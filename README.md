@@ -9,6 +9,7 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 - **P2P Networking** - libp2p with DHT discovery, NAT traversal (hole punching), and relay fallback
 - **End-to-End Encryption** - libsodium (XChaCha20-Poly1305) for both file contents and filenames
 - **Simple CLI** - Easy to use command-line interface
+- **GTK4 GUI** - Native desktop application with system tray integration
 - **Cross-Platform** - Works on Linux, macOS, and Windows
 
 ## Installation
@@ -18,6 +19,8 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 - **Nim** 2.2.8 or later
 - **libsodium** 1.0.18 or later
 - **SQLite3** development headers
+- **GTK4** development libraries (for GUI)
+- **pkg-config** (for GUI build)
 - **g++** (C++ compiler, required by libp2p's lsquic dependency)
 
 ### Linux (Debian/Ubuntu)
@@ -27,14 +30,18 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 curl https://nim-lang.org/choosenim/init.sh -sSf | sh
 source ~/.nimble/bin/nim
 
-# Install system dependencies
+# Install system dependencies (CLI)
 sudo apt update
 sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev
+
+# Install GTK4 dependencies (for GUI)
+sudo apt install -y pkg-config libgtk-4-dev
 
 # Clone and build
 git clone https://github.com/gokr/buddydrive.git
 cd buddydrive
-nimble build
+nimble build        # Build CLI
+nimble gui_release  # Build GUI
 ```
 
 ### macOS
@@ -50,12 +57,13 @@ curl https://nim-lang.org/choosenim/init.sh -sSf | sh
 source ~/.nimble/bin/nim
 
 # Install system dependencies
-brew install libsodium sqlite3
+brew install libsodium sqlite3 gtk4 pkg-config
 
 # Clone and build
 git clone https://github.com/gokr/buddydrive.git
 cd buddydrive
-nimble build
+nimble build        # Build CLI
+nimble gui_release  # Build GUI
 ```
 
 ### Build from Source
@@ -63,8 +71,24 @@ nimble build
 ```bash
 git clone https://github.com/gokr/buddydrive.git
 cd buddydrive
-nimble build
+nimble build        # Build CLI only
+nimble gui_release  # Build GUI (requires GTK4)
 ```
+
+### Installing the GUI
+
+After building, install with desktop integration:
+
+```bash
+nimble install_gui
+```
+
+This installs:
+- `buddydrive-gui` binary to `~/.local/bin/`
+- Desktop entry to `~/.local/share/applications/`
+- Icons to `~/.local/share/icons/`
+
+After installation, BuddyDrive will appear in your applications menu.
 
 ## Quick Start
 

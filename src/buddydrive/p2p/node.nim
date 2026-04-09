@@ -10,6 +10,7 @@ import libp2p/multiaddress
 import libp2p/crypto/crypto
 import libp2p/protocols/kademlia
 import libp2p/protocols/kademlia/types
+import synchsandler
 
 export results
 
@@ -28,19 +29,14 @@ type
 
 const BuddyDriveProtocol* = "/buddydrive/1.0.0"
 
-# Public libp2p bootstrap nodes (IPFS DHT)
 proc getBootstrapNodes(): seq[(PeerID, seq[MultiAddress])] =
   result = @[]
   
-  # These are IPFS public bootstrap nodes
+  # These are IPFS public bootstrap nodes (TCP only)
   let bootstrapAddrs = [
-    # ipfs.io node 1
     ("/ip4/104.131.131.82/tcp/4001", "QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"),
-    # ipfs.io node 2
     ("/ip4/104.236.179.241/tcp/4001", "QmSoLPppuBtQSGwKDZT2M73ULpjvq3sZkgcjNjh3SGwVRy"),
-    # ipfs.io node 3
     ("/ip4/128.199.219.111/tcp/4001", "QmSoLnSGccFuZ4JkRN1HD9HXhfBOc8u4BXzAdXbjnpWJ7n"),
-    # ipfs.io node 4
     ("/ip4/104.236.76.40/tcp/4001", "QmSoLV4Bbm51jM9C4gDkQW2WWwPz9RwQhcLx9Wz5yLoJhF"),
   ]
   
@@ -85,9 +81,8 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
   except:
     discard
   
-  let bootstrapNodes = getBootstrapNodes()
-  
-  # Build switch with Kademlia DHT and bootstrap nodes
+  # Build switch with DHT (no bootstrap nodes - peers connect directly)
+  # DHT works locally for peer discovery once connected
   let switch = SwitchBuilder.new()
     .withRng(newRng())
     .withPrivateKey(node.privKey)
@@ -95,25 +90,25 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
     .withNoise()
     .withYamux()
     .withTcpTransport()
-    .withKademlia(bootstrapNodes)
+    .withKademlia(@[])
     .build()
   
-  # Start switch (DHT is auto-started by withKademlia)
+  # Mount the sync protocol handler
+  let syncHandler = newSyncHandler()
+  switch.mount(syncHandler)
+  
+  # Start switch
   await switch.start()
   
   node.switch = switch
   node.peerInfo = switch.peerInfo
   node.peerId = switch.peerInfo.peerId
   
-  # Create a DHT reference for our use
-  node.dht = KadDHT.new(switch, client = true)
-  
-  # Bootstrap the DHT
-  if bootstrapNodes.len > 0:
-    try:
-      await node.dht.bootstrap()
-    except:
-      discard
+  # Find DHT in multistream handlers
+  for holder in switch.ms.handlers:
+    if holder.protocol of KadDHT:
+      node.dht = KadDHT(holder.protocol)
+      break
   
   node.started = true
   node.startTime = getTime()

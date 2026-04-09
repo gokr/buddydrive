@@ -10,6 +10,7 @@ import libp2p/multiaddress
 import types
 import config
 import daemon
+import control
 
 proc generateBuddyName*(): string
 proc generateUuid*(): string
@@ -43,6 +44,7 @@ type
     peerAddr*: string
     generateCode*: bool
     daemon*: bool
+    controlPort*: int
     showHelp*: bool
 
 proc printHelp*() =
@@ -92,6 +94,7 @@ proc parseCli*(): CommandLine =
     folderEncrypted: true,
     generateCode: false,
     daemon: false,
+    controlPort: DefaultControlPort,
     showHelp: false
   )
   
@@ -139,6 +142,9 @@ proc parseCli*(): CommandLine =
           pendingValue = "code"
       of "generate-code":
         result.generateCode = true
+      of "port", "p":
+        if val.len > 0:
+          result.controlPort = parseInt(val)
       of "daemon", "d":
         result.daemon = true
       of "help", "h":
@@ -433,10 +439,11 @@ proc handleStart*(cmd: CommandLine) =
   
   proc runDaemon() {.async.} =
     try:
-      await daemon.start()
+      await daemon.start(cmd.controlPort)
       echo ""
       echo "BuddyDrive is running!"
       echo "Peer ID: ", daemon.node.peerIdStr()
+      echo "Control API: http://127.0.0.1:", cmd.controlPort
       echo ""
       echo "Listening addresses:"
       for address in daemon.node.getAddrs():

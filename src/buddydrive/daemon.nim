@@ -10,6 +10,7 @@ import p2p/node
 import p2p/discovery
 import p2p/protocol
 import p2p/pairing
+import control
 
 export results
 export node
@@ -44,7 +45,7 @@ proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
     echo "Rejected connection from unknown buddy"
     await bc.close()
 
-proc start*(daemon: Daemon): Future[void] {.async: (raises: []).} =
+proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void] {.async: (raises: []).} =
   if daemon.running:
     return
   
@@ -71,6 +72,9 @@ proc start*(daemon: Daemon): Future[void] {.async: (raises: []).} =
     daemon.running = true
     daemon.startTime = getTime()
     
+    startControlServer(controlPort)
+    echo "Control server started on port ", controlPort
+    
     echo "Daemon started successfully"
   except Exception as e:
     echo "Error starting daemon: ", e.msg
@@ -82,6 +86,8 @@ proc stop*(daemon: Daemon): Future[void] {.async: (raises: []).} =
   echo "Stopping daemon..."
   
   try:
+    stopControlServer()
+    
     for buddyId, bc in daemon.buddyConnections:
       await bc.close()
     daemon.buddyConnections.clear()

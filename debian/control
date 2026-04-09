@@ -2,13 +2,13 @@ Source: buddydrive
 Section: net
 Priority: optional
 Maintainer: Göran Krampe <goran.krampe@gmail.com>
-Build-Depends: debhelper (>= 12), nim (>= 2.0), g++, libsodium-dev, libsqlite3-dev
+Build-Depends: debhelper (>= 12), nim (>= 2.0), g++, libsodium-dev, libsqlite3-dev, libgtk-4-dev, pkg-config
 Standards-Version: 4.5.1
 Homepage: https://github.com/gokr/buddydrive
 
 Package: buddydrive
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, libsodium23, libsqlite3-0
+Depends: ${shlibs:Depends}, ${misc:Depends}, libsodium23, libsqlite3-0, libgtk-4-1
 Description: P2P encrypted folder sync with buddies
  BuddyDrive is a peer-to-peer encrypted folder synchronization tool.
  It allows syncing folders with 1-2 friends across the internet,
@@ -19,3 +19,4 @@ Description: P2P encrypted folder sync with buddies
   - End-to-end encryption using libsodium
   - SQLite-based file index
   - systemd service support
+  - GTK4 graphical interface

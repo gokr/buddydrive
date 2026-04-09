@@ -7,12 +7,24 @@ export DH_VERBOSE=1
 
 override_dh_auto_build:
 	nimble build -d:release
+	nimble gui_release
 
 override_dh_auto_install:
 	mkdir -p debian/buddydrive/usr/bin
 	cp bin/buddydrive debian/buddydrive/usr/bin/
+	cp buddydrive-gui debian/buddydrive/usr/bin/
 	mkdir -p debian/buddydrive/lib/systemd/system
 	cp debian/buddydrive.service debian/buddydrive/lib/systemd/system/
+	mkdir -p debian/buddydrive/usr/share/applications
+	cp buddydrive.desktop debian/buddydrive/usr/share/applications/
+	mkdir -p debian/buddydrive/usr/share/icons/hicolor/48x48/apps
+	mkdir -p debian/buddydrive/usr/share/icons/hicolor/128x128/apps
+	mkdir -p debian/buddydrive/usr/share/icons/hicolor/256x256/apps
+	mkdir -p debian/buddydrive/usr/share/icons/hicolor/512x512/apps
+	cp icons/hicolor/48x48/apps/buddydrive.png debian/buddydrive/usr/share/icons/hicolor/48x48/apps/
+	cp icons/hicolor/128x128/apps/buddydrive.png debian/buddydrive/usr/share/icons/hicolor/128x128/apps/
+	cp icons/hicolor/256x256/apps/buddydrive.png debian/buddydrive/usr/share/icons/hicolor/256x256/apps/
+	cp icons/hicolor/512x512/apps/buddydrive.png debian/buddydrive/usr/share/icons/hicolor/512x512/apps/
 
 override_dh_auto_test:
 	# Tests are run separately

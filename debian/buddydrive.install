@@ -1,2 +1,8 @@
 bin/buddydrive usr/bin
+buddydrive-gui usr/bin
 debian/buddydrive.service lib/systemd/system
+buddydrive.desktop usr/share/applications
+icons/hicolor/48x48/apps/buddydrive.png usr/share/icons/hicolor/48x48/apps
+icons/hicolor/128x128/apps/buddydrive.png usr/share/icons/hicolor/128x128/apps
+icons/hicolor/256x256/apps/buddydrive.png usr/share/icons/hicolor/256x256/apps
+icons/hicolor/512x512/apps/buddydrive.png usr/share/icons/hicolor/512x512/apps

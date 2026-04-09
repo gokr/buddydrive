@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=BuddyDrive
+Comment=P2P Encrypted Folder Sync
+Exec=buddydrive-gui
+Icon=buddydrive
+Terminal=false
+Type=Application
+Categories=Network;FileTransfer;P2P;
+StartupWMClass=org.buddydrive.app
+Keywords=sync;p2p;encryption;files;
