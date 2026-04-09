@@ -1,5 +1,6 @@
 import std/os
 import std/times
+import std/strutils
 import std/sequtils
 import parsetoml
 import types
@@ -54,7 +55,7 @@ proc loadConfig*(): AppConfig =
   result.buddies = @[]
   if "buddies" in toml:
     for buddyTbl in toml["buddies"].getElems():
-      var buddy: PeerInfo
+      var buddy: BuddyInfo
       buddy.id.uuid = buddyTbl["id"].getStr()
       buddy.id.name = buddyTbl{"name"}.getStr("")
       buddy.publicKey = buddyTbl{"public_key"}.getStr("")
@@ -66,14 +67,21 @@ proc saveConfig*(config: AppConfig) =
   let path = getConfigPath()
   let tempPath = path & ".tmp"
   
+  proc escapeToml(s: string): string =
+    result = s.replace("\\", "\\\\")
+    result = result.replace("\"", "\\\"")
+    result = result.replace("\n", "\\n")
+    result = result.replace("\r", "\\r")
+    result = result.replace("\t", "\\t")
+  
   var content = ""
   
   content.add("# BuddyDrive Configuration\n")
   content.add("# Generated: " & now().format("yyyy-MM-dd HH:mm:ss") & "\n\n")
   
   content.add("[buddy]\n")
-  content.add("name = \"" & config.buddy.name & "\"\n")
-  content.add("id = \"" & config.buddy.uuid & "\"\n")
+  content.add("name = \"" & escapeToml(config.buddy.name) & "\"\n")
+  content.add("id = \"" & escapeToml(config.buddy.uuid) & "\"\n")
   content.add("public_key = \"\"\n\n")
   
   if config.folders.len > 0:
@@ -81,15 +89,15 @@ proc saveConfig*(config: AppConfig) =
     for i, folder in config.folders:
       if i > 0:
         content.add("\n[[folders]]\n")
-      content.add("name = \"" & folder.name & "\"\n")
-      content.add("path = \"" & folder.path & "\"\n")
+      content.add("name = \"" & escapeToml(folder.name) & "\"\n")
+      content.add("path = \"" & escapeToml(folder.path) & "\"\n")
       content.add("encrypted = " & $folder.encrypted & "\n")
       if folder.buddies.len > 0:
         content.add("buddies = [")
         for j, buddy in folder.buddies:
           if j > 0:
             content.add(", ")
-          content.add("\"" & buddy & "\"")
+          content.add("\"" & escapeToml(buddy) & "\"")
         content.add("]\n")
   
   if config.buddies.len > 0:
@@ -97,9 +105,9 @@ proc saveConfig*(config: AppConfig) =
     for i, buddy in config.buddies:
       if i > 0:
         content.add("\n[[buddies]]\n")
-      content.add("id = \"" & buddy.id.uuid & "\"\n")
-      content.add("name = \"" & buddy.id.name & "\"\n")
-      content.add("public_key = \"" & buddy.publicKey & "\"\n")
+      content.add("id = \"" & escapeToml(buddy.id.uuid) & "\"\n")
+      content.add("name = \"" & escapeToml(buddy.id.name) & "\"\n")
+      content.add("public_key = \"" & escapeToml(buddy.publicKey) & "\"\n")
       content.add("added_at = \"" & buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'") & "\"\n")
   
   writeFile(tempPath, content)
@@ -128,7 +136,7 @@ proc removeFolder*(config: var AppConfig, name: string): bool =
   else:
     result = false
 
-proc addBuddy*(config: var AppConfig, buddy: PeerInfo) =
+proc addBuddy*(config: var AppConfig, buddy: BuddyInfo) =
   let idx = config.buddies.mapIt(it.id.uuid).find(buddy.id.uuid)
   if idx >= 0:
     config.buddies[idx] = buddy

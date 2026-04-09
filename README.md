@@ -15,8 +15,48 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 
 ### Prerequisites
 
-- Nim 2.2.8 or later
-- libsodium
+- **Nim** 2.2.8 or later
+- **libsodium** 1.0.18 or later
+- **SQLite3** development headers
+- **g++** (C++ compiler, required by libp2p's lsquic dependency)
+
+### Linux (Debian/Ubuntu)
+
+```bash
+# Install Nim (using choosenim for version management)
+curl https://nim-lang.org/choosenim/init.sh -sSf | sh
+source ~/.nimble/bin/nim
+
+# Install system dependencies
+sudo apt update
+sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev
+
+# Clone and build
+git clone https://github.com/gokr/buddydrive.git
+cd buddydrive
+nimble build
+```
+
+### macOS
+
+```bash
+# Install Homebrew if needed: https://brew.sh
+
+# Install Nim via Homebrew
+brew install nim
+
+# Or use choosenim for version management
+curl https://nim-lang.org/choosenim/init.sh -sSf | sh
+source ~/.nimble/bin/nim
+
+# Install system dependencies
+brew install libsodium sqlite3
+
+# Clone and build
+git clone https://github.com/gokr/buddydrive.git
+cd buddydrive
+nimble build
+```
 
 ### Build from Source
 

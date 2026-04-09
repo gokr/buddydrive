@@ -3,8 +3,12 @@ import std/strutils
 import std/parseopt
 import std/random
 import std/times
+import std/sequtils
+import uuids
+import chronos
 import types
 import config
+import daemon
 
 proc generateBuddyName*(): string
 proc generateUuid*(): string
@@ -323,7 +327,7 @@ proc handleAddBuddy*(cmd: CommandLine) =
     echo "  Pairing Code: ", code
     echo ""
     echo "Your buddy should run:"
-    echo "  buddydrive add-buddy --id ", cfg.buddy.uuid.shortId(), " --code ", code
+    echo "  buddydrive add-buddy --id ", cfg.buddy.uuid, " --code ", code
     return
   
   if cmd.buddyId.len == 0:
@@ -339,8 +343,18 @@ proc handleAddBuddy*(cmd: CommandLine) =
   echo "Pairing with buddy: ", cmd.buddyId.shortId()
   echo "Pairing code: ", cmd.pairingCode
   echo ""
-  echo "Note: Actual P2P pairing not implemented yet."
-  echo "This is a placeholder for Phase 3."
+  
+  var cfg = loadConfig()
+  var buddy: BuddyInfo
+  buddy.id.uuid = cmd.buddyId
+  buddy.id.name = "unknown"
+  buddy.publicKey = ""
+  buddy.addedAt = getTime()
+  
+  cfg.addBuddy(buddy)
+  
+  echo "Buddy added: ", cmd.buddyId.shortId()
+  echo "Note: P2P connection will be established when both sides start the daemon."
 
 proc handleRemoveBuddy*(cmd: CommandLine) =
   if not config.configExists():
@@ -381,17 +395,44 @@ proc handleStart*(cmd: CommandLine) =
     echo "No config found. Run 'buddydrive init' first."
     return
   
+  let cfg = loadConfig()
+  let daemon = newDaemon(cfg)
+  
   echo "Starting BuddyDrive daemon..."
+  echo ""
   
   if cmd.daemon:
-    echo "Running in background mode..."
-    echo "Note: Daemon mode not implemented yet."
-  else:
-    echo "Running in foreground..."
+    echo "Background mode (daemonizing)..."
+    echo ""
+    echo "Note: Background daemon mode not fully implemented."
+    echo "Running in foreground instead..."
+    echo ""
   
-  echo ""
-  echo "Note: P2P networking not implemented yet."
-  echo "This is a placeholder for Phase 2."
+  proc runDaemon() {.async.} =
+    try:
+      await daemon.start()
+      echo ""
+      echo "BuddyDrive is running!"
+      echo "Peer ID: ", daemon.node.peerIdStr()
+      echo ""
+      echo "Listening addresses:"
+      for address in daemon.node.getAddrs():
+        echo "  ", $address
+      echo ""
+      echo "Folders:"
+      for folder in cfg.folders:
+        echo "  ", folder.name, " -> ", folder.path
+      echo ""
+      echo "Press Ctrl+C to stop..."
+      
+      while daemon.isRunning():
+        await sleepAsync(chronos.seconds(1))
+    except Exception as e:
+      echo "Error: ", e.msg
+    finally:
+      await daemon.stop()
+  
+  waitFor runDaemon()
 
 proc handleStop*() =
   echo "Stopping BuddyDrive daemon..."
@@ -405,7 +446,7 @@ proc handleStatus*() =
   let cfg = loadConfig()
   
   echo "Buddy: ", cfg.buddy.name, " (", cfg.buddy.uuid.shortId(), ")"
-  echo "Status: Offline (not implemented)"
+  echo "Peer ID: ", "(run 'buddydrive start' to connect)"
   echo ""
   
   if cfg.folders.len > 0:
@@ -413,18 +454,24 @@ proc handleStatus*() =
     for folder in cfg.folders:
       echo "  ", folder.name
       echo "    Path: ", folder.path
-      echo "    Status: Not synced"
+      echo "    Encrypted: ", folder.encrypted
+      if folder.buddies.len > 0:
+        echo "    Buddies: ", folder.buddies.mapIt(shortId(it)).join(", ")
   else:
     echo "No folders configured."
+    echo "Use 'buddydrive add-folder <path> --name <name>' to add one."
   
   echo ""
   
   if cfg.buddies.len > 0:
     echo "Buddies:"
     for buddy in cfg.buddies:
-      echo "  ", buddy.id.name, " - Offline"
+      echo "  ", buddy.id.name, " (", buddy.id.uuid.shortId(), ")"
+      echo "    Status: Offline"
+      echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired."
+    echo "Use 'buddydrive add-buddy --generate-code' to pair."
 
 proc handleLogs*() =
   let logPath = config.getLogPath()
@@ -466,16 +513,8 @@ proc generateBuddyName*(): string =
   result = adj & "-" & noun
 
 proc generateUuid*(): string =
-  randomize()
-  let now = getTime().toUnix()
-  var parts: seq[string] = @[]
-  for i in 0..3:
-    var part = ""
-    for j in 0..7:
-      let hex = rand(15)
-      part.add("0123456789abcdef"[hex])
-    parts.add(part)
-  result = parts[0] & "-" & parts[1] & "-" & parts[2] & "-" & parts[3]
+  let uuid = genUuid()
+  result = $uuid
 
 proc generatePairingCode*(): string =
   randomize()

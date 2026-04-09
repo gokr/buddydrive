@@ -1,8 +1,9 @@
 import buddydrive/cli
 import buddydrive/logutils
+import buddydrive/config
 
 when isMainModule:
-  setupLogging()
+  setupLogging(path = config.getLogPath())
   
   let cmd = parseCli()
   

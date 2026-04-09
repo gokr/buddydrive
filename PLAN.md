@@ -29,7 +29,7 @@ buddydrive/
 │       ├── config.nim           # Config read/write
 │       ├── crypto.nim           # Encryption (libsodium)
 │       ├── types.nim            # Shared types
-│       ├── logging.nim          # Logging setup
+│       ├── logutils.nim         # Logging setup
 │       ├── sync/
 │       │   ├── scanner.nim      # Polling file scanner
 │       │   ├── index.nim        # SQLite file index

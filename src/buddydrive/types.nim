@@ -5,7 +5,7 @@ type
     uuid*: string
     name*: string
   
-  PeerInfo* = object
+  BuddyInfo* = object
     id*: BuddyId
     publicKey*: string
     addresses*: seq[string]
@@ -20,7 +20,7 @@ type
   AppConfig* = object
     buddy*: BuddyId
     folders*: seq[FolderConfig]
-    buddies*: seq[PeerInfo]
+    buddies*: seq[BuddyInfo]
   
   FileInfo* = object
     path*: string
