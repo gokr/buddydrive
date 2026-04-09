@@ -1,3 +1,27 @@
 nimble.develop
 nimble.paths
 nimbledeps
+
+# Build artifacts
+bin/buddydrive
+src/buddydrive
+src/buddydrive.out
+*.o
+
+# Debian build
+debian/buddydrive/
+debian/files
+debian/*.debhelper*
+debian/debhelper-build-stamp
+debian/substvars
+debian/tmp/
+
+# Test binaries
+tests/harness/test_pairing
+tests/harness/test_peer_discovery
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

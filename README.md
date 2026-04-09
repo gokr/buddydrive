@@ -195,3 +195,32 @@ Contributions welcome! Please feel free to submit pull requests.
 ## License
 
 MIT
+
+## Debian/Ubuntu Package
+
+### Build the Package
+
+```bash
+# Install build dependencies
+sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev debhelper
+
+# Build the package
+make deb
+
+# The .deb file will be in the parent directory
+sudo dpkg -i ../buddydrive_*.deb
+```
+
+### Using systemd
+
+```bash
+# Enable and start the service
+systemctl --user enable buddydrive
+systemctl --user start buddydrive
+
+# Check status
+systemctl --user status buddydrive
+
+# View logs
+journalctl --user -u buddydrive -f
+```

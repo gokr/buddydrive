@@ -1,0 +1,30 @@
+[Unit]
+Description=BuddyDrive P2P Folder Sync
+Documentation=https://github.com/anomalyco/buddydrive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%u
+Group=%u
+ExecStart=/usr/bin/buddydrive start
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Environment
+Environment="HOME=/home/%u"
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=no
+ReadWritePaths=/home/%u/.buddydrive
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

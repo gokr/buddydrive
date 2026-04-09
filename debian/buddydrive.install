@@ -1,0 +1,2 @@
+bin/buddydrive usr/bin
+debian/buddydrive.service lib/systemd/system

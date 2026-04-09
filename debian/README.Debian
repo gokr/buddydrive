@@ -1,0 +1,57 @@
+buddydrive for Debian
+====================
+
+Getting Started
+---------------
+
+1. Initialize your BuddyDrive instance:
+
+    buddydrive init
+
+2. Add a folder to sync:
+
+    buddydrive add-folder ~/Documents --name docs
+
+3. Pair with a buddy:
+
+    # Generate a pairing code
+    buddydrive add-buddy --generate-code
+    
+    # On your buddy's machine
+    buddydrive add-buddy --id <your-id> --code <your-code>
+
+4. Start the sync daemon:
+
+    buddydrive start
+
+Using systemd
+-------------
+
+Enable the service to start on boot:
+
+    systemctl --user enable buddydrive
+    systemctl --user start buddydrive
+
+Check status:
+
+    systemctl --user status buddydrive
+
+View logs:
+
+    journalctl --user -u buddydrive -f
+
+Configuration
+-------------
+
+Configuration files are stored in:
+
+    ~/.buddydrive/
+    ├── config.toml    # Main configuration
+    ├── index.db       # File index database
+    └── buddydrive.log # Log file
+
+For more information, see:
+
+    buddydrive help
+
+ -- Göran Krampe <goran.krampe@gmail.com>  Wed, 09 Apr 2025
