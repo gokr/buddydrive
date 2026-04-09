@@ -8,7 +8,8 @@ import libp2p/peerid
 import libp2p/peerinfo
 import libp2p/multiaddress
 import libp2p/crypto/crypto
-import ../types
+import libp2p/protocols/kademlia
+import libp2p/protocols/kademlia/types
 
 export results
 
@@ -19,6 +20,7 @@ type
     peerId*: PeerID
     peerInfo*: peerinfo.PeerInfo
     switch*: Switch
+    dht*: KadDHT
     privKey*: PrivateKey
     pubKey*: PublicKey
     started*: bool
@@ -57,6 +59,7 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
   except:
     discard
   
+  # Build switch with Kademlia DHT
   let switch = SwitchBuilder.new()
     .withRng(newRng())
     .withPrivateKey(node.privKey)
@@ -64,15 +67,22 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
     .withNoise()
     .withYamux()
     .withTcpTransport()
+    .withKademlia()
     .build()
   
+  # Start switch (DHT is auto-started by withKademlia)
   await switch.start()
   
-  node.started = true
-  node.startTime = getTime()
   node.switch = switch
   node.peerInfo = switch.peerInfo
   node.peerId = switch.peerInfo.peerId
+  
+  # Create a DHT reference for our use
+  # Note: The DHT is already running, we just create a reference for the API
+  node.dht = KadDHT.new(switch, client = true)
+  
+  node.started = true
+  node.startTime = getTime()
 
 proc stop*(node: BuddyNode): Future[void] {.async.} =
   if not node.started:
