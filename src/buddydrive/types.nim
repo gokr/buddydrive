@@ -1,6 +1,4 @@
-import times
-import sequtils
-import tables
+import std/times
 
 type
   BuddyId* = object

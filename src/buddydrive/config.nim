@@ -1,9 +1,9 @@
 import std/os
 import std/times
-import std/strutils
+import std/sequtils
 import parsetoml
 import types
-import logging
+import logutils
 
 const CONFIG_DIR* = ".buddydrive"
 const CONFIG_FILE* = "config.toml"

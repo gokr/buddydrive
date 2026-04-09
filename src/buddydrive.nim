@@ -1,6 +1,5 @@
 import buddydrive/cli
-import buddydrive/logging
-import buddydrive/config
+import buddydrive/logutils
 
 when isMainModule:
   setupLogging()

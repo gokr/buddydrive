@@ -408,6 +408,78 @@ requires "sqlite3"
 
 ---
 
+## Debian Packaging
+
+BuddyDrive will be distributed as a `.deb` package for easy installation on Debian/Ubuntu systems.
+
+### Package Structure
+
+```
+buddydrive_0.1.0_amd64.deb
+├── DEBIAN/
+│   ├── control          # Package metadata
+│   ├── preinst          # Pre-install script
+│   ├── postinst         # Post-install script
+│   ├── prerm            # Pre-remove script
+│   └── postrm           # Post-remove script
+├── usr/
+│   └── bin/
+│       └── buddydrive   # Main executable
+├── etc/
+│   └── systemd/
+│       └── system/
+│           └── buddydrive.service  # Systemd service
+└── usr/
+    └── share/
+        └── doc/
+            └── buddydrive/
+                ├── README.md
+                └── LICENSE
+```
+
+### Systemd Service
+
+```ini
+# /etc/systemd/system/buddydrive.service
+[Unit]
+Description=BuddyDrive P2P Sync Service
+After=network.target
+
+[Service]
+Type=simple
+User=buddydrive
+Group=buddydrive
+ExecStart=/usr/bin/buddydrive start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Post-Install Actions
+
+1. Create `buddydrive` user/group
+2. Enable systemd service
+3. Create config directory at `/var/lib/buddydrive/`
+
+### Build Command
+
+```bash
+# Build the .deb package
+dpkg-deb --build buddydrive_0.1.0_amd64
+```
+
+### Installation
+
+```bash
+sudo dpkg -i buddydrive_0.1.0_amd64.deb
+sudo systemctl enable buddydrive
+sudo systemctl start buddydrive
+```
+
+---
+
 ## Future Enhancements (Post-MVP)
 
 1. Delta sync (rolling hash)
@@ -426,4 +498,17 @@ requires "sqlite3"
 
 ### 2026-04-09
 - Project initialized
-- Core infrastructure setup
+- Phase 1 completed:
+  - Project structure created
+  - CLI framework with subcommands working
+  - Config file (TOML) read/write
+  - Name generation (adjective-noun)
+  - UUID generation
+  - Pairing code generation
+  - Commands: init, config, add-folder, remove-folder, list-folders, add-buddy, list-buddies, start, stop, status
+- Dependencies: libp2p, libsodium, parsetoml, results
+
+### Next Steps
+- Phase 2: libp2p networking (DHT discovery, NAT traversal)
+- Phase 3: Buddy pairing protocol
+- Phase 4: File sync with encryption

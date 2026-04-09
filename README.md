@@ -15,7 +15,7 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 
 ### Prerequisites
 
-- Nim 2.0.16 or later
+- Nim 2.2.8 or later
 - libsodium
 
 ### Build from Source

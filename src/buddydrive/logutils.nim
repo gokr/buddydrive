@@ -1,6 +1,5 @@
-import logging
-import os
-import times
+import std/logging
+import std/os
 
 var logFile*: File = nil
 var logPath*: string = ""

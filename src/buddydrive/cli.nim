@@ -1,9 +1,14 @@
 import std/os
 import std/strutils
 import std/parseopt
+import std/random
+import std/times
 import types
 import config
-import logging
+
+proc generateBuddyName*(): string
+proc generateUuid*(): string
+proc generatePairingCode*(): string
 
 type
   CommandKind* = enum
@@ -81,23 +86,47 @@ proc parseCli*(): CommandLine =
   )
   
   var args: seq[string] = @[]
+  var pendingValue: string = ""
   
   for kind, key, val in p.getopt():
+    if pendingValue.len > 0:
+      case pendingValue
+      of "name":
+        result.folderName = key
+      of "buddy", "id":
+        result.buddyId = key
+      of "code":
+        result.pairingCode = key
+      pendingValue = ""
+      continue
+    
     case kind
     of cmdArgument:
       args.add(key)
     of cmdLongOption, cmdShortOption:
       case key.toLower()
       of "name":
-        result.folderName = val
+        if val.len > 0:
+          result.folderName = val
+        else:
+          pendingValue = "name"
       of "no-encrypt":
         result.folderEncrypted = false
       of "buddy":
-        result.buddyId = val
+        if val.len > 0:
+          result.buddyId = val
+        else:
+          pendingValue = "buddy"
       of "id":
-        result.buddyId = val
+        if val.len > 0:
+          result.buddyId = val
+        else:
+          pendingValue = "id"
       of "code":
-        result.pairingCode = val
+        if val.len > 0:
+          result.pairingCode = val
+        else:
+          pendingValue = "code"
       of "generate-code":
         result.generateCode = true
       of "daemon", "d":
@@ -225,7 +254,7 @@ proc handleAddFolder*(cmd: CommandLine) =
     echo "Error: Folder name already exists: ", cmd.folderName
     return
   
-  let folder = newFolderConfig(cmd.folderName, absPath, cmd.folderEncrypted)
+  var folder = newFolderConfig(cmd.folderName, absPath, cmd.folderEncrypted)
   
   if cmd.buddyId.len > 0:
     let buddyIdx = cfg.getBuddy(cmd.buddyId)

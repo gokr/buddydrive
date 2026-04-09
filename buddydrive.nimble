@@ -6,7 +6,7 @@ srcDir = "src"
 binDir = "bin"
 bin = @["buddydrive"]
 
-requires "nim >= 2.0.16"
+requires "nim >= 2.2.8"
 requires "libp2p >= 1.15"
 requires "libsodium >= 0.7"
 requires "parsetoml"
