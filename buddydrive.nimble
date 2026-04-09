@@ -10,9 +10,7 @@ requires "nim >= 2.0.16"
 requires "libp2p >= 1.15"
 requires "libsodium >= 0.7"
 requires "parsetoml"
-requires "toml-serialization"
-requires "result"
-requires "sqlite3_nim"
+requires "results"
 
 task test, "Run tests":
   exec "nim c -r tests/test_crypto.nim"
