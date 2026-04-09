@@ -15,8 +15,7 @@ requires "uuids"
 requires "db_connector"
 
 task test, "Run tests":
-  exec "nim c -r tests/test_crypto.nim"
-  exec "nim c -r tests/test_config.nim"
+  exec "nimble c -r tests/harness/test_peer_discovery.nim"
 
 task build, "Build release":
   exec "nim c -d:release src/buddydrive.nim"
