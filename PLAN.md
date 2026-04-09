@@ -509,13 +509,39 @@ sudo systemctl start buddydrive
 - Dependencies: libp2p, libsodium, parsetoml, results
 
 ### Next Steps
-- Phase 2: libp2p networking - MOSTLY COMPLETE
+- Phase 2: libp2p networking - COMPLETE ✓
   - libp2p node creation working ✓
   - Node starts and binds to addresses ✓
   - MultiAddress display working ✓
   - Kademlia DHT integration ✓
   - DHT announce/findProvider API ✓
   - Test harness for two local instances ✓
-  - TODO: Test actual peer discovery and connection
+  - Direct peer connection tested ✓
+
+- Phase 3: Buddy pairing protocol - COMPLETE ✓
+  - Pairing handshake implemented ✓
+  - Buddy verification against config ✓
+  - BuddyConnection tracking in daemon ✓
+
+- Phase 4: File sync - COMPLETE ✓
+  - File scanner with change detection ✓
+  - SQLite file index ✓
+  - Chunk-based file transfer ✓
+  - SyncManager coordination ✓
+
+- Phase 5: Encryption - COMPLETE ✓
+  - libsodium secretbox for content ✓
+  - Password-based key derivation ✓
+  - Encrypted filename support ✓
+
+- Phase 6: Debian packaging - COMPLETE ✓
+  - debian/ directory with control, rules ✓
+  - systemd service unit file ✓
+  - Makefile for build/package ✓
+
+### Remaining Work
+- Test end-to-end sync between two local instances
+- Test actual DHT discovery with bootstrap nodes
+- Add relay fallback for NAT traversal
 - Phase 3: Buddy pairing protocol
 - Phase 4: File sync with encryption
