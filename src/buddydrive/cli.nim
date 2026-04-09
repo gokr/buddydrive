@@ -6,6 +6,7 @@ import std/times
 import std/sequtils
 import uuids
 import chronos
+import libp2p/multiaddress
 import types
 import config
 import daemon
@@ -417,7 +418,11 @@ proc handleStart*(cmd: CommandLine) =
       echo ""
       echo "Listening addresses:"
       for address in daemon.node.getAddrs():
-        echo "  ", $address
+        let addrStr = multiaddress.toString(address)
+        if addrStr.isOk:
+          echo "  ", addrStr.get()
+        else:
+          echo "  (invalid address)"
       echo ""
       echo "Folders:"
       for folder in cfg.folders:

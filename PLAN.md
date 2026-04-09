@@ -509,6 +509,10 @@ sudo systemctl start buddydrive
 - Dependencies: libp2p, libsodium, parsetoml, results
 
 ### Next Steps
-- Phase 2: libp2p networking (DHT discovery, NAT traversal)
+- Phase 2: libp2p networking (DHT discovery, NAT traversal) - IN PROGRESS
+  - libp2p node creation working
+  - Node starts and binds to addresses
+  - MultiAddress display working
+  - Test harness for two local instances created
 - Phase 3: Buddy pairing protocol
 - Phase 4: File sync with encryption
