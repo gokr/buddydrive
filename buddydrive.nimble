@@ -12,6 +12,7 @@ requires "libsodium >= 0.7"
 requires "parsetoml"
 requires "results"
 requires "uuids"
+requires "db_connector"
 
 task test, "Run tests":
   exec "nim c -r tests/test_crypto.nim"

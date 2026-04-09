@@ -1,13 +1,15 @@
-import std/os
 import std/times
+import std/tables
 import results
 import chronos
-import config
+import libp2p
+import libp2p/multiaddress
+import libp2p/stream/connection
 import types
-import logutils
 import p2p/node
 import p2p/discovery
 import p2p/protocol
+import p2p/pairing
 
 export results
 export node
@@ -20,6 +22,7 @@ type
     node*: BuddyNode
     discovery*: DiscoveryService
     syncProtocol*: SyncProtocol
+    buddyConnections*: Table[string, BuddyConnection]
     running*: bool
     startTime*: Time
 
@@ -27,6 +30,19 @@ proc newDaemon*(config: AppConfig): Daemon =
   result = Daemon()
   result.config = config
   result.running = false
+  result.buddyConnections = initTable[string, BuddyConnection]()
+
+proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
+  let bc = newBuddyConnection()
+  bc.conn = conn
+  
+  let success = await bc.acceptHandshake(daemon.config)
+  if success:
+    echo "Buddy connected: ", bc.buddyName, " (", bc.buddyId.shortId(), ")"
+    daemon.buddyConnections[bc.buddyId] = bc
+  else:
+    echo "Rejected connection from unknown buddy"
+    await bc.close()
 
 proc start*(daemon: Daemon): Future[void] {.async: (raises: []).} =
   if daemon.running:
@@ -66,6 +82,10 @@ proc stop*(daemon: Daemon): Future[void] {.async: (raises: []).} =
   echo "Stopping daemon..."
   
   try:
+    for buddyId, bc in daemon.buddyConnections:
+      await bc.close()
+    daemon.buddyConnections.clear()
+    
     if daemon.discovery != nil:
       await daemon.discovery.stop()
     
@@ -90,7 +110,17 @@ proc getBuddyStatus*(daemon: Daemon): seq[BuddyStatus] =
     var status: BuddyStatus
     status.id = buddy.id.uuid
     status.name = buddy.id.name
-    status.state = csDisconnected
+    
+    if daemon.buddyConnections.hasKey(buddy.id.uuid):
+      let bc = daemon.buddyConnections[buddy.id.uuid]
+      if bc.isConnected():
+        status.state = csConnected
+        status.latencyMs = int((getTime() - bc.lastActivity).inMilliseconds)
+      else:
+        status.state = csDisconnected
+    else:
+      status.state = csDisconnected
+    
     status.latencyMs = -1
     status.lastSync = buddy.addedAt
     result.add(status)
@@ -106,3 +136,53 @@ proc getFolderStatus*(daemon: Daemon): seq[SyncStatus] =
     status.syncedFiles = 0
     status.status = "idle"
     result.add(status)
+
+proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq[MultiAddress]): Future[bool] {.async: (raises: []).} =
+  if not daemon.running:
+    return false
+  
+  if addrs.len == 0:
+    return false
+  
+  try:
+    let conn = await daemon.node.switch.dial(peerId, addrs, PairingProtocol)
+    echo "Connected to peer: ", $peerId
+    
+    let bc = newBuddyConnection()
+    bc.conn = conn
+    
+    let success = await bc.performHandshake(daemon.config)
+    if success:
+      echo "Handshake successful with: ", bc.buddyName
+      daemon.buddyConnections[bc.buddyId] = bc
+      return true
+    else:
+      echo "Handshake failed with: ", $peerId
+      await bc.close()
+      return false
+  except Exception as e:
+    echo "Connection failed: ", e.msg
+    return false
+
+proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
+  if not daemon.running:
+    return
+  
+  echo "Checking ", daemon.config.buddies.len, " buddies..."
+  
+  for buddy in daemon.config.buddies:
+    if daemon.buddyConnections.hasKey(buddy.id.uuid):
+      continue
+    
+    echo "Buddy: ", buddy.id.name
+    echo "  Searching DHT for: ", buddy.id.uuid
+    
+    try:
+      let peers = await daemon.discovery.findBuddy(buddy.id.uuid)
+      if peers.len > 0:
+        let (peerId, addrs) = peers[0]
+        discard await daemon.connectToBuddy(buddy.id.uuid, peerId, addrs)
+      else:
+        echo "  Not found on DHT yet"
+    except Exception as e:
+      echo "  DHT lookup failed: ", e.msg

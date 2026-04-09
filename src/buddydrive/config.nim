@@ -6,6 +6,9 @@ import parsetoml
 import types
 import logutils
 
+export newAppConfig
+export newBuddyId
+
 const CONFIG_DIR* = ".buddydrive"
 const CONFIG_FILE* = "config.toml"
 const INDEX_FILE* = "index.db"

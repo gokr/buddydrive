@@ -6,7 +6,6 @@ import libp2p
 import libp2p/stream/connection
 import node
 import messages
-import ../types
 
 export results
 
