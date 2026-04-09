@@ -28,6 +28,32 @@ type
 
 const BuddyDriveProtocol* = "/buddydrive/1.0.0"
 
+# Public libp2p bootstrap nodes (IPFS DHT)
+proc getBootstrapNodes(): seq[(PeerID, seq[MultiAddress])] =
+  result = @[]
+  
+  # These are IPFS public bootstrap nodes
+  let bootstrapAddrs = [
+    # ipfs.io node 1
+    ("/ip4/104.131.131.82/tcp/4001", "QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"),
+    # ipfs.io node 2
+    ("/ip4/104.236.179.241/tcp/4001", "QmSoLPppuBtQSGwKDZT2M73ULpjvq3sZkgcjNjh3SGwVRy"),
+    # ipfs.io node 3
+    ("/ip4/128.199.219.111/tcp/4001", "QmSoLnSGccFuZ4JkRN1HD9HXhfBOc8u4BXzAdXbjnpWJ7n"),
+    # ipfs.io node 4
+    ("/ip4/104.236.76.40/tcp/4001", "QmSoLV4Bbm51jM9C4gDkQW2WWwPz9RwQhcLx9Wz5yLoJhF"),
+  ]
+  
+  for (addrStr, peerIdStr) in bootstrapAddrs:
+    try:
+      let maRes = MultiAddress.init(addrStr)
+      if maRes.isOk:
+        let pidRes = PeerID.init(peerIdStr)
+        if pidRes.isOk:
+          result.add((pidRes.get(), @[maRes.get()]))
+    except:
+      discard
+
 proc generateKeyPair*(): (PublicKey, PrivateKey) =
   var rng = newRng()
   let privKey = PrivateKey.random(PKScheme.Secp256k1, rng[]).tryGet()
@@ -59,7 +85,9 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
   except:
     discard
   
-  # Build switch with Kademlia DHT
+  let bootstrapNodes = getBootstrapNodes()
+  
+  # Build switch with Kademlia DHT and bootstrap nodes
   let switch = SwitchBuilder.new()
     .withRng(newRng())
     .withPrivateKey(node.privKey)
@@ -67,7 +95,7 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
     .withNoise()
     .withYamux()
     .withTcpTransport()
-    .withKademlia()
+    .withKademlia(bootstrapNodes)
     .build()
   
   # Start switch (DHT is auto-started by withKademlia)
@@ -78,8 +106,14 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
   node.peerId = switch.peerInfo.peerId
   
   # Create a DHT reference for our use
-  # Note: The DHT is already running, we just create a reference for the API
   node.dht = KadDHT.new(switch, client = true)
+  
+  # Bootstrap the DHT
+  if bootstrapNodes.len > 0:
+    try:
+      await node.dht.bootstrap()
+    except:
+      discard
   
   node.started = true
   node.startTime = getTime()

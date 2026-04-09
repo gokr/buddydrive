@@ -26,6 +26,7 @@ type
     cmdAddBuddy
     cmdRemoveBuddy
     cmdListBuddies
+    cmdConnect
     cmdStart
     cmdStop
     cmdStatus
@@ -39,6 +40,7 @@ type
     folderEncrypted*: bool
     buddyId*: string
     pairingCode*: string
+    peerAddr*: string
     generateCode*: bool
     daemon*: bool
     showHelp*: bool
@@ -64,6 +66,8 @@ Commands:
     --code <code>           Pairing code from buddy
   remove-buddy <id>         Remove a buddy
   list-buddies              List paired buddies
+  connect <address>         Connect to a buddy manually
+                            Address format: /ip4/127.0.0.1/tcp/PORT
   start                     Start sync daemon
     --daemon                Run in background
   stop                      Stop sync daemon
@@ -76,6 +80,7 @@ Examples:
   buddydrive add-folder ~/Documents --name docs
   buddydrive add-buddy --generate-code
   buddydrive add-buddy --id abc123 --code XYZ789
+  buddydrive connect /ip4/127.0.0.1/tcp/12345
   buddydrive start
   buddydrive status
 """
@@ -158,6 +163,7 @@ proc parseCli*(): CommandLine =
     of "add-buddy": cmdAddBuddy
     of "remove-buddy": cmdRemoveBuddy
     of "list-buddies": cmdListBuddies
+    of "connect": cmdConnect
     of "start": cmdStart
     of "stop": cmdStop
     of "status": cmdStatus
@@ -173,6 +179,8 @@ proc parseCli*(): CommandLine =
       result.folderName = args[1]
     of cmdRemoveBuddy:
       result.buddyId = args[1]
+    of cmdConnect:
+      result.peerAddr = args[1]
     else:
       discard
 
@@ -390,6 +398,20 @@ proc handleListBuddies*() =
     echo "  ", buddy.id.name, " (", buddy.id.uuid.shortId(), ")"
     echo "    ID: ", buddy.id.uuid
     echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
+
+proc handleConnect*(cmd: CommandLine) =
+  if not config.configExists():
+    echo "No config found. Run 'buddydrive init' first."
+    return
+  
+  if cmd.peerAddr.len == 0:
+    echo "Error: Peer address required"
+    echo "Usage: buddydrive connect <peer-id> <address>"
+    echo "Example: buddydrive connect 16Uiu2HAk... /ip4/127.0.0.1/tcp/12345"
+    return
+  
+  echo "Note: Direct connection not yet implemented."
+  echo "Use 'buddydrive start' to connect via DHT discovery."
 
 proc handleStart*(cmd: CommandLine) =
   if not config.configExists():

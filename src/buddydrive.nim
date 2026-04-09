@@ -24,6 +24,8 @@ when isMainModule:
     handleRemoveBuddy(cmd)
   of cmdListBuddies:
     handleListBuddies()
+  of cmdConnect:
+    handleConnect(cmd)
   of cmdStart:
     handleStart(cmd)
   of cmdStop:
