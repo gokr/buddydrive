@@ -1,8 +1,5 @@
-import std/os
-import std/times
-import std/strutils
-import std/sequtils
-import std/hashes
+import std/os except FileInfo
+import std/[times, strutils, hashes, tables]
 import ../types
 
 export types
@@ -29,7 +26,7 @@ proc newFileScanner*(folder: FolderConfig): FileScanner =
   result.folder = folder
   result.rootPath = folder.path
 
-proc scanFile*(scanner: FileScanner, path: string): FileInfo =
+proc scanFile*(scanner: FileScanner, path: string): types.FileInfo =
   let relativePath = path[scanner.rootPath.len..^1]
   if relativePath.startsWith("/") or relativePath.startsWith("\\"):
     result.path = relativePath[1..^1]
@@ -47,7 +44,7 @@ proc scanFile*(scanner: FileScanner, path: string): FileInfo =
     result.size = 0
     result.mtime = 0
 
-proc scanDirectory*(scanner: FileScanner): seq[FileInfo] =
+proc scanDirectory*(scanner: FileScanner): seq[types.FileInfo] =
   result = @[]
   
   if not dirExists(scanner.rootPath):
@@ -57,16 +54,16 @@ proc scanDirectory*(scanner: FileScanner): seq[FileInfo] =
     if path.fileExists():
       result.add(scanner.scanFile(path))
 
-proc scanChanges*(scanner: FileScanner, previous: seq[FileInfo]): seq[FileChange] =
+proc scanChanges*(scanner: FileScanner, previous: seq[types.FileInfo]): seq[FileChange] =
   result = @[]
   
   let current = scanner.scanDirectory()
   
-  var currentMap: Table[string, FileInfo]
+  var currentMap: Table[string, types.FileInfo]
   for f in current:
     currentMap[f.path] = f
   
-  var previousMap: Table[string, FileInfo]
+  var previousMap: Table[string, types.FileInfo]
   for f in previous:
     previousMap[f.path] = f
   
@@ -103,15 +100,19 @@ proc writeFileChunk*(path: string, offset: int64, data: seq[byte]): bool =
   try:
     var f: File
     if fileExists(path):
-      f = open(path, fmReadWrite)
+      f = open(path, fmReadWriteExisting)
     else:
       createDir(path.parentDir())
-      f = open(path, fmReadWrite)
+      if offset == 0:
+        f = open(path, fmWrite)
+      else:
+        let createFile = open(path, fmWrite)
+        createFile.close()
+        f = open(path, fmReadWriteExisting)
     
     defer: f.close()
     
     f.setFilePos(offset)
-    f.writeBytes(data, 0, data.len)
-    result = true
+    result = f.writeBytes(data, 0, data.len) == data.len
   except:
     result = false

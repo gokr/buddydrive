@@ -15,6 +15,11 @@ type
     msgFileDelete
     msgPing
     msgPong
+    msgSyncDone
+
+  CompressionKind* = enum
+    ckNone = 0
+    ckLz4 = 1
 
   ProtocolMessage* = object
     case kind*: MessageKind
@@ -30,6 +35,8 @@ type
       dataOffset*: int64
       totalSize*: int64
       done*: bool
+      dataCompression*: CompressionKind
+      dataOriginalLen*: int
     of msgFileAck:
       success*: bool
       bytesReceived*: int64
@@ -39,6 +46,8 @@ type
       timestamp*: int64
     of msgPong:
       pingTimestamp*: int64
+    of msgSyncDone:
+      syncFolderName*: string
   
   FileEntry* = object
     path*: string
@@ -47,7 +56,7 @@ type
     hash*: string
 
 const
-  ProtocolVersion*: uint8 = 1
+  ProtocolVersion*: uint8 = 2
   MaxMessageSize*: int = 1024 * 1024 * 10  # 10MB max
   ChunkSize*: int = 64 * 1024  # 64KB chunks
 
@@ -117,6 +126,8 @@ proc encode*(msg: ProtocolMessage): seq[byte] =
     result.add(msg.dataOffset.encodeInt())
     result.add(msg.totalSize.encodeInt())
     result.add(msg.done.byte)
+    result.add(byte(msg.dataCompression))
+    result.add(msg.dataOriginalLen.uint32.encodeInt())
     result.add(msg.data.len.uint32.encodeInt())
     result.add(msg.data)
   
@@ -134,12 +145,15 @@ proc encode*(msg: ProtocolMessage): seq[byte] =
   of msgPong:
     result.add(msg.pingTimestamp.encodeInt())
 
+  of msgSyncDone:
+    discard
+
 proc decode*(data: seq[byte]): Result[ProtocolMessage, string] =
   if data.len < 2:
     return err("Message too short")
   
   let kindByte = data[0]
-  if kindByte > ord(msgPong):
+  if kindByte > ord(msgSyncDone):
     return err("Invalid message kind: " & $kindByte)
   
   let kind = MessageKind(kindByte)
@@ -148,8 +162,7 @@ proc decode*(data: seq[byte]): Result[ProtocolMessage, string] =
   if version != ProtocolVersion:
     return err("Unsupported protocol version")
   
-  var msg: ProtocolMessage
-  msg.kind = kind
+  var msg = ProtocolMessage(kind: kind)
   
   var pos = 2
   
@@ -217,16 +230,22 @@ proc decode*(data: seq[byte]): Result[ProtocolMessage, string] =
     checkLen(12)
     msg.requestOffset = readInt64(data, pos)
     pos += 8
-    msg.requestLength = int(int32(readUint32(data, pos)))
+    msg.requestLength = cast[int32](readUint32(data, pos)).int
   
   of msgFileData:
-    checkLen(17)
+    checkLen(22)
     msg.dataOffset = readInt64(data, pos)
     pos += 8
     msg.totalSize = readInt64(data, pos)
     pos += 8
     msg.done = data[pos] != 0
     pos += 1
+    if data[pos] > ord(ckLz4):
+      return err("Invalid compression kind")
+    msg.dataCompression = CompressionKind(data[pos])
+    pos += 1
+    msg.dataOriginalLen = int(readUint32(data, pos))
+    pos += 4
     
     checkLen(4)
     let dataLen = readUint32(data, pos).int
@@ -258,6 +277,9 @@ proc decode*(data: seq[byte]): Result[ProtocolMessage, string] =
   of msgPong:
     checkLen(8)
     msg.pingTimestamp = readInt64(data, pos)
+
+  of msgSyncDone:
+    discard
   
   ok(msg)
 
@@ -267,8 +289,23 @@ proc newFileList*(folderName: string, files: seq[FileEntry]): ProtocolMessage =
 proc newFileRequest*(path: string, offset: int64 = 0, length: int = -1): ProtocolMessage =
   ProtocolMessage(kind: msgFileRequest, requestPath: path, requestOffset: offset, requestLength: length)
 
-proc newFileData*(data: seq[byte], offset: int64, totalSize: int64, done: bool = false): ProtocolMessage =
-  ProtocolMessage(kind: msgFileData, data: data, dataOffset: offset, totalSize: totalSize, done: done)
+proc newFileData*(
+    data: seq[byte],
+    offset: int64,
+    totalSize: int64,
+    done: bool = false,
+    compression: CompressionKind = ckNone,
+    originalLen: int = 0,
+): ProtocolMessage =
+  ProtocolMessage(
+    kind: msgFileData,
+    data: data,
+    dataOffset: offset,
+    totalSize: totalSize,
+    done: done,
+    dataCompression: compression,
+    dataOriginalLen: if originalLen > 0: originalLen else: data.len
+  )
 
 proc newFileAck*(success: bool, bytesReceived: int64 = 0): ProtocolMessage =
   ProtocolMessage(kind: msgFileAck, success: success, bytesReceived: bytesReceived)
@@ -281,3 +318,6 @@ proc newPing*(): ProtocolMessage =
 
 proc newPong*(pingTimestamp: int64): ProtocolMessage =
   ProtocolMessage(kind: msgPong, pingTimestamp: pingTimestamp)
+
+proc newSyncDone*(): ProtocolMessage =
+  ProtocolMessage(kind: msgSyncDone)

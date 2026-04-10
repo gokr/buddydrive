@@ -1,15 +1,19 @@
-import std/os
+import std/os except FileInfo
+import std/options
+import std/tables
 import std/times
 import std/strutils
 import std/sequtils
 import results
 import chronos
+import lz4
 import libp2p/stream/connection
 import ../p2p/messages
 import ../p2p/protocol
 import ../types
 import scanner
 import index
+import policy
 
 export results
 export scanner
@@ -29,7 +33,7 @@ const
 proc newFileTransfer*(folder: FolderConfig, protocol: SyncProtocol): FileTransfer =
   result = FileTransfer()
   result.scanner = newFileScanner(folder)
-  result.index = newIndex(folder.name)
+  result.index = newIndex(folder.name & "|" & folder.path)
   result.protocol = protocol
 
 proc close*(transfer: FileTransfer) =
@@ -116,7 +120,17 @@ proc sendFileData*(transfer: FileTransfer, conn: Connection, path: string, offse
       return false
     
     let isDone = remaining <= chunkSize
-    let msg = newFileData(data, currentOffset, fileSize, isDone)
+    var payload = data
+    var compression = ckNone
+    try:
+      let compressed = compress(data)
+      if compressed.len > 0 and compressed.len < data.len:
+        payload = compressed
+        compression = ckLz4
+    except CatchableError:
+      discard
+
+    let msg = newFileData(payload, currentOffset, fileSize, isDone, compression, data.len)
     
     try:
       await transfer.protocol.sendMessage(conn, msg)
@@ -125,8 +139,12 @@ proc sendFileData*(transfer: FileTransfer, conn: Connection, path: string, offse
     
     currentOffset += chunkSize
     remaining -= chunkSize
-  
-  return true
+
+  let ackOpt = await transfer.protocol.receiveMessage(conn)
+  if ackOpt.isNone or ackOpt.get().kind != msgFileAck:
+    return false
+
+  ackOpt.get().success
 
 proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): Future[bool] {.async.} =
   let fullPath = transfer.scanner.rootPath / path
@@ -144,11 +162,19 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): F
     
     let msg = msgOpt.get()
     
-    if not writeFileChunk(fullPath, msg.dataOffset, msg.data):
+    var payload = msg.data
+    if msg.dataCompression == ckLz4:
+      try:
+        payload = decompress(msg.data, msg.dataOriginalLen)
+      except CatchableError:
+        success = false
+        break
+
+    if not writeFileChunk(fullPath, msg.dataOffset, payload):
       success = false
       break
     
-    totalReceived += msg.data.len
+    totalReceived += payload.len
     
     if msg.done:
       break
@@ -158,6 +184,9 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): F
     await transfer.protocol.sendMessage(conn, ack)
   except:
     discard
+
+  if success and fileExists(fullPath):
+    transfer.index.addFile(transfer.scanner.scanFile(fullPath), synced = true)
   
   return success
 
@@ -170,7 +199,7 @@ proc syncFile*(transfer: FileTransfer, conn: Connection, fileInfo: FileInfo): Fu
 proc compareWithRemote*(transfer: FileTransfer, remoteFiles: seq[FileInfo]): seq[FileInfo] =
   result = @[]
   
-  let localFiles = transfer.index.getAllFiles()
+  let localFiles = transfer.scanner.scanDirectory()
   
   var localMap: Table[string, FileInfo]
   for f in localFiles:
@@ -179,7 +208,5 @@ proc compareWithRemote*(transfer: FileTransfer, remoteFiles: seq[FileInfo]): seq
   for remote in remoteFiles:
     if remote.path notin localMap:
       result.add(remote)
-    else:
-      let local = localMap[remote.path]
-      if remote.mtime > local.mtime or remote.size != local.size:
-        result.add(remote)
+    elif shouldSyncRemoteFile(transfer.scanner.folder, remote, true, localMap[remote.path]):
+      result.add(remote)

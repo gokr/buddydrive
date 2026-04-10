@@ -11,6 +11,7 @@ export newBuddyId
 
 const CONFIG_DIR* = ".buddydrive"
 const CONFIG_FILE* = "config.toml"
+const STATE_FILE* = "state.db"
 const INDEX_FILE* = "index.db"
 const LOG_FILE* = "buddydrive.log"
 
@@ -19,6 +20,9 @@ proc getConfigDir*(): string =
 
 proc getConfigPath*(): string =
   result = getConfigDir() / CONFIG_FILE
+
+proc getStatePath*(): string =
+  result = getConfigDir() / STATE_FILE
 
 proc getIndexPath*(): string =
   result = getConfigDir() / INDEX_FILE
@@ -45,12 +49,16 @@ proc loadConfig*(): AppConfig =
   result.announceAddr = ""
   result.relayBaseUrl = ""
   result.relayRegion = ""
+  result.syncWindowStart = ""
+  result.syncWindowEnd = ""
 
   if "network" in toml:
     result.listenPort = toml["network"]{"listen_port"}.getInt(DefaultP2PPort)
     result.announceAddr = toml["network"]{"announce_addr"}.getStr("")
     result.relayBaseUrl = toml["network"]{"relay_base_url"}.getStr("")
     result.relayRegion = toml["network"]{"relay_region"}.getStr("")
+    result.syncWindowStart = toml["network"]{"sync_window_start"}.getStr("")
+    result.syncWindowEnd = toml["network"]{"sync_window_end"}.getStr("")
   
   result.folders = @[]
   if "folders" in toml:
@@ -59,6 +67,7 @@ proc loadConfig*(): AppConfig =
       folder.name = folderTbl["name"].getStr()
       folder.path = folderTbl["path"].getStr()
       folder.encrypted = folderTbl{"encrypted"}.getBool(true)
+      folder.appendOnly = folderTbl{"append_only"}.getBool(false)
       folder.buddies = @[]
       if "buddies" in folderTbl:
         for buddy in folderTbl["buddies"].getElems():
@@ -102,7 +111,9 @@ proc saveConfig*(config: AppConfig) =
   content.add("listen_port = " & $config.listenPort & "\n")
   content.add("announce_addr = \"" & escapeToml(config.announceAddr) & "\"\n")
   content.add("relay_base_url = \"" & escapeToml(config.relayBaseUrl) & "\"\n")
-  content.add("relay_region = \"" & escapeToml(config.relayRegion) & "\"\n\n")
+  content.add("relay_region = \"" & escapeToml(config.relayRegion) & "\"\n")
+  content.add("sync_window_start = \"" & escapeToml(config.syncWindowStart) & "\"\n")
+  content.add("sync_window_end = \"" & escapeToml(config.syncWindowEnd) & "\"\n\n")
   
   if config.folders.len > 0:
     content.add("[[folders]]\n")
@@ -112,6 +123,7 @@ proc saveConfig*(config: AppConfig) =
       content.add("name = \"" & escapeToml(folder.name) & "\"\n")
       content.add("path = \"" & escapeToml(folder.path) & "\"\n")
       content.add("encrypted = " & $folder.encrypted & "\n")
+      content.add("append_only = " & $folder.appendOnly & "\n")
       if folder.buddies.len > 0:
         content.add("buddies = [")
         for j, buddy in folder.buddies:

@@ -1,8 +1,5 @@
-import std/os
-import std/times
-import std/strutils
-import std/sequtils
-import sqlite3
+import std/[options, times, strutils]
+import db_connector/db_sqlite
 import ../types
 import ../config
 
@@ -42,7 +39,7 @@ proc newIndex*(folderName: string): FileIndex =
     CREATE INDEX IF NOT EXISTS idx_folder_synced ON files(folder, synced);
   """
   
-  discard db.exec(createTable)
+  discard db.tryExec(sql(createTable))
 
 proc close*(index: FileIndex) =
   if index.db != nil:
@@ -62,36 +59,36 @@ proc stringToHash*(s: string): array[32, byte] =
     except:
       discard
 
-proc addFile*(index: FileIndex, info: FileInfo, synced: bool = false) =
+proc addFile*(index: FileIndex, info: types.FileInfo, synced: bool = false) =
   let hashStr = hashToString(info.hash)
   let query = """
     INSERT OR REPLACE INTO files (folder, path, encrypted_path, size, mtime, hash, synced, last_sync)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   """
   let lastSync = if synced: getTime().toUnix() else: 0
-  discard index.db.exec(query, index.folderName, info.path, info.encryptedPath, info.size, info.mtime, hashStr, if synced: 1 else: 0, lastSync)
+  discard index.db.tryExec(sql(query), index.folderName, info.path, info.encryptedPath, info.size, info.mtime, hashStr, if synced: 1 else: 0, lastSync)
 
 proc removeFile*(index: FileIndex, path: string) =
   let query = "DELETE FROM files WHERE folder = ? AND path = ?"
-  discard index.db.exec(query, index.folderName, path)
+  discard index.db.tryExec(sql(query), index.folderName, path)
 
-proc getFile*(index: FileIndex, path: string): Option[FileInfo] =
+proc getFile*(index: FileIndex, path: string): Option[types.FileInfo] =
   let query = "SELECT path, encrypted_path, size, mtime, hash FROM files WHERE folder = ? AND path = ?"
-  for row in index.db.rows(query, index.folderName, path):
-    var info: FileInfo
+  for row in index.db.rows(sql(query), index.folderName, path):
+    var info: types.FileInfo
     info.path = row[0]
     info.encryptedPath = row[1]
     info.size = row[2].parseInt()
     info.mtime = row[3].parseInt()
     info.hash = stringToHash(row[4])
     return some(info)
-  return none(FileInfo)
+  return none(types.FileInfo)
 
-proc getAllFiles*(index: FileIndex): seq[FileInfo] =
+proc getAllFiles*(index: FileIndex): seq[types.FileInfo] =
   result = @[]
   let query = "SELECT path, encrypted_path, size, mtime, hash FROM files WHERE folder = ?"
-  for row in index.db.rows(query, index.folderName):
-    var info: FileInfo
+  for row in index.db.rows(sql(query), index.folderName):
+    var info: types.FileInfo
     info.path = row[0]
     info.encryptedPath = row[1]
     info.size = row[2].parseInt()
@@ -99,11 +96,11 @@ proc getAllFiles*(index: FileIndex): seq[FileInfo] =
     info.hash = stringToHash(row[4])
     result.add(info)
 
-proc getUnsyncedFiles*(index: FileIndex): seq[FileInfo] =
+proc getUnsyncedFiles*(index: FileIndex): seq[types.FileInfo] =
   result = @[]
   let query = "SELECT path, encrypted_path, size, mtime, hash FROM files WHERE folder = ? AND synced = 0"
-  for row in index.db.rows(query, index.folderName):
-    var info: FileInfo
+  for row in index.db.rows(sql(query), index.folderName):
+    var info: types.FileInfo
     info.path = row[0]
     info.encryptedPath = row[1]
     info.size = row[2].parseInt()
@@ -113,21 +110,21 @@ proc getUnsyncedFiles*(index: FileIndex): seq[FileInfo] =
 
 proc markSynced*(index: FileIndex, path: string) =
   let query = "UPDATE files SET synced = 1, last_sync = ? WHERE folder = ? AND path = ?"
-  discard index.db.exec(query, getTime().toUnix(), index.folderName, path)
+  discard index.db.tryExec(sql(query), getTime().toUnix(), index.folderName, path)
 
 proc markAllSynced*(index: FileIndex) =
   let query = "UPDATE files SET synced = 1, last_sync = ? WHERE folder = ?"
-  discard index.db.exec(query, getTime().toUnix(), index.folderName)
+  discard index.db.tryExec(sql(query), getTime().toUnix(), index.folderName)
 
 proc getSyncStatus*(index: FileIndex): tuple[total: int, synced: int, pending: int] =
   result = (0, 0, 0)
   
   let totalQuery = "SELECT COUNT(*) FROM files WHERE folder = ?"
-  for row in index.db.rows(totalQuery, index.folderName):
+  for row in index.db.rows(sql(totalQuery), index.folderName):
     result.total = row[0].parseInt()
   
   let syncedQuery = "SELECT COUNT(*) FROM files WHERE folder = ? AND synced = 1"
-  for row in index.db.rows(syncedQuery, index.folderName):
+  for row in index.db.rows(sql(syncedQuery), index.folderName):
     result.synced = row[0].parseInt()
   
   result.pending = result.total - result.synced

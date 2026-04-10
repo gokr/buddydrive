@@ -18,6 +18,7 @@ type
     name*: string
     path*: string
     encrypted*: bool
+    appendOnly*: bool
     buddies*: seq[string]
   
   AppConfig* = object
@@ -26,6 +27,8 @@ type
     announceAddr*: string
     relayBaseUrl*: string
     relayRegion*: string
+    syncWindowStart*: string
+    syncWindowEnd*: string
     folders*: seq[FolderConfig]
     buddies*: seq[BuddyInfo]
   
@@ -87,6 +90,7 @@ proc newFolderConfig*(name, path: string, encrypted = true): FolderConfig =
   result.name = name
   result.path = path
   result.encrypted = encrypted
+  result.appendOnly = false
   result.buddies = @[]
 
 proc newAppConfig*(buddy: BuddyId): AppConfig =
@@ -95,5 +99,7 @@ proc newAppConfig*(buddy: BuddyId): AppConfig =
   result.announceAddr = ""
   result.relayBaseUrl = ""
   result.relayRegion = ""
+  result.syncWindowStart = ""
+  result.syncWindowEnd = ""
   result.folders = @[]
   result.buddies = @[]

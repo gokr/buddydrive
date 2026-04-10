@@ -11,6 +11,7 @@ import types
 import config
 import daemon
 import control
+import sync/policy
 
 proc generateBuddyName*(): string
 proc generateUuid*(): string
@@ -39,6 +40,7 @@ type
     folderPath*: string
     folderName*: string
     folderEncrypted*: bool
+    folderAppendOnly*: bool
     buddyId*: string
     configAction*: string
     configKey*: string
@@ -64,6 +66,7 @@ Commands:
   add-folder <path>         Add a folder to sync
     --name <name>           Folder name (required)
     --no-encrypt            Don't encrypt files
+    --append-only           Only sync new files, never updates or deletions
     --buddy <id>            Add buddy to folder
   remove-folder <name>      Remove a folder
   list-folders              List configured folders
@@ -86,7 +89,9 @@ Examples:
   buddydrive init
   buddydrive config set relay-base-url https://buddydrive.net/relays
   buddydrive config set relay-region eu
+  buddydrive config set sync-window 01:00-06:00
   buddydrive config set buddy-relay-token abc123 swift-eagle
+  buddydrive config set folder-append-only docs on
   buddydrive add-folder ~/Documents --name docs
   buddydrive add-buddy --generate-code
   buddydrive add-buddy --id abc123 --code XYZ789
@@ -100,6 +105,7 @@ proc parseCli*(): CommandLine =
   result = CommandLine(
     command: cmdNone,
     folderEncrypted: true,
+    folderAppendOnly: false,
     configAction: "",
     configKey: "",
     configTarget: "",
@@ -137,6 +143,8 @@ proc parseCli*(): CommandLine =
           pendingValue = "name"
       of "no-encrypt":
         result.folderEncrypted = false
+      of "append-only":
+        result.folderAppendOnly = true
       of "buddy":
         if val.len > 0:
           result.buddyId = val
@@ -197,9 +205,9 @@ proc parseCli*(): CommandLine =
         if args.len >= 4:
           result.configKey = args[2].toLowerAscii()
           case result.configKey
-          of "relay-base-url", "relay_base_url", "relay-region", "relay_region":
+          of "relay-base-url", "relay_base_url", "relay-region", "relay_region", "sync-window", "sync_window":
             result.configValue = args[3]
-          of "buddy-relay-token", "buddy_relay_token", "buddy-name", "buddy_name":
+          of "buddy-relay-token", "buddy_relay_token", "buddy-name", "buddy_name", "folder-append-only", "folder_append_only":
             if args.len >= 5:
               result.configTarget = args[3]
               result.configValue = args[4]
@@ -248,6 +256,7 @@ proc handleInit*() =
   echo "  Announce addr: (set [network].announce_addr after forwarding this port on your router)"
   echo "  Relay base URL: (set with 'buddydrive config set relay-base-url <url>')"
   echo "  Relay region: (set with 'buddydrive config set relay-region <region>')"
+  echo "  Sync window: always (set with 'buddydrive config set sync-window HH:MM-HH:MM')"
   echo ""
   echo "Next steps:"
   echo "  1. Add a folder: buddydrive add-folder <path> --name <name>"
@@ -273,6 +282,20 @@ proc handleConfig*(cmd: CommandLine) =
       saveConfig(cfg)
       echo "Relay region set to: ", cfg.relayRegion
       return
+    of "sync-window", "sync_window":
+      if cmd.configValue.toLowerAscii() == "off":
+        cfg.syncWindowStart = ""
+        cfg.syncWindowEnd = ""
+      else:
+        let parts = cmd.configValue.split("-", maxsplit = 1)
+        if parts.len != 2 or parseClockMinutes(parts[0]) < 0 or parseClockMinutes(parts[1]) < 0:
+          echo "Invalid sync window. Use HH:MM-HH:MM or 'off'."
+          return
+        cfg.syncWindowStart = parts[0]
+        cfg.syncWindowEnd = parts[1]
+      saveConfig(cfg)
+      echo "Sync window set to: ", syncWindowDescription(cfg)
+      return
     of "buddy-relay-token", "buddy_relay_token":
       let idx = cfg.getBuddy(cmd.configTarget)
       if idx < 0:
@@ -291,9 +314,25 @@ proc handleConfig*(cmd: CommandLine) =
       saveConfig(cfg)
       echo "Buddy name set to: ", cfg.buddies[idx].id.name
       return
+    of "folder-append-only", "folder_append_only":
+      let idx = cfg.getFolder(cmd.configTarget)
+      if idx < 0:
+        echo "Folder not found: ", cmd.configTarget
+        return
+      let normalized = cmd.configValue.toLowerAscii()
+      if normalized in ["on", "true", "yes", "1"]:
+        cfg.folders[idx].appendOnly = true
+      elif normalized in ["off", "false", "no", "0"]:
+        cfg.folders[idx].appendOnly = false
+      else:
+        echo "Invalid append-only value. Use on/off."
+        return
+      saveConfig(cfg)
+      echo "Append-only for folder '", cfg.folders[idx].name, "' set to: ", cfg.folders[idx].appendOnly
+      return
     else:
       echo "Unknown config key: ", cmd.configKey
-      echo "Supported keys: relay-base-url, relay-region, buddy-relay-token, buddy-name"
+      echo "Supported keys: relay-base-url, relay-region, sync-window, buddy-relay-token, buddy-name, folder-append-only"
       return
 
   let cfg = loadConfig()
@@ -314,6 +353,7 @@ proc handleConfig*(cmd: CommandLine) =
     echo "  Relay region: ", cfg.relayRegion
   else:
     echo "  Relay region: (not set)"
+  echo "  Sync window: ", syncWindowDescription(cfg)
   echo ""
   
   if cfg.folders.len > 0:
@@ -322,6 +362,7 @@ proc handleConfig*(cmd: CommandLine) =
       echo "  ", folder.name
       echo "    Path: ", folder.path
       echo "    Encrypted: ", folder.encrypted
+      echo "    Append-only: ", folder.appendOnly
       if folder.buddies.len > 0:
         echo "    Buddies: ", folder.buddies.join(", ")
     echo ""
@@ -365,6 +406,7 @@ proc handleAddFolder*(cmd: CommandLine) =
     return
   
   var folder = newFolderConfig(cmd.folderName, absPath, cmd.folderEncrypted)
+  folder.appendOnly = cmd.folderAppendOnly
   
   if cmd.buddyId.len > 0:
     let buddyIdx = cfg.getBuddy(cmd.buddyId)
@@ -378,6 +420,7 @@ proc handleAddFolder*(cmd: CommandLine) =
   echo "Folder added: ", cmd.folderName
   echo "  Path: ", absPath
   echo "  Encrypted: ", cmd.folderEncrypted
+  echo "  Append-only: ", folder.appendOnly
   if folder.buddies.len > 0:
     echo "  Buddies: ", folder.buddies.join(", ")
 
@@ -414,6 +457,7 @@ proc handleListFolders*() =
     echo "  ", folder.name
     echo "    Path: ", folder.path
     echo "    Encrypted: ", folder.encrypted
+    echo "    Append-only: ", folder.appendOnly
     if folder.buddies.len > 0:
       echo "    Buddies: ", folder.buddies.join(", ")
 
@@ -584,6 +628,7 @@ proc handleStatus*() =
   
   echo "Buddy: ", cfg.buddy.name, " (", cfg.buddy.uuid.shortId(), ")"
   echo "Peer ID: ", "(run 'buddydrive start' to connect)"
+  echo "Sync window: ", syncWindowDescription(cfg)
   echo ""
   
   if cfg.folders.len > 0:
@@ -592,6 +637,7 @@ proc handleStatus*() =
       echo "  ", folder.name
       echo "    Path: ", folder.path
       echo "    Encrypted: ", folder.encrypted
+      echo "    Append-only: ", folder.appendOnly
       if folder.buddies.len > 0:
         echo "    Buddies: ", folder.buddies.mapIt(shortId(it)).join(", ")
   else:

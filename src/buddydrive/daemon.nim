@@ -11,6 +11,8 @@ import p2p/discovery
 import p2p/protocol
 import p2p/pairing
 import p2p/rawrelay
+import sync/policy
+import sync/session
 import control
 import nat
 
@@ -29,6 +31,7 @@ type
     diagnostics*: Table[string, string]
     relayListCache*: RelayListCache
     discoveryLoop*: Future[void]
+    statusUpdateFut*: Future[void]
     running*: bool
     startTime*: Time
 
@@ -109,7 +112,37 @@ proc startupReachabilityDiagnostic(daemon: Daemon) =
       "for example /ip4/<public-ip>/tcp/" & $daemon.config.listenPort & "."
   )
 
+proc syncWindowDiagnosticKey(): string =
+  "sync-window"
+
+proc buddyDiagnosticKey(buddyId: string): string {.raises: [].}
+proc statusUpdateLoop(daemon: Daemon) {.async: (raises: [CancelledError]).}
+
+proc runBuddySync(daemon: Daemon, bc: BuddyConnection) {.async.} =
+  let diagnosticKey = "buddy-" & bc.buddyId
+  try:
+    if await syncBuddyFolders(daemon.config, bc.buddyId, bc.conn, daemon.syncProtocol):
+      echo "Folder sync finished with: ", bc.buddyName
+    else:
+      daemon.logDiagnostic(
+        diagnosticKey,
+        "Folder sync failed for buddy " & bc.buddyId.shortId()
+      )
+  except CatchableError as e:
+    daemon.logDiagnostic(
+      diagnosticKey,
+      "Folder sync errored for buddy " & bc.buddyId.shortId() & ": " & e.msg
+    )
+
 proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
+  if not isWithinSyncWindow(daemon.config):
+    daemon.logDiagnostic(
+      syncWindowDiagnosticKey(),
+      "Sync window is closed (" & syncWindowDescription(daemon.config) & "); rejecting incoming sync connections until the window opens."
+    )
+    await conn.close()
+    return
+
   let bc = newBuddyConnection()
   bc.conn = conn
   
@@ -117,6 +150,7 @@ proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
   if success:
     echo "Buddy connected: ", bc.buddyName, " (", bc.buddyId.shortId(), ")"
     daemon.buddyConnections[bc.buddyId] = bc
+    asyncSpawn daemon.runBuddySync(bc)
   else:
     echo "Rejected connection from unknown buddy"
     await bc.close()
@@ -168,6 +202,7 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
 
     daemon.node = newBuddyNode(daemon.config.listenPort, announceAddrs)
     await daemon.node.start()
+    daemon.syncProtocol = newSyncProtocol(daemon.node)
 
     let pairingHandler = proc(conn: Connection, proto: string): Future[void] {.closure, gcsafe, async: (raises: [CancelledError]).} =
       try:
@@ -196,11 +231,24 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     asyncSpawn daemon.discovery.publishBuddy(daemon.config.buddy.uuid)
     echo "Started buddy announcement on DHT: ", daemon.config.buddy.uuid
     
-    daemon.syncProtocol = newSyncProtocol(daemon.node)
     daemon.running = true
     daemon.startTime = getTime()
+    
+    block:
+      {.cast(gcsafe).}:
+        writeRuntimeStatus(
+          daemon.config,
+          daemon.node.peerIdStr(),
+          daemon.node.getAddrs().mapIt($it),
+          daemon.startTime,
+          running = true
+        )
+    
     daemon.discoveryLoop = daemon.runDiscoveryLoop()
     asyncSpawn daemon.discoveryLoop
+    
+    daemon.statusUpdateFut = statusUpdateLoop(daemon)
+    asyncSpawn daemon.statusUpdateFut
     
     startControlServer(controlPort)
     echo "Control server started on port ", controlPort
@@ -216,7 +264,17 @@ proc stop*(daemon: Daemon): Future[void] {.async: (raises: []).} =
   echo "Stopping daemon..."
   
   try:
-    stopControlServer()
+    block:
+      {.cast(gcsafe).}:
+        stopControlServer()
+        markControlStopped()
+
+    if daemon.statusUpdateFut != nil:
+      daemon.statusUpdateFut.cancelSoon()
+      try:
+        await daemon.statusUpdateFut
+      except:
+        discard
 
     if daemon.discoveryLoop != nil:
       daemon.discoveryLoop.cancelSoon()
@@ -280,6 +338,19 @@ proc getFolderStatus*(daemon: Daemon): seq[SyncStatus] =
     status.status = "idle"
     result.add(status)
 
+proc updateLiveStatus*(daemon: Daemon) =
+  try:
+    let buddyStatuses = daemon.getBuddyStatus()
+    let folderStatuses = daemon.getFolderStatus()
+    writeLiveStatus(buddyStatuses, folderStatuses)
+  except:
+    discard
+
+proc statusUpdateLoop(daemon: Daemon) {.async: (raises: [CancelledError]).} =
+  while daemon.running:
+    daemon.updateLiveStatus()
+    await chronos.sleepAsync(chronos.seconds(2))
+
 proc buddyDiagnosticKey(buddyId: string): string =
   "buddy-" & buddyId
 
@@ -311,6 +382,7 @@ proc connectToBuddyViaRelay(daemon: Daemon, buddyId: string): Future[bool] {.asy
       echo "Relay handshake successful with: ", bc.buddyName, " via ", relayConn.relayAddr
       daemon.diagnostics.del(buddyDiagnosticKey(buddyId))
       daemon.buddyConnections[bc.buddyId] = bc
+      asyncSpawn daemon.runBuddySync(bc)
       return true
 
     echo "Relay handshake failed for buddy: ", buddyId.shortId()
@@ -365,6 +437,7 @@ proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq
       echo "Handshake successful with: ", bc.buddyName
       daemon.diagnostics.del(buddyDiagnosticKey(buddyId))
       daemon.buddyConnections[bc.buddyId] = bc
+      asyncSpawn daemon.runBuddySync(bc)
       return true
     else:
       echo "Handshake failed with: ", $peerId
@@ -384,6 +457,15 @@ proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq
 proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
   if not daemon.running:
     return
+
+  if not isWithinSyncWindow(daemon.config):
+    daemon.logDiagnostic(
+      syncWindowDiagnosticKey(),
+      "Sync window is closed (" & syncWindowDescription(daemon.config) & "); postponing buddy sync attempts."
+    )
+    return
+
+  daemon.diagnostics.del(syncWindowDiagnosticKey())
   
   echo "Checking ", daemon.config.buddies.len, " buddies..."
   
