@@ -212,7 +212,9 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
       except CatchableError:
         discard
 
-    daemon.node.switch.mount(LPProtocol.new(@[PairingProtocol], pairingHandler))
+    let pairingProto = LPProtocol.new(@[PairingProtocol], pairingHandler)
+    await pairingProto.start()
+    daemon.node.switch.mount(pairingProto)
 
     echo "Node started with Peer ID: ", daemon.node.peerIdStr()
     
