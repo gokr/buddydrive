@@ -129,18 +129,18 @@
         <h3>Peer Discovery</h3>
         <p>How two buddies find each other:</p>
         <ol>
-            <li><strong>DHT Announce</strong> - Each daemon announces its peer ID on the DHT</li>
-            <li><strong>Buddy ID Lookup</strong> - Query DHT for buddy's peer ID</li>
-            <li><strong>Address Resolution</strong> - Get multi-addresses (IP:port)</li>
-            <li><strong>Direct Connection</strong> - Connect via TCP with NAT traversal</li>
+            <li><strong>Buddy ID Announce</strong> - Each daemon publishes your buddy ID to the DHT with its current peer record</li>
+            <li><strong>Buddy Lookup</strong> - Query the DHT for a configured buddy ID</li>
+            <li><strong>Address Resolution</strong> - Read the peer ID and advertised multi-addresses</li>
+            <li><strong>Connection Attempt</strong> - Dial a public TCP address directly, or fall back to relay when configured</li>
         </ol>
 
         <h3>NAT Traversal</h3>
-        <p>Works behind home routers:</p>
+        <p>Current connectivity options:</p>
         <ul>
-            <li><strong>Hole punching</strong> - coordinated connection attempts</li>
-            <li><strong>Relay fallback</strong> - if direct connection fails (planned)</li>
-            <li><strong>UPnP</strong> - automatic port forwarding (optional)</li>
+            <li><strong>Public TCP address</strong> - direct connection when a forwarded port and public <code>announce_addr</code> are available</li>
+            <li><strong>Relay fallback</strong> - used when <code>relay_region</code> and a shared buddy <code>relay_token</code> are configured</li>
+            <li><strong>UPnP</strong> - automatic port forwarding attempt when no explicit <code>announce_addr</code> is set</li>
         </ul>
 
         <h2>File Sync</h2>
@@ -307,7 +307,7 @@ Master Key (per installation)
         <h3>Network</h3>
         <ul>
             <li>Chunked transfer for large files</li>
-            <li>Compression for text (planned)</li>
+            <li>LZ4 compression when it helps for a transferred chunk</li>
             <li>Bandwidth throttling (planned)</li>
         </ul>
 
@@ -321,7 +321,7 @@ Master Key (per installation)
 
         <h3>Current</h3>
         <ul>
-            <li>Sync triggered manually (auto in progress)</li>
+            <li>Sync triggered when buddies connect</li>
             <li>One buddy per folder</li>
             <li>No delta sync for large files</li>
             <li>No selective download</li>
@@ -329,7 +329,7 @@ Master Key (per installation)
 
         <h3>Planned</h3>
         <ul>
-            <li>Automatic background sync</li>
+            <li>Better background daemon management</li>
             <li>Multiple buddies per folder</li>
             <li>Delta sync (rsync-style)</li>
             <li>Compression for text files</li>

@@ -54,10 +54,10 @@
         <h3>Peer-to-Peer Architecture</h3>
         <p>No central server. No cloud. No middleman.</p>
         <pre><code>Your Machine &lt;--encrypted channel--&gt; Buddy's Machine</code></pre>
-        <p>Both machines connect directly using libp2p, the same technology powering IPFS. Features:</p>
+        <p>BuddyDrive uses libp2p for peer discovery and transport. Current connectivity options include direct public TCP connections and relay fallback. Features:</p>
         <ul>
             <li><strong>DHT-based peer discovery</strong> - find your buddy even behind home routers</li>
-            <li><strong>NAT traversal</strong> - works without port forwarding</li>
+            <li><strong>Relay fallback</strong> - available when both peers configure the same relay token</li>
             <li><strong>Multi-address support</strong> - connects via IP, TCP, and more</li>
             <li><strong>Yamux multiplexing</strong> - efficient multiple streams over one connection</li>
         </ul>
@@ -93,15 +93,15 @@
         <h2>Security Features</h2>
 
         <h3>Secure Pairing</h3>
-        <p>Pairing uses a 6-character code that you share with your buddy out-of-band (in person, text, call). This prevents man-in-the-middle attacks:</p>
+        <p>Pairing uses a short code that you share with your buddy out-of-band (in person, text, call):</p>
         <ol>
             <li>Generate pairing code on your machine</li>
             <li>Share code with your buddy</li>
             <li>They enter the code on their machine</li>
-            <li>Cryptographic keys exchange securely</li>
-            <li>Devices paired, ready to sync</li>
+            <li>BuddyDrive stores the buddy relationship locally</li>
+            <li>Both sides can start the daemon and attempt sync</li>
         </ol>
-        <p>Each pairing creates unique encryption keys. Compromise one buddy, others remain secure.</p>
+        <p>Each buddy relationship is configured independently.</p>
 
         <h3>Encrypted At Rest</h3>
         <p>Files are encrypted before storage on your buddy's machine:</p>
@@ -119,27 +119,27 @@
         <p>When both you and your buddy edit the same file:</p>
         <ul>
             <li><strong>Last-write-wins</strong> by default</li>
-            <li><strong>Version history</strong> kept for recovery</li>
-            <li><strong>Manual resolution</strong> option available</li>
+            <li><strong>Append-only mode</strong> available per folder to avoid remote overwrites and deletions</li>
+            <li><strong>No built-in version history yet</strong></li>
         </ul>
 
         <h3>Large File Support</h3>
         <ul>
             <li>Files split into 64KB chunks</li>
-            <li>Resume interrupted transfers</li>
-            <li>Deduplication saves bandwidth</li>
+            <li>Resume-friendly chunked transfer flow</li>
+            <li>LZ4 compression when it reduces payload size</li>
         </ul>
 
         <h2>Platform Support</h2>
 
         <h3>Linux</h3>
-        <p>Native packages for major distributions. GTK4 GUI with desktop integration.</p>
+        <p>Build from source today. GTK4 GUI with desktop integration on Linux.</p>
 
         <h3>macOS</h3>
-        <p>Native app bundle with menu bar integration.</p>
+        <p>Build from source.</p>
 
         <h3>Windows</h3>
-        <p>Standalone executable with system tray icon.</p>
+        <p>Build from source.</p>
 
         <h3>Headless</h3>
         <p>Run on servers, NAS boxes, or Raspberry Pi with command-line interface only.</p>
@@ -159,7 +159,7 @@
 
         <p>Current limitations to be aware of:</p>
         <ul>
-            <li>Sync triggers manually (auto-sync in progress)</li>
+            <li>Background sync depends on peers connecting successfully</li>
             <li>One buddy per folder (multiple buddies planned)</li>
             <li>No mobile apps yet</li>
             <li>No file versioning yet</li>
