@@ -16,9 +16,12 @@ requires "results"
 requires "uuids"
 requires "db_connector"
 requires "mummy"
+requires "nat_traversal"
+requires "curly"
 
 task test, "Run tests":
   exec "nimble c -r tests/harness/test_peer_discovery.nim"
+  exec "nimble c -r tests/harness/test_relay_fallback.nim"
 
 task build, "Build release CLI":
   exec "nim c -d:release src/buddydrive.nim"

@@ -1,16 +1,18 @@
-import std/times
-import std/tables
+import std/[times, tables, strutils, sequtils]
 import results
 import chronos
 import libp2p
 import libp2p/multiaddress
 import libp2p/stream/connection
+from libp2p/protocols/protocol import LPProtocol
 import types
 import p2p/node
 import p2p/discovery
 import p2p/protocol
 import p2p/pairing
+import p2p/rawrelay
 import control
+import nat
 
 export results
 export node
@@ -24,14 +26,88 @@ type
     discovery*: DiscoveryService
     syncProtocol*: SyncProtocol
     buddyConnections*: Table[string, BuddyConnection]
+    diagnostics*: Table[string, string]
+    relayListCache*: RelayListCache
+    discoveryLoop*: Future[void]
     running*: bool
     startTime*: Time
+
+const BuddyDiscoveryInterval* = chronos.seconds(15)
 
 proc newDaemon*(config: AppConfig): Daemon =
   result = Daemon()
   result.config = config
   result.running = false
   result.buddyConnections = initTable[string, BuddyConnection]()
+  result.diagnostics = initTable[string, string]()
+  result.relayListCache = initRelayListCache()
+
+proc isPrivateOrLoopback(ma: MultiAddress): bool =
+  let s = $ma
+  if s.contains("/p2p-circuit"):
+    return true
+  if s.startsWith("/ip4/127.") or s.startsWith("/ip4/10.") or
+      s.startsWith("/ip4/192.168.") or s.startsWith("/ip4/169.254."):
+    return true
+  if s.startsWith("/ip4/172."):
+    let parts = s.split("/")
+    if parts.len > 2:
+      let octets = parts[2].split(".")
+      if octets.len > 1:
+        try:
+          let second = parseInt(octets[1])
+          return second >= 16 and second <= 31
+        except ValueError:
+          discard
+  if s.startsWith("/ip4/100."):
+    let parts = s.split("/")
+    if parts.len > 2:
+      let octets = parts[2].split(".")
+      if octets.len > 1:
+        try:
+          let second = parseInt(octets[1])
+          return second >= 64 and second <= 127
+        except ValueError:
+          discard
+  if s.startsWith("/ip6/::1") or s.startsWith("/ip6/fc") or
+      s.startsWith("/ip6/fd") or s.startsWith("/ip6/fe80"):
+    return true
+  false
+
+proc isRelayAddress(ma: MultiAddress): bool =
+  ($ma).contains("/p2p-circuit")
+
+proc directDialableAddrs(addrs: seq[MultiAddress]): seq[MultiAddress] =
+  for ma in addrs:
+    let s = $ma
+    if isRelayAddress(ma):
+      continue
+    if isPrivateOrLoopback(ma):
+      continue
+    if s.contains("/tcp/"):
+      result.add(ma)
+
+proc hasDirectReachability(addrs: seq[MultiAddress]): bool =
+  directDialableAddrs(addrs).len > 0
+
+proc logDiagnostic(daemon: Daemon, key: string, message: string) =
+  if daemon.diagnostics.getOrDefault(key) == message:
+    return
+  daemon.diagnostics[key] = message
+  echo message
+
+proc startupReachabilityDiagnostic(daemon: Daemon) =
+  let addrs = daemon.node.getAdvertisedAddrs()
+  if hasDirectReachability(addrs):
+    return
+
+  daemon.logDiagnostic(
+    "startup-reachability",
+    "Direct-only mode: no public TCP address is being advertised. " &
+      "Forward TCP port " & $daemon.config.listenPort &
+      " on your router and set [network].announce_addr in ~/.buddydrive/config.toml to your public multiaddr, " &
+      "for example /ip4/<public-ip>/tcp/" & $daemon.config.listenPort & "."
+  )
 
 proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
   let bc = newBuddyConnection()
@@ -45,6 +121,21 @@ proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
     echo "Rejected connection from unknown buddy"
     await bc.close()
 
+proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).}
+
+proc runDiscoveryLoop(daemon: Daemon) {.async.} =
+  while daemon.running:
+    try:
+      await daemon.connectToBuddies()
+    except CancelledError:
+      return
+    except Exception as e:
+      echo "Discovery loop error: ", e.msg
+    try:
+      await sleepAsync(BuddyDiscoveryInterval)
+    except CancelledError:
+      return
+
 proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void] {.async: (raises: []).} =
   if daemon.running:
     return
@@ -52,25 +143,64 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
   echo "Starting daemon..."
   
   try:
-    daemon.node = newBuddyNode()
-    await daemon.node.start()
+    var announceAddrs: seq[MultiAddress] = @[]
     
+    if daemon.config.announceAddr.len > 0:
+      let maRes = MultiAddress.init(daemon.config.announceAddr)
+      if maRes.isOk:
+        announceAddrs.add(maRes.get())
+      else:
+        daemon.logDiagnostic(
+          "startup-announce-addr",
+          "Configured announce_addr is invalid and will be ignored: " & daemon.config.announceAddr
+        )
+    
+    if announceAddrs.len == 0:
+      echo "Attempting UPnP port mapping for port ", daemon.config.listenPort, "..."
+      let upnpAddr = attemptUpnpPortMapping(daemon.config.listenPort)
+      if upnpAddr.isSome:
+        let maRes = MultiAddress.init(upnpAddr.get)
+        if maRes.isOk:
+          announceAddrs.add(maRes.get())
+          echo "UPnP created port mapping, using: ", upnpAddr.get
+      else:
+        echo "UPnP not available (no router support or already forwarded)"
+
+    daemon.node = newBuddyNode(daemon.config.listenPort, announceAddrs)
+    await daemon.node.start()
+
+    let pairingHandler = proc(conn: Connection, proto: string): Future[void] {.closure, gcsafe, async: (raises: [CancelledError]).} =
+      try:
+        await daemon.handleIncomingConnection(conn)
+      except CancelledError:
+        raise
+      except CatchableError:
+        discard
+
+    daemon.node.switch.mount(LPProtocol.new(@[PairingProtocol], pairingHandler))
+
     echo "Node started with Peer ID: ", daemon.node.peerIdStr()
     
     for address in daemon.node.getAddrs():
       echo "Listening on: ", $address
+    for address in daemon.node.getAdvertisedAddrs():
+      echo "Advertising: ", $address
+
+    daemon.startupReachabilityDiagnostic()
     
     daemon.discovery = newDiscovery(daemon.node)
     await daemon.discovery.start()
     
     echo "DHT discovery started"
     
-    await daemon.discovery.publishBuddy(daemon.config.buddy.uuid)
-    echo "Announced buddy ID on DHT: ", daemon.config.buddy.uuid
+    asyncSpawn daemon.discovery.publishBuddy(daemon.config.buddy.uuid)
+    echo "Started buddy announcement on DHT: ", daemon.config.buddy.uuid
     
     daemon.syncProtocol = newSyncProtocol(daemon.node)
     daemon.running = true
     daemon.startTime = getTime()
+    daemon.discoveryLoop = daemon.runDiscoveryLoop()
+    asyncSpawn daemon.discoveryLoop
     
     startControlServer(controlPort)
     echo "Control server started on port ", controlPort
@@ -87,6 +217,13 @@ proc stop*(daemon: Daemon): Future[void] {.async: (raises: []).} =
   
   try:
     stopControlServer()
+
+    if daemon.discoveryLoop != nil:
+      daemon.discoveryLoop.cancelSoon()
+      try:
+        await daemon.discoveryLoop
+      except:
+        discard
     
     for buddyId, bc in daemon.buddyConnections:
       await bc.close()
@@ -143,15 +280,81 @@ proc getFolderStatus*(daemon: Daemon): seq[SyncStatus] =
     status.status = "idle"
     result.add(status)
 
+proc buddyDiagnosticKey(buddyId: string): string =
+  "buddy-" & buddyId
+
+proc buddyRelayToken(config: AppConfig, buddyId: string): string =
+  for buddy in config.buddies:
+    if buddy.id.uuid == buddyId:
+      return buddy.relayToken
+
+proc connectToBuddyViaRelay(daemon: Daemon, buddyId: string): Future[bool] {.async: (raises: []).} =
+  let relayToken = buddyRelayToken(daemon.config, buddyId)
+  if daemon.config.relayRegion.len == 0 or relayToken.len == 0:
+    return false
+
+  try:
+    echo "Attempting relay fallback for buddy ", buddyId.shortId(), " in region ", daemon.config.relayRegion
+    let relayConn = await connectViaRegionalRelay(
+      daemon.relayListCache,
+      daemon.config.relayBaseUrl,
+      daemon.config.relayRegion,
+      relayToken
+    )
+    let conn = relayConn.conn
+
+    let bc = newBuddyConnection()
+    bc.conn = conn
+
+    let success = await bc.performHandshake(daemon.config)
+    if success:
+      echo "Relay handshake successful with: ", bc.buddyName, " via ", relayConn.relayAddr
+      daemon.diagnostics.del(buddyDiagnosticKey(buddyId))
+      daemon.buddyConnections[bc.buddyId] = bc
+      return true
+
+    echo "Relay handshake failed for buddy: ", buddyId.shortId()
+    await bc.close()
+  except Exception as e:
+    daemon.logDiagnostic(
+      buddyDiagnosticKey(buddyId),
+      "Relay fallback in region " & daemon.config.relayRegion & " for buddy " & buddyId.shortId() & " failed: " & e.msg
+    )
+
+  false
+
+proc explainDirectConnectivityFailure(addrs: seq[MultiAddress]): string =
+  if addrs.len == 0:
+    return "buddy published no addresses"
+
+  let relayOnly = addrs.allIt(isRelayAddress(it))
+  if relayOnly:
+    return "buddy is only reachable via relay addresses, and relay fallback is disabled"
+
+  let privateOnly = addrs.allIt(isPrivateOrLoopback(it))
+  if privateOnly:
+    return "buddy only advertised private or loopback addresses"
+
+  "no public TCP address was found among discovered addresses"
+
 proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq[MultiAddress]): Future[bool] {.async: (raises: []).} =
   if not daemon.running:
     return false
   
-  if addrs.len == 0:
+  let dialAddrs = directDialableAddrs(addrs)
+  if dialAddrs.len == 0:
+    if await daemon.connectToBuddyViaRelay(buddyId):
+      return true
+
+    daemon.logDiagnostic(
+      buddyDiagnosticKey(buddyId),
+      "Direct connection to buddy " & buddyId.shortId() & " is not possible: " &
+        explainDirectConnectivityFailure(addrs) & ". Configure a forwarded TCP port and a public announce_addr on both peers, or set [network].relay_region and the buddy relay_token."
+    )
     return false
   
   try:
-    let conn = await daemon.node.switch.dial(peerId, addrs, PairingProtocol)
+    let conn = await daemon.node.switch.dial(peerId, dialAddrs, PairingProtocol)
     echo "Connected to peer: ", $peerId
     
     let bc = newBuddyConnection()
@@ -160,6 +363,7 @@ proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq
     let success = await bc.performHandshake(daemon.config)
     if success:
       echo "Handshake successful with: ", bc.buddyName
+      daemon.diagnostics.del(buddyDiagnosticKey(buddyId))
       daemon.buddyConnections[bc.buddyId] = bc
       return true
     else:
@@ -167,7 +371,14 @@ proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq
       await bc.close()
       return false
   except Exception as e:
-    echo "Connection failed: ", e.msg
+    if await daemon.connectToBuddyViaRelay(buddyId):
+      return true
+
+    daemon.logDiagnostic(
+      buddyDiagnosticKey(buddyId),
+      "Direct connection to buddy " & buddyId.shortId() & " failed after discovery: " & e.msg &
+        ". Verify that both peers are advertising public TCP addresses and that router port forwarding is configured, or configure relay fallback with relay_region."
+    )
     return false
 
 proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =

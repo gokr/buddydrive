@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How It Works - BuddyDrive</title>
+    <meta name="description" content="Technical architecture of BuddyDrive: peer-to-peer networking, libp2p, encryption, and file sync.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="images/buddydrive-icon.png" type="image/png">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <a href="index.html" class="logo">
+                <img src="images/buddydrive-icon.png" alt="BuddyDrive" class="logo-img">
+                <span class="logo-text">BuddyDrive</span>
+            </a>
+            <button class="nav-toggle" aria-label="Toggle navigation">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-menu">
+                <li><a href="features.html">Features</a></li>
+                <li><a href="security.html">Security</a></li>
+                <li><a href="how-it-works.html">How It Works</a></li>
+                <li><a href="docs.html">Docs</a></li>
+                <li><a href="https://github.com/gokr/buddydrive" class="nav-cta">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="page-header">
+        <div class="container">
+            <h1>How It Works</h1>
+            <p>Technical architecture under the hood.</p>
+        </div>
+    </header>
+
+    <main class="content-page">
+        <h2>Architecture</h2>
+
+        <p>BuddyDrive uses peer-to-peer networking with modern cryptographic protocols.</p>
+
+        <div class="diagram">
+<pre>
+┌─────────────────┐                    ┌─────────────────┐
+│  Your Machine   │                    │ Buddy's Machine │
+│                 │                    │                 │
+│  ┌───────────┐  │   libp2p/Noise    │  ┌───────────┐  │
+│  │ BuddyDrive│◄─┼──────────────────┼──►│ BuddyDrive│  │
+│  └───────────┘  │   encrypted       │  └───────────┘  │
+│       │         │                   │       │         │
+│       ▼         │                   │       ▼         │
+│  ┌───────────┐  │                   │  ┌───────────┐  │
+│  │  Files    │  │                   │  │ Encrypted │  │
+│  │ (plain)   │  │                   │  │  Storage  │  │
+│  └───────────┘  │                   │  └───────────┘  │
+└─────────────────┘                    └─────────────────┘
+</pre>
+        </div>
+
+        <h2>Components</h2>
+
+        <h3>Daemon (Background Service)</h3>
+        <p>The BuddyDrive daemon runs in the background:</p>
+        <ul>
+            <li><strong>libp2p node</strong> - handles peer-to-peer networking</li>
+            <li><strong>Sync manager</strong> - detects file changes and coordinates sync</li>
+            <li><strong>Control API</strong> - local HTTP server for GUI communication</li>
+            <li><strong>SQLite database</strong> - tracks file state and sync progress</li>
+        </ul>
+
+        <h3>GUI (Desktop Application)</h3>
+        <p>GTK4 application for Linux, macOS, Windows:</p>
+        <ul>
+            <li>Shows buddy connection status</li>
+            <li>Displays folder sync progress</li>
+            <li>Manages folder configuration</li>
+            <li>Handles pairing workflow</li>
+        </ul>
+
+        <h3>CLI (Command Line)</h3>
+        <p>For headless operation:</p>
+        <ul>
+            <li>Same daemon, no GUI</li>
+            <li>Run on servers, NAS, Raspberry Pi</li>
+            <li>Script-friendly output</li>
+        </ul>
+
+        <h2>Networking</h2>
+
+        <h3>libp2p Stack</h3>
+        <p>BuddyDrive uses libp2p for all networking:</p>
+
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Layer</th>
+                    <th>Protocol</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Transport</td>
+                    <td>TCP</td>
+                    <td>Connection</td>
+                </tr>
+                <tr>
+                    <td>Security</td>
+                    <td>Noise</td>
+                    <td>Encryption</td>
+                </tr>
+                <tr>
+                    <td>Muxer</td>
+                    <td>Yamux</td>
+                    <td>Multiplexing</td>
+                </tr>
+                <tr>
+                    <td>Discovery</td>
+                    <td>Kademlia DHT</td>
+                    <td>Find peers</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Peer Discovery</h3>
+        <p>How two buddies find each other:</p>
+        <ol>
+            <li><strong>DHT Announce</strong> - Each daemon announces its peer ID on the DHT</li>
+            <li><strong>Buddy ID Lookup</strong> - Query DHT for buddy's peer ID</li>
+            <li><strong>Address Resolution</strong> - Get multi-addresses (IP:port)</li>
+            <li><strong>Direct Connection</strong> - Connect via TCP with NAT traversal</li>
+        </ol>
+
+        <h3>NAT Traversal</h3>
+        <p>Works behind home routers:</p>
+        <ul>
+            <li><strong>Hole punching</strong> - coordinated connection attempts</li>
+            <li><strong>Relay fallback</strong> - if direct connection fails (planned)</li>
+            <li><strong>UPnP</strong> - automatic port forwarding (optional)</li>
+        </ul>
+
+        <h2>File Sync</h2>
+
+        <h3>Change Detection</h3>
+        <p>The sync manager monitors configured folders:</p>
+        <ol>
+            <li><strong>Scan</strong> - enumerate files, calculate hashes</li>
+            <li><strong>Compare</strong> - check against last-known state</li>
+            <li><strong>Detect</strong> - identify added, modified, deleted files</li>
+            <li><strong>Queue</strong> - add changes to sync queue</li>
+        </ol>
+
+        <h3>Transfer Protocol</h3>
+        <p>File transfer uses a simple chunked protocol:</p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">protocol.json</span>
+            </div>
+            <div class="code-body">
+<pre><code><span class="syntax-comment">// REQUEST:</span>
+{
+  <span class="syntax-string">"type"</span>: <span class="syntax-string">"file_request"</span>,
+  <span class="syntax-string">"path"</span>: <span class="syntax-string">"photos/2024/vacation.jpg"</span>,
+  <span class="syntax-string">"offset"</span>: <span class="syntax-number">0</span>,
+  <span class="syntax-string">"length"</span>: <span class="syntax-number">65536</span>
+}
+
+<span class="syntax-comment">// RESPONSE:</span>
+{
+  <span class="syntax-string">"type"</span>: <span class="syntax-string">"file_chunk"</span>,
+  <span class="syntax-string">"data"</span>: <span class="syntax-string">"&lt;base64-encoded-chunk&gt;"</span>,
+  <span class="syntax-string">"hash"</span>: <span class="syntax-string">"&lt;blake2b-hash&gt;"</span>
+}</code></pre>
+            </div>
+        </div>
+
+        <h3>SQLite State</h3>
+        <p>Each folder tracked in SQLite:</p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">schema.sql</span>
+            </div>
+            <div class="code-body">
+<pre><code><span class="syntax-keyword">CREATE TABLE</span> files (
+  path <span class="syntax-type">TEXT PRIMARY KEY</span>,
+  size <span class="syntax-type">INTEGER</span>,
+  mtime <span class="syntax-type">INTEGER</span>,
+  hash <span class="syntax-type">BLOB</span>,
+  synced <span class="syntax-type">INTEGER</span>,
+  last_sync <span class="syntax-type">INTEGER</span>
+);</code></pre>
+            </div>
+        </div>
+
+        <h2>Control API</h2>
+
+        <p>Local HTTP server (default port 17521) for GUI communication:</p>
+
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Endpoint</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>GET /status</code></td>
+                    <td>Runtime status</td>
+                </tr>
+                <tr>
+                    <td><code>GET /buddies</code></td>
+                    <td>Buddy list with connection state</td>
+                </tr>
+                <tr>
+                    <td><code>GET /folders</code></td>
+                    <td>Folder list with sync status</td>
+                </tr>
+                <tr>
+                    <td><code>POST /folders</code></td>
+                    <td>Add folder</td>
+                </tr>
+                <tr>
+                    <td><code>DELETE /folders/:name</code></td>
+                    <td>Remove folder</td>
+                </tr>
+                <tr>
+                    <td><code>POST /sync/:folder</code></td>
+                    <td>Trigger sync</td>
+                </tr>
+                <tr>
+                    <td><code>POST /buddies/pairing-code</code></td>
+                    <td>Generate pairing code</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p>API reads from SQLite, avoiding thread safety issues.</p>
+
+        <h2>Cryptography</h2>
+
+        <h3>Key Hierarchy</h3>
+        <div class="diagram">
+<pre>
+Master Key (per installation)
+    │
+    ├── Identity Key Pair (X25519)
+    │       Used for: authentication, key exchange
+    │
+    └── Per-Buddy Shared Secret
+            Derived via: X25519 key exchange
+            Used for: session encryption
+</pre>
+        </div>
+
+        <h3>File Encryption</h3>
+        <p>Each file encrypted with unique key:</p>
+        <ol>
+            <li><strong>Generate random key</strong> (32 bytes)</li>
+            <li><strong>Encrypt file</strong> with XSalsa20-Poly1305</li>
+            <li><strong>Encrypt key</strong> with buddy's shared secret</li>
+            <li><strong>Store together</strong> as encrypted blob</li>
+        </ol>
+
+        <h3>Message Authentication</h3>
+        <p>Every message authenticated:</p>
+        <ul>
+            <li>Poly1305 MAC for file chunks</li>
+            <li>Blake2b hash for integrity</li>
+            <li>Sequence numbers prevent replay</li>
+        </ul>
+
+        <h2>Data Flow</h2>
+
+        <h3>Syncing a New File</h3>
+        <ol>
+            <li>User adds file to <code>~/SyncedFolder/photo.jpg</code></li>
+            <li>Daemon detects change: scanner finds new file, calculates Blake2b hash, adds to SQLite index</li>
+            <li>Sync triggered: request sent to buddy, buddy accepts and creates storage slot</li>
+            <li>Transfer: file encrypted locally, sent in 64KB chunks, buddy stores encrypted</li>
+            <li>Complete: mark synced in SQLite, GUI shows progress</li>
+        </ol>
+
+        <h2>Performance</h2>
+
+        <h3>Memory</h3>
+        <ul>
+            <li>~50MB baseline</li>
+            <li>Additional ~10MB per active sync</li>
+        </ul>
+
+        <h3>CPU</h3>
+        <ul>
+            <li>Encryption: ~100MB/s on modern CPU</li>
+            <li>Hashing: ~200MB/s</li>
+            <li>Sync overhead: minimal when idle</li>
+        </ul>
+
+        <h3>Network</h3>
+        <ul>
+            <li>Chunked transfer for large files</li>
+            <li>Compression for text (planned)</li>
+            <li>Bandwidth throttling (planned)</li>
+        </ul>
+
+        <h3>Disk</h3>
+        <ul>
+            <li>Encrypted files: ~5% larger than originals</li>
+            <li>SQLite index: ~1KB per file</li>
+        </ul>
+
+        <h2>Limitations</h2>
+
+        <h3>Current</h3>
+        <ul>
+            <li>Sync triggered manually (auto in progress)</li>
+            <li>One buddy per folder</li>
+            <li>No delta sync for large files</li>
+            <li>No selective download</li>
+        </ul>
+
+        <h3>Planned</h3>
+        <ul>
+            <li>Automatic background sync</li>
+            <li>Multiple buddies per folder</li>
+            <li>Delta sync (rsync-style)</li>
+            <li>Compression for text files</li>
+            <li>Mobile apps</li>
+        </ul>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <a href="index.html" class="logo">
+                        <img src="images/buddydrive-icon.png" alt="BuddyDrive" class="logo-img">
+                        <span class="logo-text">BuddyDrive</span>
+                    </a>
+                    <p>Backup your life, with a friend.</p>
+                </div>
+                <div class="footer-column">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/gokr/buddydrive">GitHub</a></li>
+                        <li><a href="docs.html">Documentation</a></li>
+                        <li><a href="features.html">Features</a></li>
+                        <li><a href="security.html">Security</a></li>
+                        <li><a href="how-it-works.html">How It Works</a></li>
+                    </ul>
+                </div>
+                <div class="footer-column">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://github.com/gokr/buddydrive/issues">Issues</a></li>
+                        <li><a href="https://github.com/gokr/buddydrive/discussions">Discussions</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>Released under the MIT License.</p>
+                <p>100% Open Source. Your data, your rules.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

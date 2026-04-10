@@ -1,5 +1,7 @@
 import std/times
 
+const DefaultP2PPort* = 41721
+
 type
   BuddyId* = object
     uuid*: string
@@ -9,6 +11,7 @@ type
     id*: BuddyId
     publicKey*: string
     addresses*: seq[string]
+    relayToken*: string
     addedAt*: Time
   
   FolderConfig* = object
@@ -19,6 +22,10 @@ type
   
   AppConfig* = object
     buddy*: BuddyId
+    listenPort*: int
+    announceAddr*: string
+    relayBaseUrl*: string
+    relayRegion*: string
     folders*: seq[FolderConfig]
     buddies*: seq[BuddyInfo]
   
@@ -84,5 +91,9 @@ proc newFolderConfig*(name, path: string, encrypted = true): FolderConfig =
 
 proc newAppConfig*(buddy: BuddyId): AppConfig =
   result.buddy = buddy
+  result.listenPort = DefaultP2PPort
+  result.announceAddr = ""
+  result.relayBaseUrl = ""
+  result.relayRegion = ""
   result.folders = @[]
   result.buddies = @[]

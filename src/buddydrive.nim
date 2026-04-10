@@ -11,7 +11,7 @@ when isMainModule:
   of cmdInit:
     handleInit()
   of cmdConfig:
-    handleConfig()
+    handleConfig(cmd)
   of cmdAddFolder:
     handleAddFolder(cmd)
   of cmdRemoveFolder:

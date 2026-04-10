@@ -10,7 +10,9 @@ import libp2p/multiaddress
 import libp2p/crypto/crypto
 import libp2p/protocols/kademlia
 import libp2p/protocols/kademlia/types
+import libp2p/protocols/kademlia/find
 import synchsandler
+import ../types
 
 export results
 
@@ -24,6 +26,8 @@ type
     dht*: KadDHT
     privKey*: PrivateKey
     pubKey*: PublicKey
+    listenPort*: int
+    announceAddrs*: seq[MultiAddress]
     started*: bool
     startTime*: Time
 
@@ -56,20 +60,32 @@ proc generateKeyPair*(): (PublicKey, PrivateKey) =
   let pubKey = privKey.getPublicKey().tryGet()
   result = (pubKey, privKey)
 
-proc newBuddyNode*(privKey: PrivateKey): BuddyNode =
+proc newBuddyNode*(
+    privKey: PrivateKey,
+    listenPort: int = DefaultP2PPort,
+    announceAddrs: seq[MultiAddress] = @[]
+): BuddyNode =
   result = BuddyNode()
   result.started = false
   
   result.pubKey = privKey.getPublicKey().tryGet()
   result.privKey = privKey
+  result.listenPort = listenPort
+  result.announceAddrs = announceAddrs
   
   let peerId = PeerID.init(result.pubKey).tryGet()
   result.peerId = peerId
   result.peerInfo = PeerInfo.new(privKey)
 
 proc newBuddyNode*(): BuddyNode =
-  let (pubKey, privKey) = generateKeyPair()
+  let (_, privKey) = generateKeyPair()
   result = newBuddyNode(privKey)
+
+proc newBuddyNode*(listenPort: int, announceAddrs: seq[MultiAddress] = @[]): BuddyNode =
+  let (_, privKey) = generateKeyPair()
+  result = newBuddyNode(privKey, listenPort, announceAddrs)
+
+proc bootstrapDht*(node: BuddyNode): Future[void] {.async.}
 
 proc start*(node: BuddyNode): Future[void] {.async.} =
   if node.started:
@@ -77,12 +93,14 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
   
   var listenAddrs: seq[MultiAddress] = @[]
   try:
-    listenAddrs.add(MultiAddress.init("/ip4/0.0.0.0/tcp/0").tryGet())
+    listenAddrs.add(MultiAddress.init("/ip4/0.0.0.0/tcp/" & $node.listenPort).tryGet())
   except:
     discard
   
-  # Build switch with DHT (no bootstrap nodes - peers connect directly)
-  # DHT works locally for peer discovery once connected
+  let bootstrapNodes = getBootstrapNodes()
+
+  # Start the libp2p switch first, then create a client-side Kademlia instance.
+  # Mounting Kademlia into the switch causes startup to block while it bootstraps.
   let switch = SwitchBuilder.new()
     .withRng(newRng())
     .withPrivateKey(node.privKey)
@@ -90,7 +108,6 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
     .withNoise()
     .withYamux()
     .withTcpTransport()
-    .withKademlia(@[])
     .build()
   
   # Mount the sync protocol handler
@@ -104,14 +121,27 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
   node.peerInfo = switch.peerInfo
   node.peerId = switch.peerInfo.peerId
   
-  # Find DHT in multistream handlers
-  for holder in switch.ms.handlers:
-    if holder.protocol of KadDHT:
-      node.dht = KadDHT(holder.protocol)
-      break
-  
+  # Use Kademlia as an outbound DHT client so we can query public peers without
+  # blocking switch startup or requiring an inbound Kademlia handler.
+  node.dht = KadDHT.new(switch, bootstrapNodes = bootstrapNodes, client = true)
+  node.dht.updatePeers(bootstrapNodes)
+
   node.started = true
   node.startTime = getTime()
+  asyncSpawn node.bootstrapDht()
+
+proc bootstrapDht*(node: BuddyNode): Future[void] {.async.} =
+  if node.dht == nil:
+    return
+
+  try:
+    let fut = node.dht.bootstrap()
+    if not await fut.withTimeout(chronos.seconds(45)):
+      echo "DHT bootstrap timed out"
+      return
+    echo "DHT bootstrap completed"
+  except Exception as e:
+    echo "DHT bootstrap failed: ", e.msg
 
 proc stop*(node: BuddyNode): Future[void] {.async.} =
   if not node.started:
@@ -124,6 +154,11 @@ proc getAddrs*(node: BuddyNode): seq[MultiAddress] =
   if not node.started:
     return @[]
   result = node.peerInfo.addrs
+
+proc getAdvertisedAddrs*(node: BuddyNode): seq[MultiAddress] =
+  if node.announceAddrs.len > 0:
+    return node.announceAddrs
+  node.getAddrs()
 
 proc peerIdStr*(node: BuddyNode): string =
   $node.peerId

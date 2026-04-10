@@ -2,6 +2,7 @@ import std/times
 import results
 import chronos
 import libp2p
+import libp2p/protocols/protocol
 import libp2p/stream/connection
 import node
 import messages
@@ -168,3 +169,13 @@ proc close*(bc: BuddyConnection) {.async.} =
       discard
   bc.state = psNone
   bc.conn = nil
+
+proc newPairingHandler*(handlerProc: proc(conn: Connection): Future[void] {.closure, gcsafe, raises: [CancelledError].}): LPProtocol =
+  let handler = proc(conn: Connection, proto: string): Future[void] {.closure, gcsafe, async: (raises: [CancelledError]).} =
+    try:
+      await handlerProc(conn)
+    except CancelledError:
+      raise
+    except CatchableError:
+      discard
+  LPProtocol.new(@[PairingProtocol], handler)

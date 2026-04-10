@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Features - BuddyDrive</title>
+    <meta name="description" content="Detailed features of BuddyDrive: end-to-end encryption, peer-to-peer sync, automatic file sync, and more.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="images/buddydrive-icon.png" type="image/png">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <a href="index.html" class="logo">
+                <img src="images/buddydrive-icon.png" alt="BuddyDrive" class="logo-img">
+                <span class="logo-text">BuddyDrive</span>
+            </a>
+            <button class="nav-toggle" aria-label="Toggle navigation">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-menu">
+                <li><a href="features.html">Features</a></li>
+                <li><a href="security.html">Security</a></li>
+                <li><a href="how-it-works.html">How It Works</a></li>
+                <li><a href="docs.html">Docs</a></li>
+                <li><a href="https://github.com/gokr/buddydrive" class="nav-cta">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="page-header">
+        <div class="container">
+            <h1>Features</h1>
+            <p>Everything you need for secure, private offsite backup.</p>
+        </div>
+    </header>
+
+    <main class="content-page">
+        <h2>Core Features</h2>
+
+        <h3>End-to-End Encryption</h3>
+        <p>BuddyDrive encrypts every file before transmission using modern cryptographic standards:</p>
+        <ul>
+            <li><strong>NaCl/libsodium</strong> for authenticated encryption</li>
+            <li><strong>X25519</strong> key exchange for secure pairing</li>
+            <li><strong>XSalsa20-Poly1305</strong> for file encryption</li>
+            <li><strong>Blake2b</strong> for integrity verification</li>
+        </ul>
+        <p>Your buddy stores encrypted blobs. They cannot read your files. Even with physical access to their machine, your data remains private.</p>
+
+        <h3>Peer-to-Peer Architecture</h3>
+        <p>No central server. No cloud. No middleman.</p>
+        <pre><code>Your Machine &lt;--encrypted channel--&gt; Buddy's Machine</code></pre>
+        <p>Both machines connect directly using libp2p, the same technology powering IPFS. Features:</p>
+        <ul>
+            <li><strong>DHT-based peer discovery</strong> - find your buddy even behind home routers</li>
+            <li><strong>NAT traversal</strong> - works without port forwarding</li>
+            <li><strong>Multi-address support</strong> - connects via IP, TCP, and more</li>
+            <li><strong>Yamux multiplexing</strong> - efficient multiple streams over one connection</li>
+        </ul>
+
+        <h3>Automatic File Sync</h3>
+        <p>Once paired and configured, BuddyDrive runs in the background:</p>
+        <ul>
+            <li><strong>File change detection</strong> - notices new, modified, and deleted files</li>
+            <li><strong>Incremental sync</strong> - only transfers what changed</li>
+            <li><strong>Chunked transfer</strong> - handles large files efficiently</li>
+            <li><strong>Resume support</strong> - interrupted syncs continue where they left off</li>
+        </ul>
+
+        <h3>Selective Folder Sync</h3>
+        <p>Choose exactly what to share:</p>
+        <ul>
+            <li>Sync your Photos folder with your parents</li>
+            <li>Sync Documents with your work partner</li>
+            <li>Each buddy can have different folders</li>
+            <li>Exclude sensitive files or subdirectories</li>
+        </ul>
+
+        <h3>Real-Time Status</h3>
+        <p>GTK4 desktop application shows:</p>
+        <ul>
+            <li>Connection status for each buddy</li>
+            <li>Sync progress per folder</li>
+            <li>File counts and bytes transferred</li>
+            <li>Recent activity log</li>
+        </ul>
+        <p>Command-line interface for headless servers.</p>
+
+        <h2>Security Features</h2>
+
+        <h3>Secure Pairing</h3>
+        <p>Pairing uses a 6-character code that you share with your buddy out-of-band (in person, text, call). This prevents man-in-the-middle attacks:</p>
+        <ol>
+            <li>Generate pairing code on your machine</li>
+            <li>Share code with your buddy</li>
+            <li>They enter the code on their machine</li>
+            <li>Cryptographic keys exchange securely</li>
+            <li>Devices paired, ready to sync</li>
+        </ol>
+        <p>Each pairing creates unique encryption keys. Compromise one buddy, others remain secure.</p>
+
+        <h3>Encrypted At Rest</h3>
+        <p>Files are encrypted before storage on your buddy's machine:</p>
+        <ul>
+            <li>Original filename hidden</li>
+            <li>File contents encrypted</li>
+            <li>Directory structure hidden</li>
+            <li>Timestamps protected</li>
+        </ul>
+        <p>Even with physical access to your buddy's hard drive, your data is unreadable.</p>
+
+        <h2>Sync Features</h2>
+
+        <h3>Conflict Handling</h3>
+        <p>When both you and your buddy edit the same file:</p>
+        <ul>
+            <li><strong>Last-write-wins</strong> by default</li>
+            <li><strong>Version history</strong> kept for recovery</li>
+            <li><strong>Manual resolution</strong> option available</li>
+        </ul>
+
+        <h3>Large File Support</h3>
+        <ul>
+            <li>Files split into 64KB chunks</li>
+            <li>Resume interrupted transfers</li>
+            <li>Deduplication saves bandwidth</li>
+        </ul>
+
+        <h2>Platform Support</h2>
+
+        <h3>Linux</h3>
+        <p>Native packages for major distributions. GTK4 GUI with desktop integration.</p>
+
+        <h3>macOS</h3>
+        <p>Native app bundle with menu bar integration.</p>
+
+        <h3>Windows</h3>
+        <p>Standalone executable with system tray icon.</p>
+
+        <h3>Headless</h3>
+        <p>Run on servers, NAS boxes, or Raspberry Pi with command-line interface only.</p>
+
+        <h2>Technical Stack</h2>
+
+        <p>Built with modern, proven technologies:</p>
+        <ul>
+            <li><strong>Nim</strong> - high-performance systems language</li>
+            <li><strong>libp2p</strong> - peer-to-peer networking</li>
+            <li><strong>libsodium</strong> - cryptography</li>
+            <li><strong>GTK4</strong> - native GUI</li>
+            <li><strong>SQLite</strong> - file tracking database</li>
+        </ul>
+
+        <h2>Limitations</h2>
+
+        <p>Current limitations to be aware of:</p>
+        <ul>
+            <li>Sync triggers manually (auto-sync in progress)</li>
+            <li>One buddy per folder (multiple buddies planned)</li>
+            <li>No mobile apps yet</li>
+            <li>No file versioning yet</li>
+        </ul>
+
+        <h2>Roadmap</h2>
+
+        <p>Current version: <strong>0.1.0</strong></p>
+
+        <p>Upcoming features:</p>
+        <ul>
+            <li><strong>Mobile apps</strong> - iOS and Android</li>
+            <li><strong>Versioning</strong> - keep multiple file versions</li>
+            <li><strong>Selective download</strong> - choose which files to fetch</li>
+            <li><strong>Bandwidth scheduling</strong> - sync only at night</li>
+            <li><strong>Multiple buddies</strong> - sync with more than one person</li>
+            <li><strong>Compression</strong> - reduce bandwidth for text files</li>
+        </ul>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <a href="index.html" class="logo">
+                        <img src="images/buddydrive-icon.png" alt="BuddyDrive" class="logo-img">
+                        <span class="logo-text">BuddyDrive</span>
+                    </a>
+                    <p>Backup your life, with a friend.</p>
+                </div>
+                <div class="footer-column">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/gokr/buddydrive">GitHub</a></li>
+                        <li><a href="docs.html">Documentation</a></li>
+                        <li><a href="features.html">Features</a></li>
+                        <li><a href="security.html">Security</a></li>
+                        <li><a href="how-it-works.html">How It Works</a></li>
+                    </ul>
+                </div>
+                <div class="footer-column">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://github.com/gokr/buddydrive/issues">Issues</a></li>
+                        <li><a href="https://github.com/gokr/buddydrive/discussions">Discussions</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>Released under the MIT License.</p>
+                <p>100% Open Source. Your data, your rules.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -40,6 +40,10 @@ type
     folderName*: string
     folderEncrypted*: bool
     buddyId*: string
+    configAction*: string
+    configKey*: string
+    configTarget*: string
+    configValue*: string
     pairingCode*: string
     peerAddr*: string
     generateCode*: bool
@@ -56,6 +60,7 @@ Usage: buddydrive <command> [options]
 Commands:
   init                      Initialize BuddyDrive (generate identity)
   config                    Show current configuration
+  config set <key> ...      Update configuration values
   add-folder <path>         Add a folder to sync
     --name <name>           Folder name (required)
     --no-encrypt            Don't encrypt files
@@ -79,6 +84,9 @@ Commands:
 
 Examples:
   buddydrive init
+  buddydrive config set relay-base-url https://buddydrive.net/relays
+  buddydrive config set relay-region eu
+  buddydrive config set buddy-relay-token abc123 swift-eagle
   buddydrive add-folder ~/Documents --name docs
   buddydrive add-buddy --generate-code
   buddydrive add-buddy --id abc123 --code XYZ789
@@ -92,6 +100,10 @@ proc parseCli*(): CommandLine =
   result = CommandLine(
     command: cmdNone,
     folderEncrypted: true,
+    configAction: "",
+    configKey: "",
+    configTarget: "",
+    configValue: "",
     generateCode: false,
     daemon: false,
     controlPort: DefaultControlPort,
@@ -179,6 +191,24 @@ proc parseCli*(): CommandLine =
   
   if args.len > 1:
     case result.command
+    of cmdConfig:
+      result.configAction = args[1].toLowerAscii()
+      if result.configAction == "set":
+        if args.len >= 4:
+          result.configKey = args[2].toLowerAscii()
+          case result.configKey
+          of "relay-base-url", "relay_base_url", "relay-region", "relay_region":
+            result.configValue = args[3]
+          of "buddy-relay-token", "buddy_relay_token", "buddy-name", "buddy_name":
+            if args.len >= 5:
+              result.configTarget = args[3]
+              result.configValue = args[4]
+            else:
+              result.showHelp = true
+          else:
+            result.showHelp = true
+        else:
+          result.showHelp = true
     of cmdAddFolder:
       result.folderPath = args[1]
     of cmdRemoveFolder:
@@ -189,6 +219,9 @@ proc parseCli*(): CommandLine =
       result.peerAddr = args[1]
     else:
       discard
+
+  if result.showHelp:
+    result.command = cmdHelp
 
 proc handleInit*() =
   var configExists = config.configExists()
@@ -210,21 +243,77 @@ proc handleInit*() =
   echo ""
   echo "Config created at: ", config.getConfigPath()
   echo ""
+  echo "Network defaults:"
+  echo "  Listen port: 41721"
+  echo "  Announce addr: (set [network].announce_addr after forwarding this port on your router)"
+  echo "  Relay base URL: (set with 'buddydrive config set relay-base-url <url>')"
+  echo "  Relay region: (set with 'buddydrive config set relay-region <region>')"
+  echo ""
   echo "Next steps:"
   echo "  1. Add a folder: buddydrive add-folder <path> --name <name>"
   echo "  2. Pair with a buddy: buddydrive add-buddy --generate-code"
   echo "  3. Start syncing: buddydrive start"
 
-proc handleConfig*() =
+proc handleConfig*(cmd: CommandLine) =
   if not config.configExists():
     echo "No config found. Run 'buddydrive init' first."
     return
-  
+
+  if cmd.configAction == "set":
+    var cfg = loadConfig()
+
+    case cmd.configKey
+    of "relay-base-url", "relay_base_url":
+      cfg.relayBaseUrl = cmd.configValue
+      saveConfig(cfg)
+      echo "Relay base URL set to: ", cfg.relayBaseUrl
+      return
+    of "relay-region", "relay_region":
+      cfg.relayRegion = cmd.configValue.toLowerAscii()
+      saveConfig(cfg)
+      echo "Relay region set to: ", cfg.relayRegion
+      return
+    of "buddy-relay-token", "buddy_relay_token":
+      let idx = cfg.getBuddy(cmd.configTarget)
+      if idx < 0:
+        echo "Buddy not found: ", cmd.configTarget.shortId()
+        return
+      cfg.buddies[idx].relayToken = cmd.configValue
+      saveConfig(cfg)
+      echo "Relay token set for buddy: ", cfg.buddies[idx].id.uuid.shortId()
+      return
+    of "buddy-name", "buddy_name":
+      let idx = cfg.getBuddy(cmd.configTarget)
+      if idx < 0:
+        echo "Buddy not found: ", cmd.configTarget.shortId()
+        return
+      cfg.buddies[idx].id.name = cmd.configValue
+      saveConfig(cfg)
+      echo "Buddy name set to: ", cfg.buddies[idx].id.name
+      return
+    else:
+      echo "Unknown config key: ", cmd.configKey
+      echo "Supported keys: relay-base-url, relay-region, buddy-relay-token, buddy-name"
+      return
+
   let cfg = loadConfig()
   
   echo "Buddy: ", cfg.buddy.name
   echo "  ID: ", cfg.buddy.uuid
   echo "  Config: ", config.getConfigPath()
+  echo "  Listen port: ", cfg.listenPort
+  if cfg.announceAddr.len > 0:
+    echo "  Announce addr: ", cfg.announceAddr
+  else:
+    echo "  Announce addr: (not set)"
+  if cfg.relayBaseUrl.len > 0:
+    echo "  Relay base URL: ", cfg.relayBaseUrl
+  else:
+    echo "  Relay base URL: (not set)"
+  if cfg.relayRegion.len > 0:
+    echo "  Relay region: ", cfg.relayRegion
+  else:
+    echo "  Relay region: (not set)"
   echo ""
   
   if cfg.folders.len > 0:
@@ -242,6 +331,8 @@ proc handleConfig*() =
     for buddy in cfg.buddies:
       echo "  ", buddy.id.name, " (", shortId(buddy.id.uuid), ")"
       echo "    ID: ", buddy.id.uuid
+      if buddy.relayToken.len > 0:
+        echo "    Relay token: ", buddy.relayToken
       echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired yet."
@@ -370,6 +461,8 @@ proc handleAddBuddy*(cmd: CommandLine) =
   
   echo "Buddy added: ", cmd.buddyId.shortId()
   echo "Note: P2P connection will be established when both sides start the daemon."
+  echo "If using relay fallback, set a shared token with:"
+  echo "  buddydrive config set buddy-relay-token ", cmd.buddyId, " <token>"
 
 proc handleRemoveBuddy*(cmd: CommandLine) =
   if not config.configExists():
@@ -403,6 +496,8 @@ proc handleListBuddies*() =
   for buddy in cfg.buddies:
     echo "  ", buddy.id.name, " (", buddy.id.uuid.shortId(), ")"
     echo "    ID: ", buddy.id.uuid
+    if buddy.relayToken.len > 0:
+      echo "    Relay token: ", buddy.relayToken
     echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
 
 proc handleConnect*(cmd: CommandLine) =
@@ -447,6 +542,14 @@ proc handleStart*(cmd: CommandLine) =
       echo ""
       echo "Listening addresses:"
       for address in daemon.node.getAddrs():
+        let addrStr = multiaddress.toString(address)
+        if addrStr.isOk:
+          echo "  ", addrStr.get()
+        else:
+          echo "  (invalid address)"
+      echo ""
+      echo "Advertised addresses:"
+      for address in daemon.node.getAdvertisedAddrs():
         let addrStr = multiaddress.toString(address)
         if addrStr.isOk:
           echo "  ", addrStr.get()
@@ -502,6 +605,8 @@ proc handleStatus*() =
     for buddy in cfg.buddies:
       echo "  ", buddy.id.name, " (", buddy.id.uuid.shortId(), ")"
       echo "    Status: Offline"
+      if buddy.relayToken.len > 0:
+        echo "    Relay token: ", buddy.relayToken
       echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired."

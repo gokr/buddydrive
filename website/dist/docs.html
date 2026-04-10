@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation - BuddyDrive</title>
+    <meta name="description" content="Get started with BuddyDrive. Installation guide, CLI reference, and troubleshooting.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="images/buddydrive-icon.png" type="image/png">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <a href="index.html" class="logo">
+                <img src="images/buddydrive-icon.png" alt="BuddyDrive" class="logo-img">
+                <span class="logo-text">BuddyDrive</span>
+            </a>
+            <button class="nav-toggle" aria-label="Toggle navigation">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-menu">
+                <li><a href="features.html">Features</a></li>
+                <li><a href="security.html">Security</a></li>
+                <li><a href="how-it-works.html">How It Works</a></li>
+                <li><a href="docs.html">Docs</a></li>
+                <li><a href="https://github.com/gokr/buddydrive" class="nav-cta">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="page-header">
+        <div class="container">
+            <h1>Getting Started</h1>
+            <p>Install, pair, and start syncing in minutes.</p>
+        </div>
+    </header>
+
+    <main class="content-page">
+        <h2>Quick Start</h2>
+
+        <h3>Prerequisites</h3>
+        <ul>
+            <li>Linux, macOS, or Windows</li>
+            <li>Internet connection</li>
+            <li>A friend with BuddyDrive installed</li>
+        </ul>
+
+        <h3>Install</h3>
+
+        <p><strong>Linux:</strong></p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code><span class="syntax-comment"># Download the latest release</span>
+curl -LO https://github.com/gokr/buddydrive/releases/latest/buddydrive-linux-x64.tar.gz
+tar xzf buddydrive-linux-x64.tar.gz
+sudo mv buddydrive /usr/local/bin/
+
+<span class="syntax-comment"># Or build from source</span>
+git clone https://github.com/gokr/buddydrive
+cd buddydrive
+nimble build</code></pre>
+            </div>
+        </div>
+
+        <p><strong>macOS:</strong> Download DMG or build from source (requires Xcode command line tools).</p>
+
+        <p><strong>Windows:</strong> Download ZIP or build from source (requires Visual Studio Build Tools).</p>
+
+        <h3>Initialize</h3>
+
+        <p>First time setup creates your identity:</p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive init</code></pre>
+            </div>
+        </div>
+
+        <p>This generates:</p>
+        <ul>
+            <li>Your unique buddy ID</li>
+            <li>Cryptographic key pair</li>
+            <li>Configuration file at <code>~/.buddydrive/config.toml</code></li>
+        </ul>
+
+        <h3>Pair With a Buddy</h3>
+
+        <p><strong>On your machine:</strong></p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive add-buddy --generate-code
+
+Your pairing code: <span class="syntax-string">ABCD-EFGH</span>
+Share this code with your buddy. Code expires in 5 minutes.
+
+Your buddy ID: <span class="syntax-string">fcd6295c-a912-44d4-a27b-ad898795207d</span></code></pre>
+            </div>
+        </div>
+
+        <p><strong>On your buddy's machine:</strong></p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive add-buddy --id <span class="syntax-string">&lt;your-buddy-id&gt;</span> --code <span class="syntax-string">ABCD-EFGH</span>
+
+Paired with: <span class="syntax-string">&lt;your-name&gt;</span> (fcd6295c...)</code></pre>
+            </div>
+        </div>
+
+        <h3>Add a Folder</h3>
+
+        <p>Configure a folder to sync:</p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive add-folder ~/Documents --name docs</code></pre>
+            </div>
+        </div>
+
+        <p>Options:</p>
+        <ul>
+            <li><code>--name</code> - Friendly name for the folder (required)</li>
+            <li><code>--no-encrypt</code> - Disable encryption (not recommended)</li>
+            <li><code>--buddy &lt;id&gt;</code> - Share with specific buddy</li>
+        </ul>
+
+        <h3>Start Syncing</h3>
+
+        <p>Start the daemon:</p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive start</code></pre>
+            </div>
+        </div>
+
+        <p>For background operation:</p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive start --daemon</code></pre>
+            </div>
+        </div>
+
+        <h3>Check Status</h3>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive status
+
+BuddyDrive Status
+Running: true
+Uptime: 2h 15m
+Peer ID: 16Uiu2HAk...
+
+Folders:
+  docs
+    Path: /home/you/Documents
+    Files: 234
+    Status: synced
+
+Buddies:
+  Alice (fcd6295c...)
+    Status: connected
+    Last sync: 5 minutes ago</code></pre>
+            </div>
+        </div>
+
+        <h3>Stop the Daemon</h3>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive stop</code></pre>
+            </div>
+        </div>
+
+        <h2>GUI</h2>
+
+        <h3>Launch</h3>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive-gui</code></pre>
+            </div>
+        </div>
+
+        <p>Or from your desktop menu: <strong>BuddyDrive</strong></p>
+
+        <h3>Features</h3>
+        <ul>
+            <li><strong>Status panel</strong> - daemon running, identity, uptime</li>
+            <li><strong>Folders list</strong> - all configured folders with sync status</li>
+            <li><strong>Buddies list</strong> - paired buddies with connection state</li>
+            <li><strong>Add folder dialog</strong> - select path, name, encryption</li>
+            <li><strong>Pair dialog</strong> - generate or enter pairing codes</li>
+        </ul>
+
+        <h3>Controls</h3>
+        <ul>
+            <li><strong>Refresh</strong> - update status from daemon</li>
+            <li><strong>Sync All</strong> - sync all folders</li>
+            <li><strong>Sync</strong> (per folder) - sync individual folder</li>
+            <li><strong>Remove</strong> - remove folder or buddy</li>
+        </ul>
+
+        <h2>CLI Reference</h2>
+
+        <h3>Commands</h3>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">commands</span>
+            </div>
+            <div class="code-body">
+<pre><code>buddydrive init                        <span class="syntax-comment"># Initialize BuddyDrive</span>
+buddydrive config                      <span class="syntax-comment"># Show configuration</span>
+buddydrive add-folder &lt;path&gt;           <span class="syntax-comment"># Add folder to sync</span>
+  --name &lt;name&gt;                        <span class="syntax-comment"># Folder name (required)</span>
+  --no-encrypt                          <span class="syntax-comment"># Don't encrypt files</span>
+  --buddy &lt;id&gt;                         <span class="syntax-comment"># Share with buddy</span>
+buddydrive remove-folder &lt;name&gt;        <span class="syntax-comment"># Remove folder</span>
+buddydrive list-folders                <span class="syntax-comment"># List configured folders</span>
+buddydrive add-buddy                   <span class="syntax-comment"># Pair with buddy</span>
+  --generate-code                      <span class="syntax-comment"># Generate pairing code</span>
+  --id &lt;buddy-id&gt;                      <span class="syntax-comment"># Buddy ID to pair with</span>
+  --code &lt;code&gt;                        <span class="syntax-comment"># Pairing code from buddy</span>
+buddydrive remove-buddy &lt;id&gt;          <span class="syntax-comment"># Remove buddy</span>
+buddydrive list-buddies                <span class="syntax-comment"># List paired buddies</span>
+buddydrive connect &lt;address&gt;           <span class="syntax-comment"># Connect manually</span>
+buddydrive start                       <span class="syntax-comment"># Start sync daemon</span>
+  --daemon                             <span class="syntax-comment"># Run in background</span>
+buddydrive stop                        <span class="syntax-comment"># Stop sync daemon</span>
+buddydrive status                      <span class="syntax-comment"># Show sync status</span>
+buddydrive logs                        <span class="syntax-comment"># Show recent logs</span>
+buddydrive help                        <span class="syntax-comment"># Show help</span></code></pre>
+            </div>
+        </div>
+
+        <h3>Examples</h3>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">examples</span>
+            </div>
+            <div class="code-body">
+<pre><code><span class="syntax-comment"># Pair with a buddy</span>
+buddydrive add-buddy --generate-code
+<span class="syntax-comment"># (share code with buddy)</span>
+buddydrive add-buddy --id abc123 --code XYZ-789
+
+<span class="syntax-comment"># Add multiple folders</span>
+buddydrive add-folder ~/Photos --name photos
+buddydrive add-folder ~/Documents --name docs
+buddydrive add-folder ~/Projects --name projects
+
+<span class="syntax-comment"># Check what's configured</span>
+buddydrive list-folders
+buddydrive list-buddies
+
+<span class="syntax-comment"># Start and monitor</span>
+buddydrive start --daemon
+buddydrive status
+buddydrive logs
+
+<span class="syntax-comment"># Stop</span>
+buddydrive stop</code></pre>
+            </div>
+        </div>
+
+        <h2>Configuration</h2>
+
+        <p>Config stored at <code>~/.buddydrive/config.toml</code>:</p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">config.toml</span>
+            </div>
+            <div class="code-body">
+<pre><code>[buddy]
+name = <span class="syntax-string">"Alice"</span>
+uuid = <span class="syntax-string">"fcd6295c-a912-44d4-a27b-ad898795207d"</span>
+
+[[folders]]
+name = <span class="syntax-string">"docs"</span>
+path = <span class="syntax-string">"/home/alice/Documents"</span>
+encrypted = <span class="syntax-keyword">true</span>
+buddies = [<span class="syntax-string">"bob-uuid"</span>]
+
+[[buddies]]
+id = { uuid = <span class="syntax-string">"bob-uuid"</span>, name = <span class="syntax-string">"Bob"</span> }
+publicKey = <span class="syntax-string">"abc123..."</span>
+addedAt = 2024-01-15T10:30:00Z</code></pre>
+            </div>
+        </div>
+
+        <p>Edit with care. Better to use CLI commands.</p>
+
+        <h2>Files</h2>
+
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Location</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>~/.buddydrive/config.toml</code></td>
+                    <td>Configuration</td>
+                </tr>
+                <tr>
+                    <td><code>~/.buddydrive/state.db</code></td>
+                    <td>Runtime state (SQLite)</td>
+                </tr>
+                <tr>
+                    <td><code>~/.buddydrive/buddydrive.log</code></td>
+                    <td>Logs</td>
+                </tr>
+                <tr>
+                    <td><code>~/.buddydrive/port</code></td>
+                    <td>Control API port</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>Troubleshooting</h2>
+
+        <h3>Daemon won't start</h3>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code><span class="syntax-comment"># Check if already running</span>
+ps aux | grep buddydrive
+
+<span class="syntax-comment"># Check logs</span>
+cat ~/.buddydrive/buddydrive.log
+
+<span class="syntax-comment"># Check config</span>
+buddydrive config</code></pre>
+            </div>
+        </div>
+
+        <h3>Can't connect to buddy</h3>
+        <ol>
+            <li>Both need internet access</li>
+            <li>Both need buddydrive running</li>
+            <li>Check pairing status: <code>buddydrive list-buddies</code></li>
+            <li>Try regenerating pairing codes</li>
+        </ol>
+
+        <h3>Files not syncing</h3>
+        <ol>
+            <li>Check daemon running: <code>buddydrive status</code></li>
+            <li>Check folder configured: <code>buddydrive list-folders</code></li>
+            <li>Check buddy connected in GUI or status output</li>
+            <li>Manually trigger: GUI "Sync" button or API call</li>
+        </ol>
+
+        <h3>Pairing code expired</h3>
+        <p>Codes expire after 5 minutes. Generate a new one:</p>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code>$ buddydrive add-buddy --generate-code</code></pre>
+            </div>
+        </div>
+
+        <h3>Reset everything</h3>
+
+        <div class="code-window">
+            <div class="code-header">
+                <div class="code-dots"><span></span><span></span><span></span></div>
+                <span class="code-title">terminal</span>
+            </div>
+            <div class="code-body">
+<pre><code><span class="syntax-comment"># Stop daemon</span>
+buddydrive stop
+
+<span class="syntax-comment"># Backup config if needed</span>
+cp ~/.buddydrive/config.toml ~/buddydrive-backup.toml
+
+<span class="syntax-comment"># Remove all state</span>
+rm -rf ~/.buddydrive
+
+<span class="syntax-comment"># Start fresh</span>
+buddydrive init</code></pre>
+            </div>
+        </div>
+
+        <h2>Next Steps</h2>
+
+        <ul>
+            <li>Read <a href="features.html">Features</a> for capabilities</li>
+            <li>Read <a href="security.html">Security</a> for encryption details</li>
+            <li>Read <a href="how-it-works.html">How It Works</a> for architecture</li>
+        </ul>
+
+        <h2>Getting Help</h2>
+
+        <ul>
+            <li><strong>GitHub Issues:</strong> bug reports, feature requests</li>
+            <li><strong>Documentation:</strong> this site</li>
+            <li><strong>Community:</strong> discussions, questions</li>
+        </ul>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <a href="index.html" class="logo">
+                        <img src="images/buddydrive-icon.png" alt="BuddyDrive" class="logo-img">
+                        <span class="logo-text">BuddyDrive</span>
+                    </a>
+                    <p>Backup your life, with a friend.</p>
+                </div>
+                <div class="footer-column">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/gokr/buddydrive">GitHub</a></li>
+                        <li><a href="docs.html">Documentation</a></li>
+                        <li><a href="features.html">Features</a></li>
+                        <li><a href="security.html">Security</a></li>
+                        <li><a href="how-it-works.html">How It Works</a></li>
+                    </ul>
+                </div>
+                <div class="footer-column">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://github.com/gokr/buddydrive/issues">Issues</a></li>
+                        <li><a href="https://github.com/gokr/buddydrive/discussions">Discussions</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>Released under the MIT License.</p>
+                <p>100% Open Source. Your data, your rules.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
