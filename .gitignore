@@ -3,7 +3,10 @@ nimble.paths
 nimbledeps
 
 # Build artifacts
-bin/buddydrive
+bin/*
+!bin/.gitkeep
+relay/bin/*
+!relay/bin/.gitkeep
 src/buddydrive
 src/buddydrive.out
 *.o
@@ -17,8 +20,8 @@ debian/substvars
 debian/tmp/
 
 # Test binaries
-tests/harness/test_pairing
-tests/harness/test_peer_discovery
+tests/harness/test_*
+!tests/harness/*.nim
 
 # IDE
 .vscode/
