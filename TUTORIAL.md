@@ -1,142 +1,172 @@
-
 # BuddyDrive Local Testing Tutorial
 
-This tutorial shows how to test BuddyDrive on a single machine with two instances syncing a folder.
+This tutorial shows how to smoke-test BuddyDrive on a single machine with two isolated instances.
+
+Important: a full end-to-end sync does not currently work over loopback or private-only addresses. BuddyDrive will only dial buddies when it discovers a public TCP address, or when relay fallback is configured. The steps below validate initialization, folder setup, pairing, and daemon startup on one machine. For a real file transfer test, use two machines with public reachability or configure relay fallback.
 
 ## Prerequisites
 
 ```bash
-# Build the project
 cd /home/gokr/tankfeud/buddydrive
 nimble build
 ```
 
-## Step 1: Create Two Test Directories
+## Step 1: Create Two Isolated Test Homes
 
 ```bash
-# Create test directories for each instance
-mkdir -p /tmp/buddy1/sync-folder
-mkdir -p /tmp/buddy2/sync-folder
+mkdir -p /tmp/buddy1/Documents
+mkdir -p /tmp/buddy2/Documents
 
-# Create a test file in buddy1's folder
-echo "Hello from Buddy 1!" > /tmp/buddy1/sync-folder/test.txt
+printf 'Hello from Buddy 1!\n' > /tmp/buddy1/Documents/test.txt
 ```
 
 ## Step 2: Initialize Both Instances
 
 ```bash
-# Initialize Buddy 1
 HOME=/tmp/buddy1 ./bin/buddydrive init
-
-# Initialize Buddy 2
 HOME=/tmp/buddy2 ./bin/buddydrive init
 ```
 
-## Step 3: Add Folders to Each Instance
+Each instance gets its own config under `/tmp/buddyX/.buddydrive/config.toml`.
 
-```bash
-# Add sync folder to Buddy 1
-HOME=/tmp/buddy1 ./bin/buddydrive add-folder /tmp/buddy1/sync-folder --name mydocs
+## Step 3: Give the Second Instance a Different P2P Port
 
-# Add sync folder to Buddy 2
-HOME=/tmp/buddy2 ./bin/buddydrive add-folder /tmp/buddy2/sync-folder --name mydocs
+Both instances default to `listen_port = 41721`, so the second one must be changed before you start them together.
+
+Open `/tmp/buddy2/.buddydrive/config.toml` and change:
+
+```toml
+listen_port = 41721
 ```
 
-## Step 4: Pair the Buddies
+to:
+
+```toml
+listen_port = 41722
+```
+
+## Step 4: Add a Folder to Each Instance
 
 ```bash
-# Get Buddy 1's ID
+HOME=/tmp/buddy1 ./bin/buddydrive add-folder /tmp/buddy1/Documents --name docs
+HOME=/tmp/buddy2 ./bin/buddydrive add-folder /tmp/buddy2/Documents --name docs
+```
+
+## Step 5: Collect Both Buddy IDs
+
+```bash
 HOME=/tmp/buddy1 ./bin/buddydrive config
-# Note the "Buddy ID" line, e.g., "Buddy ID: abc123..."
-
-# Get Buddy 2's ID
 HOME=/tmp/buddy2 ./bin/buddydrive config
-# Note the "Buddy ID" line, e.g., "Buddy ID: def456..."
 ```
 
-Now add each other as buddies:
+Copy the `ID:` value from each command.
+
+## Step 6: Pair Both Sides
+
+BuddyDrive currently accepts a buddy ID and pairing code, then stores the buddy entry locally, so for testing you should add each side to the other.
 
 ```bash
-# Buddy 1 adds Buddy 2 (use the actual UUID from above)
-HOME=/tmp/buddy1 ./bin/buddydrive add-buddy --id <BUDDY2_UUID> --code TEST
-
-# Buddy 2 adds Buddy 1 (use the actual UUID from above)
-HOME=/tmp/buddy2 ./bin/buddydrive add-buddy --id <BUDDY1_UUID> --code TEST
+HOME=/tmp/buddy1 ./bin/buddydrive add-buddy --id <BUDDY2_UUID> --code TEST-0001
+HOME=/tmp/buddy2 ./bin/buddydrive add-buddy --id <BUDDY1_UUID> --code TEST-0002
 ```
 
-## Step 5: Start Both Daemons
+## Step 7: Verify the Saved Configuration
 
-Open two terminal windows:
+```bash
+HOME=/tmp/buddy1 ./bin/buddydrive list-folders
+HOME=/tmp/buddy1 ./bin/buddydrive list-buddies
+
+HOME=/tmp/buddy2 ./bin/buddydrive list-folders
+HOME=/tmp/buddy2 ./bin/buddydrive list-buddies
+```
+
+At this point you should see one folder and one buddy configured on each side.
+
+## Step 8: Start Both Daemons
+
+Use a different control API port for each process so both can run on the same machine.
 
 **Terminal 1 (Buddy 1):**
+
 ```bash
-HOME=/tmp/buddy1 ./bin/buddydrive start
+HOME=/tmp/buddy1 ./bin/buddydrive start --port 17521
 ```
 
 **Terminal 2 (Buddy 2):**
+
 ```bash
-HOME=/tmp/buddy2 ./bin/buddydrive start
+HOME=/tmp/buddy2 ./bin/buddydrive start --port 17522
 ```
 
-You should see output like:
-```
+Expected startup output includes lines like:
+
+```text
+Starting BuddyDrive daemon...
 Starting daemon...
 Node started with Peer ID: 16Uiu2HAm...
-Listening on: /ip4/127.0.0.1/tcp/XXXXX
+Listening on: /ip4/0.0.0.0/tcp/41721
 DHT discovery started
-Announced buddy ID on DHT: <your-uuid>
+Control server started on port 17521
+BuddyDrive is running!
 ```
 
-## Step 6: Verify Sync
+On a single machine you will usually also see a connectivity warning such as:
+
+```text
+Direct-only mode: no public TCP address is being advertised.
+```
+
+That warning is expected for this local smoke test.
+
+## Step 9: What This Local Test Proves
+
+This confirms that:
+
+- separate BuddyDrive homes work
+- config is written correctly
+- folders and buddies are saved correctly
+- the daemon starts and publishes to the DHT
+- both instances can run concurrently with different P2P and control ports
+
+It does not prove that file transfer works between the two instances on the same host.
+
+## Step 10: Run a Real Sync Test
+
+To test actual file transfer, use one of these setups:
+
+1. Two real machines, each with a forwarded TCP port and a public `announce_addr` in `config.toml`
+2. Relay fallback on both sides with a shared relay token
+
+Relay fallback setup uses these commands on both peers:
 
 ```bash
-# Check that test.txt from Buddy 1 synced to Buddy 2
-ls -la /tmp/buddy2/sync-folder/
-
-# Create a file in Buddy 2's folder
-echo "Hello from Buddy 2!" > /tmp/buddy2/sync-folder/reply.txt
-
-# Wait a few seconds, then check Buddy 1's folder
-ls -la /tmp/buddy1/sync-folder/
+buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-region <region>
+buddydrive config set buddy-relay-token <buddy-id> <shared-token>
 ```
 
-## Step 7: Check Status
-
-```bash
-# Check Buddy 1's status
-HOME=/tmp/buddy1 ./bin/buddydrive status
-
-# Check Buddy 2's status
-HOME=/tmp/buddy2 ./bin/buddydrive status
-```
+Use the same `<shared-token>` on both sides for the same buddy relationship.
 
 ## Cleanup
 
 ```bash
-# Stop daemons with Ctrl+C in each terminal
-# Then remove test directories
 rm -rf /tmp/buddy1 /tmp/buddy2
 ```
 
 ## Troubleshooting
 
-1. **Port conflicts**: If both instances try to use the same port, the second one will fail. Each instance picks a random port automatically.
+1. `Address already in use` on startup
 
-2. **DHT discovery**: For local testing, DHT discovery won't work without bootstrap nodes. The instances connect directly when they know each other's addresses.
+Set different `listen_port` values in each config, and use different `--port` values when starting the daemons.
 
-3. **Firewall**: For production use across the internet, ensure the TCP port is accessible.
+2. `buddydrive status` still shows buddies as offline
 
-## What's Happening Under the Hood
+That is expected right now. The CLI status command reads configured state and sync window, but it does not yet report live daemon connectivity.
 
-1. **libp2p** creates a P2P node with a unique Peer ID
-2. **DHT** announces the buddy ID so others can find you
-3. **Pairing** verifies both sides have each other in their buddy list
-4. **Sync** compares file lists and transfers needed files in chunks
-5. **Encryption** (when enabled) encrypts file contents and filenames
+3. `buddydrive start --daemon` stays in the foreground
 
-## Next Steps
+That is expected too. Background daemon mode is not fully implemented yet.
 
-- Try syncing different file types
-- Test with larger files
-- Enable encryption with `--no-encrypt` flag removed
-- Run over the internet with a friend
+4. `buddydrive connect` does not help with local loopback testing
+
+Correct. The command currently prints guidance, but manual direct dialing is not implemented.

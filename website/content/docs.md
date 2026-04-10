@@ -15,13 +15,8 @@ title: Getting Started
 **Linux:**
 
 ```bash
-# Download the latest release
-curl -LO https://github.com/your-repo/buddydrive/releases/latest/buddydrive-linux-x64.tar.gz
-tar xzf buddydrive-linux-x64.tar.gz
-sudo mv buddydrive /usr/local/bin/
-
-# Or build from source
-git clone https://github.com/your-repo/buddydrive
+# Build from source
+git clone https://github.com/gokr/buddydrive
 cd buddydrive
 nimble build
 ```
@@ -29,28 +24,33 @@ nimble build
 **macOS:**
 
 ```bash
-# Download DMG or build from source
-# Requires Xcode command line tools
+# Build from source
+git clone https://github.com/gokr/buddydrive
+cd buddydrive
+nimble build
 ```
 
 **Windows:**
 
 ```powershell
-# Download ZIP or build from source
-# Requires Visual Studio Build Tools
+# Build from source
+git clone https://github.com/gokr/buddydrive
+cd buddydrive
+nimble build
 ```
 
 ### Initialize
 
-First time setup creates your identity:
+First time setup creates your local BuddyDrive identity:
 
 ```bash
 buddydrive init
 ```
 
-This generates:
+This creates:
+
 - Your unique buddy ID
-- Cryptographic key pair
+- A generated buddy name
 - Configuration file at `~/.buddydrive/config.toml`
 
 ### Pair With a Buddy
@@ -61,12 +61,15 @@ This generates:
 buddydrive add-buddy --generate-code
 ```
 
-Output:
-```
-Your pairing code: ABCD-EFGH
-Share this code with your buddy. Code expires in 5 minutes.
+Output looks like:
 
-Your buddy ID: fcd6295c-a912-44d4-a27b-ad898795207d
+```
+Generating pairing code...
+
+Share this with your buddy:
+  Your Buddy ID: fcd6295c-a912-44d4-a27b-ad898795207d
+  Your Name: purple-banana
+  Pairing Code: ABCD-EFGH
 ```
 
 **On your buddy's machine:**
@@ -76,8 +79,12 @@ buddydrive add-buddy --id <your-buddy-id> --code ABCD-EFGH
 ```
 
 If successful:
+
 ```
-Paired with: <your-name> (fcd6295c...)
+Pairing with buddy: fcd6295c...
+Pairing code: ABCD-EFGH
+
+Buddy added: fcd6295c...
 ```
 
 ### Add a Folder
@@ -89,23 +96,45 @@ buddydrive add-folder ~/Documents --name docs
 ```
 
 Options:
+
 - `--name` - Friendly name for the folder (required)
-- `--no-encrypt` - Disable encryption (not recommended)
-- `--buddy <id>` - Share with specific buddy
+- `--no-encrypt` - Disable encryption
+- `--append-only` - Only accept new incoming files for that folder
+- `--buddy <id>` - Restrict the folder to a specific buddy
 
-### Start Syncing
-
-Start the daemon:
+### Start the Daemon
 
 ```bash
 buddydrive start
 ```
 
-For background operation:
+Optional:
+
+- `--port <control-port>` - Change the local control API port
+- `--daemon` - Accepted, but currently continues in the foreground
+
+### Connectivity Notes
+
+BuddyDrive currently connects peers in one of two ways:
+
+1. Direct connection with a public TCP address
+2. Relay fallback with a configured relay token
+
+For direct connections, forward the configured `listen_port` on your router and set `[network].announce_addr` in `~/.buddydrive/config.toml` to a public multiaddr such as:
+
+```toml
+announce_addr = "/ip4/203.0.113.10/tcp/41721"
+```
+
+For relay fallback, configure both peers with:
 
 ```bash
-buddydrive start --daemon
+buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-region eu
+buddydrive config set buddy-relay-token <buddy-id> <shared-token>
 ```
+
+Use the same `<shared-token>` on both sides for the same buddy relationship.
 
 ### Check Status
 
@@ -113,30 +142,26 @@ buddydrive start --daemon
 buddydrive status
 ```
 
-Output:
+Output looks like:
+
 ```
-BuddyDrive Status
-Running: true
-Uptime: 2h 15m
-Peer ID: 16Uiu2HAk...
+Buddy: purple-banana (fcd6295c...)
+Peer ID: (run 'buddydrive start' to connect)
+Sync window: always
 
 Folders:
   docs
     Path: /home/you/Documents
-    Files: 234
-    Status: synced
-
-Buddies:
-  Alice (fcd6295c...)
-    Status: connected
-    Last sync: 5 minutes ago
+    Encrypted: true
+    Append-only: false
 ```
 
-### Stop the Daemon
+### Current CLI Limitations
 
-```bash
-buddydrive stop
-```
+- `buddydrive start --daemon` is not fully implemented yet
+- `buddydrive stop` is a placeholder command today
+- `buddydrive status` shows configured state, not live daemon connectivity
+- `buddydrive connect` does not perform a manual direct dial yet
 
 ## GUI
 
@@ -151,17 +176,16 @@ Or from your desktop menu: BuddyDrive
 ### Features
 
 - **Status panel** - daemon running, identity, uptime
-- **Folders list** - all configured folders with sync status
-- **Buddies list** - paired buddies with connection state
-- **Add folder dialog** - select path, name, encryption
-- **Pair dialog** - generate or enter pairing codes
+- **Folders list** - configured folders and sync status
+- **Buddies list** - paired buddies and their stored configuration
+- **Add folder dialog** - select path, name, encryption, and append-only mode
+- **Pair dialog** - generate or enter pairing details
 
 ### Controls
 
-- **Refresh** - update status from daemon
-- **Sync All** - sync all folders
-- **Sync** (per folder) - sync individual folder
-- **Remove** - remove folder or buddy
+- **Refresh** - reload status from the local control API
+- **Sync All** - trigger sync actions from the GUI
+- **Remove** - remove folder or buddy entries
 
 ## CLI Reference
 
@@ -170,23 +194,26 @@ Or from your desktop menu: BuddyDrive
 ```
 buddydrive init                        Initialize BuddyDrive
 buddydrive config                      Show configuration
+buddydrive config set <key> ...        Update configuration values
 buddydrive add-folder <path>           Add folder to sync
   --name <name>                        Folder name (required)
-  --no-encrypt                          Don't encrypt files
-  --buddy <id>                         Share with buddy
+  --no-encrypt                         Don't encrypt files
+  --append-only                        Only sync new files
+  --buddy <id>                         Restrict folder to buddy
 buddydrive remove-folder <name>        Remove folder
 buddydrive list-folders                List configured folders
-buddydrive add-buddy                   Pair with buddy
+buddydrive add-buddy                   Pair with a buddy
   --generate-code                      Generate pairing code
   --id <buddy-id>                      Buddy ID to pair with
   --code <code>                        Pairing code from buddy
-buddydrive remove-buddy <id>          Remove buddy
+buddydrive remove-buddy <id>           Remove buddy
 buddydrive list-buddies                List paired buddies
-buddydrive connect <address>           Connect manually
+buddydrive connect <address>           Manual connect placeholder
 buddydrive start                       Start sync daemon
-  --daemon                             Run in background
-buddydrive stop                        Stop sync daemon
-buddydrive status                      Show sync status
+  --port <control-port>                Override control API port
+  --daemon                             Accepted but stays foreground
+buddydrive stop                        Stop placeholder command
+buddydrive status                      Show configured status
 buddydrive logs                        Show recent logs
 buddydrive help                        Show help
 ```
@@ -196,25 +223,26 @@ buddydrive help                        Show help
 ```bash
 # Pair with a buddy
 buddydrive add-buddy --generate-code
-# (share code with buddy)
 buddydrive add-buddy --id abc123 --code XYZ-789
 
-# Add multiple folders
+# Add folders
 buddydrive add-folder ~/Photos --name photos
-buddydrive add-folder ~/Documents --name docs
-buddydrive add-folder ~/Projects --name projects
+buddydrive add-folder ~/Documents --name docs --append-only
+
+# Configure relay fallback
+buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-region eu
+buddydrive config set buddy-relay-token abc123 swift-eagle
 
 # Check what's configured
 buddydrive list-folders
 buddydrive list-buddies
+buddydrive config
 
-# Start and monitor
-buddydrive start --daemon
+# Start and inspect logs
+buddydrive start --port 17521
 buddydrive status
 buddydrive logs
-
-# Stop
-buddydrive stop
 ```
 
 ## Configuration
@@ -224,18 +252,30 @@ Config stored at `~/.buddydrive/config.toml`:
 ```toml
 [buddy]
 name = "Alice"
-uuid = "fcd6295c-a912-44d4-a27b-ad898795207d"
+id = "fcd6295c-a912-44d4-a27b-ad898795207d"
+public_key = ""
+
+[network]
+listen_port = 41721
+announce_addr = "/ip4/203.0.113.10/tcp/41721"
+relay_base_url = "https://buddydrive.net/relays"
+relay_region = "eu"
+sync_window_start = ""
+sync_window_end = ""
 
 [[folders]]
 name = "docs"
 path = "/home/alice/Documents"
 encrypted = true
+append_only = false
 buddies = ["bob-uuid"]
 
 [[buddies]]
-id = { uuid = "bob-uuid", name = "Bob" }
-publicKey = "abc123..."
-addedAt = 2024-01-15T10:30:00Z
+id = "bob-uuid"
+name = "Bob"
+public_key = ""
+relay_token = "swift-eagle"
+added_at = "2026-04-10T12:00:00Z"
 ```
 
 Edit with care. Better to use CLI commands.
@@ -245,7 +285,8 @@ Edit with care. Better to use CLI commands.
 | Location | Purpose |
 |----------|---------|
 | `~/.buddydrive/config.toml` | Configuration |
-| `~/.buddydrive/state.db` | Runtime state (SQLite) |
+| `~/.buddydrive/state.db` | Runtime state |
+| `~/.buddydrive/index.db` | File index |
 | `~/.buddydrive/buddydrive.log` | Logs |
 | `~/.buddydrive/port` | Control API port |
 
@@ -254,9 +295,6 @@ Edit with care. Better to use CLI commands.
 ### Daemon won't start
 
 ```bash
-# Check if already running
-ps aux | grep buddydrive
-
 # Check logs
 cat ~/.buddydrive/buddydrive.log
 
@@ -266,31 +304,23 @@ buddydrive config
 
 ### Can't connect to buddy
 
-1. Both need internet access
-2. Both need buddydrive running
-3. Check pairing status: `buddydrive list-buddies`
-4. Try regenerating pairing codes
+1. Both peers need internet access
+2. Both peers need `buddydrive start` running
+3. Check stored buddies with `buddydrive list-buddies`
+4. For direct mode, verify port forwarding and `announce_addr`
+5. For relay mode, verify `relay-region`, `relay-base-url`, and matching relay tokens
 
 ### Files not syncing
 
-1. Check daemon running: `buddydrive status`
-2. Check folder configured: `buddydrive list-folders`
-3. Check buddy connected in GUI or status output
-4. Manually trigger: GUI "Sync" button or API call
-
-### Pairing code expired
-
-Codes expire after 5 minutes. Generate a new one:
-
-```bash
-buddydrive add-buddy --generate-code
-```
+1. Check daemon logs with `buddydrive logs`
+2. Check folder configuration with `buddydrive list-folders`
+3. Remember `buddydrive status` does not show live connection state yet
+4. Single-machine loopback tests are limited unless you use relay fallback
 
 ### Reset everything
 
 ```bash
-# Stop daemon
-buddydrive stop
+# Stop foreground daemon with Ctrl+C if running
 
 # Backup config if needed
 cp ~/.buddydrive/config.toml ~/buddydrive-backup.toml

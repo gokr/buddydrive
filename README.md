@@ -9,7 +9,7 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 - **P2P Networking** - libp2p with DHT discovery, NAT traversal (hole punching), and relay fallback
 - **End-to-End Encryption** - libsodium (XChaCha20-Poly1305) for both file contents and filenames
 - **Simple CLI** - Easy to use command-line interface
-- **GTK4 GUI** - Native desktop application with system tray integration
+- **GTK4 GUI** - Native desktop application for monitoring and configuration
 - **Cross-Platform** - Works on Linux, macOS, and Windows
 
 ## Installation
@@ -97,7 +97,7 @@ After installation, BuddyDrive will appear in your applications menu.
 buddydrive init
 
 # Add a folder to sync
-buddydrive add-folder ~/Documents --name docs --encrypted
+buddydrive add-folder ~/Documents --name docs
 
 # Pair with a buddy
 buddydrive add-buddy --generate-code
@@ -106,9 +106,23 @@ buddydrive add-buddy --generate-code
 # On your buddy's machine
 buddydrive add-buddy --id <your-id> --code <pairing-code>
 
-# Start syncing
+# Start the daemon
 buddydrive start
 ```
+
+## Connectivity Notes
+
+- BuddyDrive currently connects peers when it discovers a public TCP address for the buddy, or when relay fallback is configured.
+- For direct connections, forward the configured `listen_port` on your router and set `[network].announce_addr` in `~/.buddydrive/config.toml` to a public multiaddr such as `/ip4/<public-ip>/tcp/41721`.
+- For relay fallback, configure the same relay base URL and region on both peers, then set a shared relay token per buddy:
+
+```bash
+buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-region eu
+buddydrive config set buddy-relay-token <buddy-id> <shared-token>
+```
+
+- Single-machine loopback testing is limited today. See `TUTORIAL.md` for the current local smoke-test workflow.
 
 ## Usage
 
@@ -118,52 +132,78 @@ buddydrive start
 |---------|-------------|
 | `buddydrive init` | Generate identity, create config |
 | `buddydrive config` | Show current config |
+| `buddydrive config set <key> ...` | Update runtime configuration |
 | `buddydrive add-folder <path>` | Add folder to sync |
 | `buddydrive remove-folder <name>` | Remove folder |
 | `buddydrive list-folders` | List configured folders |
 | `buddydrive add-buddy` | Add/pair with a buddy |
 | `buddydrive remove-buddy <id>` | Remove buddy |
 | `buddydrive list-buddies` | List paired buddies |
-| `buddydrive start` | Start sync daemon |
-| `buddydrive stop` | Stop daemon |
-| `buddydrive status` | Show sync status |
+| `buddydrive connect <address>` | Manual connect placeholder |
+| `buddydrive start [--port <control-port>]` | Start sync daemon in the foreground |
+| `buddydrive stop` | Stop command placeholder |
+| `buddydrive status` | Show configured folders, buddies, and sync window |
 | `buddydrive logs` | Show recent logs |
 
 ### Example Session
 
 ```bash
 $ buddydrive init
+Initializing BuddyDrive...
+
 Generated buddy name: purple-banana
 Buddy ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890
 Config created at: ~/.buddydrive/config.toml
 
-$ buddydrive add-folder ~/Documents --name docs --encrypted
+$ buddydrive add-folder ~/Documents --name docs
 Folder added: docs
   Path: /home/user/Documents
-  Encrypted: yes
+  Encrypted: true
+  Append-only: false
+
+$ buddydrive add-buddy --generate-code
+Generating pairing code...
+
+Share this with your buddy:
+  Your Buddy ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  Your Name: purple-banana
+  Pairing Code: X7K9-M2P4
 
 $ buddydrive start
 Starting BuddyDrive daemon...
-Connected to DHT
-Connected to buddy: cranky-wrench
-Watching 1 folder...
+Starting daemon...
+...
+BuddyDrive is running!
 
 $ buddydrive status
-Buddy: purple-banana
-Status: Online
+Buddy: purple-banana (a1b2c3d4...)
+Peer ID: (run 'buddydrive start' to connect)
+Sync window: always
+
 Folders:
-  docs  /home/user/Documents  [synced]  2.3 GB
+  docs
+    Path: /home/user/Documents
+    Encrypted: true
+    Append-only: false
 ```
+
+## Current CLI Limitations
+
+- `buddydrive start --daemon` currently prints a note and continues in the foreground.
+- `buddydrive start --port <control-port>` is supported even though it is not shown in `help`; it changes the local control API port.
+- `buddydrive stop` is not implemented yet; use your process manager or `Ctrl+C` for foreground runs.
+- `buddydrive status` does not yet query the running daemon for live connection state.
+- `buddydrive connect` does not perform a manual direct dial yet.
 
 ## How It Works
 
 ### Peer Discovery
 
-1. App generates UUID + Ed25519 keypair
-2. Connects to libp2p DHT using public bootstrap nodes
-3. Announces presence on DHT
-4. Discovers buddies via DHT lookup
-5. Connects directly or via NAT traversal (hole punching/relay)
+1. `buddydrive init` creates a local buddy identity and config file
+2. `buddydrive start` creates the libp2p node for the running session
+3. The daemon announces your buddy ID on the DHT
+4. The daemon looks up configured buddies via DHT
+5. It connects directly when a public TCP address is available, or via relay fallback when configured
 
 ### Encryption
 
@@ -188,22 +228,35 @@ Config file location: `~/.buddydrive/config.toml`
 [buddy]
 name = "purple-banana"
 id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+public_key = ""
+
+[network]
+listen_port = 41721
+announce_addr = "/ip4/203.0.113.10/tcp/41721"
+relay_base_url = "https://buddydrive.net/relays"
+relay_region = "eu"
+sync_window_start = ""
+sync_window_end = ""
 
 [[folders]]
 name = "docs"
 path = "/home/user/Documents"
 encrypted = true
+append_only = false
 buddies = ["buddy-id-here"]
 
 [[buddies]]
 id = "buddy-id-here"
 name = "cranky-wrench"
+public_key = ""
+relay_token = "swift-eagle"
+added_at = "2026-04-10T12:00:00Z"
 ```
 
 ## Roadmap
 
 - [ ] Delta sync (rolling hash)
-- [ ] GUI (Owlkettle)
+- [x] GTK4 desktop app
 - [ ] System tray integration
 - [ ] Auto-start on boot
 - [ ] Package for distros (deb, rpm, brew)
