@@ -74,6 +74,25 @@ proc gSignalConnect*(instance: GObject, signal: cstring, cHandler: GCallback, da
 
 proc gtkWindowSetDefaultIconName*(name: cstring) {.cdecl, importc: "gtk_window_set_default_icon_name".}
 
+# Additional GTK imports for dialogs
+proc gtkDialogNew*(): GtkWindow {.cdecl, importc: "gtk_dialog_new".}
+proc gtkDialogAddButton*(dialog: GtkWindow, buttonText: cstring, responseId: cint): GtkButton {.cdecl, importc: "gtk_dialog_add_button".}
+proc gtkDialogGetContentArea*(dialog: GtkWindow): GtkBox {.cdecl, importc: "gtk_dialog_get_content_area".}
+proc gtkEntryNew*(): pointer {.cdecl, importc: "gtk_entry_new".}
+proc gtkEditableGetText*(entry: pointer): cstring {.cdecl, importc: "gtk_editable_get_text".}
+proc gtkEditableSetText*(entry: pointer, text: cstring) {.cdecl, importc: "gtk_editable_set_text".}
+proc gtkEntrySetPlaceholderText*(entry: pointer, text: cstring) {.cdecl, importc: "gtk_entry_set_placeholder_text".}
+proc gtkCheckButtonNew*(): pointer {.cdecl, importc: "gtk_check_button_new".}
+proc gtkCheckButtonGetActive*(button: pointer): cint {.cdecl, importc: "gtk_check_button_get_active".}
+proc gtkCheckButtonSetLabel*(button: pointer, label: cstring) {.cdecl, importc: "gtk_check_button_set_label".}
+proc gtkWidgetGrabFocus*(widget: GtkWidget) {.cdecl, importc: "gtk_widget_grab_focus".}
+proc gtkWindowSetTransientFor*(window: GtkWindow, parent: GtkWindow) {.cdecl, importc: "gtk_window_set_transient_for".}
+proc gtkWindowSetModal*(window: GtkWindow, modal: cint) {.cdecl, importc: "gtk_window_set_modal".}
+
+const
+  GTK_RESPONSE_OK = -5.cint
+  GTK_RESPONSE_CANCEL = -6.cint
+
 const
   AppId = "org.buddydrive.app"
   ApiBase = "http://127.0.0.1:17521"
@@ -106,6 +125,17 @@ proc apiPost(endpoint: string, body: JsonNode = %*{}): JsonNode =
     result = parseJson(resp)
   except:
     result = %*{"error": getCurrentExceptionMsg()}
+
+proc apiDelete(endpoint: string): JsonNode =
+  try:
+    let resp = state.client.request(ApiBase & endpoint, httpMethod = HttpDelete)
+    result = parseJson(resp.body)
+  except:
+    result = %*{"error": getCurrentExceptionMsg()}
+
+# Forward declarations for dialog callbacks
+proc allocStr(s: string): pointer
+proc refreshUI(userData: pointer): cint {.cdecl.}
 
 proc formatBytes(bytes: int64): string =
   if bytes < 1024:
@@ -250,6 +280,338 @@ proc refreshUI(userData: pointer): cint {.cdecl.} =
   
   result = 1
 
+# Dialog helper procs
+type
+  AddFolderData = object
+    dialog: GtkWindow
+    nameEntry: pointer
+    pathEntry: pointer
+    encryptCheck: pointer
+  
+  PairBuddyData = object
+    dialog: GtkWindow
+    idEntry: pointer
+    nameEntry: pointer
+    codeEntry: pointer
+  
+  SettingsData = object
+    dialog: GtkWindow
+    nameEntry: pointer
+    portEntry: pointer
+    announceEntry: pointer
+    relayUrlEntry: pointer
+    relayRegionEntry: pointer
+    syncStartEntry: pointer
+    syncEndEntry: pointer
+
+proc allocStr(s: string): pointer =
+  result = allocShared0(s.len + 1)
+  copyMem(result, s.cstring, s.len)
+
+proc onAddFolderResponse(w: GtkWindow, responseId: cint, userData: pointer) {.cdecl.} =
+  let data = cast[ptr AddFolderData](userData)
+  if responseId == GTK_RESPONSE_OK:
+    let name = $gtkEditableGetText(data.nameEntry)
+    let path = $gtkEditableGetText(data.pathEntry)
+    let encrypted = gtkCheckButtonGetActive(data.encryptCheck) == 1
+    
+    if name.len > 0 and path.len > 0:
+      let body = %*{"name": name, "path": path, "encrypted": encrypted}
+      discard apiPost("/folders", body)
+      discard refreshUI(nil)
+  
+  gtkWidgetSetVisible(data.dialog, 0)
+  deallocShared(userData)
+
+proc onPairBuddyResponse(w: GtkWindow, responseId: cint, userData: pointer) {.cdecl.} =
+  let data = cast[ptr PairBuddyData](userData)
+  if responseId == GTK_RESPONSE_OK:
+    let buddyId = $gtkEditableGetText(data.idEntry)
+    let buddyName = $gtkEditableGetText(data.nameEntry)
+    let code = $gtkEditableGetText(data.codeEntry)
+    
+    if buddyId.len > 0 and code.len > 0:
+      let body = %*{"buddyId": buddyId, "buddyName": buddyName, "code": code}
+      discard apiPost("/buddies/pair", body)
+      discard refreshUI(nil)
+  
+  gtkWidgetSetVisible(data.dialog, 0)
+  deallocShared(userData)
+
+proc onSettingsResponse(w: GtkWindow, responseId: cint, userData: pointer) {.cdecl.} =
+  let data = cast[ptr SettingsData](userData)
+  if responseId == GTK_RESPONSE_OK:
+    var body = %*{"buddy": {}, "network": {}}
+    
+    let name = $gtkEditableGetText(data.nameEntry)
+    if name.len > 0:
+      body["buddy"]["name"] = %name
+    
+    let portStr = $gtkEditableGetText(data.portEntry)
+    if portStr.len > 0:
+      try:
+        body["network"]["listen_port"] = %portStr.parseInt()
+      except:
+        discard
+    
+    let announce = $gtkEditableGetText(data.announceEntry)
+    if announce.len > 0:
+      body["network"]["announce_addr"] = %announce
+    
+    let relayUrl = $gtkEditableGetText(data.relayUrlEntry)
+    if relayUrl.len > 0:
+      body["network"]["relay_base_url"] = %relayUrl
+    
+    let relayRegion = $gtkEditableGetText(data.relayRegionEntry)
+    if relayRegion.len > 0:
+      body["network"]["relay_region"] = %relayRegion
+    
+    let syncStart = $gtkEditableGetText(data.syncStartEntry)
+    if syncStart.len > 0:
+      body["network"]["sync_window_start"] = %syncStart
+    
+    let syncEnd = $gtkEditableGetText(data.syncEndEntry)
+    if syncEnd.len > 0:
+      body["network"]["sync_window_end"] = %syncEnd
+    
+    discard apiPost("/config", body)
+    discard refreshUI(nil)
+  
+  gtkWidgetSetVisible(data.dialog, 0)
+  deallocShared(userData)
+
+proc showAddFolderDialog() =
+  let dialog = gtkDialogNew()
+  gtkWindowSetTitle(dialog, "Add Folder")
+  gtkWindowSetModal(dialog, 1)
+  gtkWindowSetTransientFor(dialog, state.window)
+  gtkWindowSetDefaultSize(dialog, 450, 250)
+  
+  discard gtkDialogAddButton(dialog, "Cancel", GTK_RESPONSE_CANCEL)
+  discard gtkDialogAddButton(dialog, "Add", GTK_RESPONSE_OK)
+  
+  let content = gtkDialogGetContentArea(dialog)
+  gtkWidgetSetMarginStart(content, 16)
+  gtkWidgetSetMarginEnd(content, 16)
+  gtkWidgetSetMarginTop(content, 16)
+  gtkWidgetSetMarginBottom(content, 16)
+  
+  let nameLabel = gtkLabelNew("Folder name:")
+  gtkWidgetSetHexpand(nameLabel, 1)
+  gtkBoxAppend(content, nameLabel)
+  
+  let nameEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(nameEntry, "My Documents")
+  gtkWidgetSetMarginBottom(nameEntry, 12)
+  gtkBoxAppend(content, nameEntry)
+  
+  let pathLabel = gtkLabelNew("Folder path:")
+  gtkBoxAppend(content, pathLabel)
+  
+  let pathEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(pathEntry, "/home/user/Documents")
+  gtkWidgetSetMarginBottom(pathEntry, 12)
+  gtkBoxAppend(content, pathEntry)
+  
+  let encryptCheck = gtkCheckButtonNew()
+  gtkCheckButtonSetLabel(encryptCheck, "Encrypt folder contents")
+  gtkWidgetSetMarginBottom(encryptCheck, 8)
+  gtkBoxAppend(content, encryptCheck)
+  
+  let data = cast[ptr AddFolderData](allocShared0(sizeof(AddFolderData)))
+  data.dialog = dialog
+  data.nameEntry = nameEntry
+  data.pathEntry = pathEntry
+  data.encryptCheck = encryptCheck
+  
+  discard gSignalConnect(cast[GObject](dialog), "response", cast[GCallback](onAddFolderResponse), cast[pointer](data))
+  
+  gtkWidgetShow(dialog)
+  gtkWidgetGrabFocus(nameEntry)
+
+proc showPairBuddyDialog() =
+  let dialog = gtkDialogNew()
+  gtkWindowSetTitle(dialog, "Pair with Buddy")
+  gtkWindowSetModal(dialog, 1)
+  gtkWindowSetTransientFor(dialog, state.window)
+  gtkWindowSetDefaultSize(dialog, 450, 280)
+  
+  discard gtkDialogAddButton(dialog, "Cancel", GTK_RESPONSE_CANCEL)
+  discard gtkDialogAddButton(dialog, "Pair", GTK_RESPONSE_OK)
+  
+  let content = gtkDialogGetContentArea(dialog)
+  gtkWidgetSetMarginStart(content, 16)
+  gtkWidgetSetMarginEnd(content, 16)
+  gtkWidgetSetMarginTop(content, 16)
+  gtkWidgetSetMarginBottom(content, 16)
+  
+  let infoLabel = gtkLabelNew("Enter your buddy's information:")
+  gtkWidgetSetMarginBottom(infoLabel, 12)
+  gtkBoxAppend(content, infoLabel)
+  
+  let idLabel = gtkLabelNew("Buddy ID:")
+  gtkBoxAppend(content, idLabel)
+  
+  let idEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(idEntry, "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+  gtkWidgetSetMarginBottom(idEntry, 8)
+  gtkBoxAppend(content, idEntry)
+  
+  let nameLabel = gtkLabelNew("Buddy name (optional):")
+  gtkBoxAppend(content, nameLabel)
+  
+  let nameEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(nameEntry, "Alice")
+  gtkWidgetSetMarginBottom(nameEntry, 8)
+  gtkBoxAppend(content, nameEntry)
+  
+  let codeLabel = gtkLabelNew("Pairing code:")
+  gtkBoxAppend(content, codeLabel)
+  
+  let codeEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(codeEntry, "ABCD-EFGH")
+  gtkBoxAppend(content, codeEntry)
+  
+  let data = cast[ptr PairBuddyData](allocShared0(sizeof(PairBuddyData)))
+  data.dialog = dialog
+  data.idEntry = idEntry
+  data.nameEntry = nameEntry
+  data.codeEntry = codeEntry
+  
+  discard gSignalConnect(cast[GObject](dialog), "response", cast[GCallback](onPairBuddyResponse), cast[pointer](data))
+  
+  gtkWidgetShow(dialog)
+  gtkWidgetGrabFocus(idEntry)
+
+proc showSettingsDialog() =
+  let configJson = apiGet("/config")
+  
+  let dialog = gtkDialogNew()
+  gtkWindowSetTitle(dialog, "Settings")
+  gtkWindowSetModal(dialog, 1)
+  gtkWindowSetTransientFor(dialog, state.window)
+  gtkWindowSetDefaultSize(dialog, 500, 450)
+  
+  discard gtkDialogAddButton(dialog, "Cancel", GTK_RESPONSE_CANCEL)
+  discard gtkDialogAddButton(dialog, "Save", GTK_RESPONSE_OK)
+  
+  let content = gtkDialogGetContentArea(dialog)
+  gtkWidgetSetMarginStart(content, 16)
+  gtkWidgetSetMarginEnd(content, 16)
+  gtkWidgetSetMarginTop(content, 16)
+  gtkWidgetSetMarginBottom(content, 16)
+  
+  # Identity section
+  let identityLabel = gtkLabelNew("Identity")
+  gtkWidgetAddCssClass(identityLabel, "title-3")
+  gtkWidgetSetMarginBottom(identityLabel, 8)
+  gtkBoxAppend(content, identityLabel)
+  
+  let nameLabel = gtkLabelNew("Your name:")
+  gtkBoxAppend(content, nameLabel)
+  
+  let nameEntry = gtkEntryNew()
+  let currentName = configJson{"buddy"}{"name"}.getStr("")
+  if currentName.len > 0:
+    gtkEditableSetText(nameEntry, currentName.cstring)
+  gtkWidgetSetMarginBottom(nameEntry, 16)
+  gtkBoxAppend(content, nameEntry)
+  
+  # Network section
+  let networkLabel = gtkLabelNew("Network")
+  gtkWidgetAddCssClass(networkLabel, "title-3")
+  gtkWidgetSetMarginBottom(networkLabel, 8)
+  gtkBoxAppend(content, networkLabel)
+  
+  let portLabel = gtkLabelNew("Listen port:")
+  gtkBoxAppend(content, portLabel)
+  
+  let portEntry = gtkEntryNew()
+  let currentPort = configJson{"network"}{"listen_port"}.getInt(41721)
+  gtkEditableSetText(portEntry, cstring($currentPort))
+  gtkWidgetSetMarginBottom(portEntry, 8)
+  gtkBoxAppend(content, portEntry)
+  
+  let announceLabel = gtkLabelNew("Announce address (optional):")
+  gtkBoxAppend(content, announceLabel)
+  
+  let announceEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(announceEntry, "/ip4/203.0.113.10/tcp/41721")
+  let currentAnnounce = configJson{"network"}{"announce_addr"}.getStr("")
+  if currentAnnounce.len > 0:
+    gtkEditableSetText(announceEntry, currentAnnounce.cstring)
+  gtkWidgetSetMarginBottom(announceEntry, 16)
+  gtkBoxAppend(content, announceEntry)
+  
+  # Relay section
+  let relayLabel = gtkLabelNew("Relay Fallback")
+  gtkWidgetAddCssClass(relayLabel, "title-3")
+  gtkWidgetSetMarginBottom(relayLabel, 8)
+  gtkBoxAppend(content, relayLabel)
+  
+  let relayUrlLabel = gtkLabelNew("Relay base URL:")
+  gtkBoxAppend(content, relayUrlLabel)
+  
+  let relayUrlEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(relayUrlEntry, "https://buddydrive.net/relays")
+  let currentRelayUrl = configJson{"network"}{"relay_base_url"}.getStr("")
+  if currentRelayUrl.len > 0:
+    gtkEditableSetText(relayUrlEntry, currentRelayUrl.cstring)
+  gtkWidgetSetMarginBottom(relayUrlEntry, 8)
+  gtkBoxAppend(content, relayUrlEntry)
+  
+  let relayRegionLabel = gtkLabelNew("Relay region:")
+  gtkBoxAppend(content, relayRegionLabel)
+  
+  let relayRegionEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(relayRegionEntry, "eu")
+  let currentRelayRegion = configJson{"network"}{"relay_region"}.getStr("")
+  if currentRelayRegion.len > 0:
+    gtkEditableSetText(relayRegionEntry, currentRelayRegion.cstring)
+  gtkWidgetSetMarginBottom(relayRegionEntry, 16)
+  gtkBoxAppend(content, relayRegionEntry)
+  
+  # Sync window section
+  let syncLabel = gtkLabelNew("Sync Window")
+  gtkWidgetAddCssClass(syncLabel, "title-3")
+  gtkWidgetSetMarginBottom(syncLabel, 8)
+  gtkBoxAppend(content, syncLabel)
+  
+  let syncStartLabel = gtkLabelNew("Start time (HH:MM, leave empty for always):")
+  gtkBoxAppend(content, syncStartLabel)
+  
+  let syncStartEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(syncStartEntry, "22:00")
+  let currentSyncStart = configJson{"network"}{"sync_window_start"}.getStr("")
+  if currentSyncStart.len > 0:
+    gtkEditableSetText(syncStartEntry, currentSyncStart.cstring)
+  gtkWidgetSetMarginBottom(syncStartEntry, 8)
+  gtkBoxAppend(content, syncStartEntry)
+  
+  let syncEndLabel = gtkLabelNew("End time (HH:MM):")
+  gtkBoxAppend(content, syncEndLabel)
+  
+  let syncEndEntry = gtkEntryNew()
+  gtkEntrySetPlaceholderText(syncEndEntry, "06:00")
+  let currentSyncEnd = configJson{"network"}{"sync_window_end"}.getStr("")
+  if currentSyncEnd.len > 0:
+    gtkEditableSetText(syncEndEntry, currentSyncEnd.cstring)
+  gtkBoxAppend(content, syncEndEntry)
+  
+  let data = cast[ptr SettingsData](allocShared0(sizeof(SettingsData)))
+  data.dialog = dialog
+  data.nameEntry = nameEntry
+  data.portEntry = portEntry
+  data.announceEntry = announceEntry
+  data.relayUrlEntry = relayUrlEntry
+  data.relayRegionEntry = relayRegionEntry
+  data.syncStartEntry = syncStartEntry
+  data.syncEndEntry = syncEndEntry
+  
+  discard gSignalConnect(cast[GObject](dialog), "response", cast[GCallback](onSettingsResponse), cast[pointer](data))
+  
+  gtkWidgetShow(dialog)
+
 proc createMainWindow(app: GtkApplication): GtkWindow =
   let window = gtkApplicationWindowNew(app)
   gtkWindowSetTitle(window, "BuddyDrive")
@@ -325,6 +687,15 @@ proc createMainWindow(app: GtkApplication): GtkWindow =
   
   gtkBoxAppend(mainBox, buddiesCard.box)
   
+  # Settings card
+  let settingsCard = createSectionCard("Settings")
+  
+  let settingsBtn = gtkButtonNewWithLabel("Configure Settings...")
+  gtkWidgetAddCssClass(settingsBtn, "suggested-action")
+  gtkBoxAppend(settingsCard.content, settingsBtn)
+  
+  gtkBoxAppend(mainBox, settingsCard.box)
+  
   proc onRefreshClick(btn: GtkButton, userData: pointer) {.cdecl.} =
     discard refreshUI(nil)
   
@@ -339,13 +710,20 @@ proc createMainWindow(app: GtkApplication): GtkWindow =
   
   discard gSignalConnect(cast[GObject](syncAllBtn), "clicked", cast[GCallback](onSyncAllClick), nil)
   
+  proc onAddFolderClick(btn: GtkButton, userData: pointer) {.cdecl.} =
+    showAddFolderDialog()
+  
+  discard gSignalConnect(cast[GObject](addFolderBtn), "clicked", cast[GCallback](onAddFolderClick), nil)
+  
   proc onPairClick(btn: GtkButton, userData: pointer) {.cdecl.} =
-    let pairingJson = apiPost("/buddies/pairing-code")
-    let code = pairingJson{"pairingCode"}.getStr("")
-    let buddyId = pairingJson{"buddyId"}.getStr("")
-    echo "Pairing code: ", code, " for buddy: ", buddyId
+    showPairBuddyDialog()
   
   discard gSignalConnect(cast[GObject](pairBtn), "clicked", cast[GCallback](onPairClick), nil)
+  
+  proc onSettingsClick(btn: GtkButton, userData: pointer) {.cdecl.} =
+    showSettingsDialog()
+  
+  discard gSignalConnect(cast[GObject](settingsBtn), "clicked", cast[GCallback](onSettingsClick), nil)
   
   gtkWindowSetChild(window, mainBox)
   result = window

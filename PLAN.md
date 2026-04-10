@@ -545,3 +545,57 @@ sudo systemctl start buddydrive
 - Add relay fallback for NAT traversal
 - Phase 3: Buddy pairing protocol
 - Phase 4: File sync with encryption
+
+---
+
+## Architecture Notes
+
+### Control Server / State Management
+
+The BuddyDrive daemon includes a control server running on localhost (default port 17521) that provides a REST API for monitoring and configuration. The GUI communicates with the daemon via this API.
+
+**State Storage:**
+- `~/.buddydrive/config.toml` - Static configuration (identity, folders, buddies)
+- `~/.buddydrive/state.db` - Runtime state (SQLite):
+  - `runtime_status` - peer ID, addresses, daemon running status
+  - `buddy_state` - connection state per buddy
+  - `folder_state` - sync progress per folder
+- `~/.buddydrive/index.db` - File metadata index (per-folder SQLite)
+
+**Key Endpoints:**
+- `GET /status` - Daemon status and identity
+- `GET /buddies` - Buddy list with connection state
+- `GET /folders` - Folder list with sync status
+- `POST /folders` - Add folder
+- `DELETE /folders/:name` - Remove folder
+- `POST /buddies/pair` - Pair with buddy (requires buddy ID and code)
+- `POST /buddies/pairing-code` - Generate pairing code
+- `POST /config` - Update configuration
+- `POST /sync/:folder` - Trigger folder sync
+
+### GUI Configuration Dialogs
+
+The GTK4 GUI provides comprehensive configuration:
+
+1. **Add Folder Dialog** - Name, path, encryption toggle
+2. **Pair Buddy Dialog** - Buddy ID, name (optional), pairing code
+3. **Settings Dialog:**
+   - Identity: Your buddy name
+   - Network: Listen port, announce address
+   - Relay: Base URL, region for fallback
+   - Sync Window: Optional time restrictions (HH:MM format)
+
+### Build Notes
+
+- Uses `--threads:on` for multi-threading
+- Control server uses `std/net` synchronous HTTP server in dedicated thread
+- SQLite access via `db_connector/db_sqlite` (bundled with Nim 2.2.8+)
+- Chronos async requires `{.cast(gcsafe).}` for cross-thread calls
+- GTK4 GUI uses `gtk_editable_get_text` not `gtk_entry_get_text`
+- Cdecl callbacks cannot capture locals; use `userData` with allocated strings
+
+### Testing
+
+Integration tests for DHT discovery and relay fallback are environment-dependent:
+- Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to make tests fail hard when services unavailable
+- Without this flag, tests skip gracefully when environment doesn't support them
