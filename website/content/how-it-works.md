@@ -67,18 +67,18 @@ BuddyDrive uses libp2p for all networking:
 
 How two buddies find each other:
 
-1. **DHT Announce** - Each daemon announces its peer ID on the DHT
-2. **Buddy ID Lookup** - Query DHT for buddy's peer ID
-3. **Address Resolution** - Get multi-addresses (IP:port)
-4. **Direct Connection** - Connect via TCP with NAT traversal
+1. **Buddy ID Announce** - Each daemon publishes your buddy ID to the DHT with its current peer record
+2. **Buddy Lookup** - Query the DHT for a configured buddy ID
+3. **Address Resolution** - Read the peer ID and advertised multi-addresses
+4. **Connection Attempt** - Dial a public TCP address directly, or fall back to relay when configured
 
 ### NAT Traversal
 
-Works behind home routers:
+Current connectivity options:
 
-- **Hole punching** - coordinated connection attempts
-- **Relay fallback** - if direct connection fails (planned)
-- **UPnP** - automatic port forwarding (optional)
+- **Public TCP address** - direct connection when a forwarded port and public `announce_addr` are available
+- **Relay fallback** - used when `relay_region` and a shared buddy `relay_token` are configured
+- **UPnP** - automatic port forwarding attempt when no explicit `announce_addr` is set
 
 ## File Sync
 
@@ -234,7 +234,7 @@ Every message authenticated:
 ### Network
 
 - Chunked transfer for large files
-- Compression for text (planned)
+- LZ4 compression when it helps for a transferred chunk
 - Bandwidth throttling (planned)
 
 ### Disk
@@ -246,14 +246,14 @@ Every message authenticated:
 
 ### Current
 
-- Sync triggered manually (auto in progress)
+- Sync triggered when buddies connect
 - One buddy per folder
 - No delta sync for large files
 - No selective download
 
 ### Planned
 
-- Automatic background sync
+- Better background daemon management
 - Multiple buddies per folder
 - Delta sync (rsync-style)
 - Compression for text files

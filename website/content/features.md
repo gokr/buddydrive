@@ -23,10 +23,10 @@ No central server. No cloud. No middleman.
 Your Machine <--encrypted channel--> Buddy's Machine
 ```
 
-Both machines connect directly using libp2p, the same technology powering IPFS. Features:
+BuddyDrive uses libp2p for peer discovery and transport. Current connectivity options include direct public TCP connections and relay fallback. Features:
 
 - **DHT-based peer discovery** - find your buddy even behind home routers
-- **NAT traversal** - works without port forwarding
+- **Relay fallback** - available when both peers configure the same relay token
 - **Multi-address support** - connects via IP, TCP, and more
 - **Yamux multiplexing** - efficient multiple streams over one connection
 
@@ -63,15 +63,15 @@ Command-line interface for headless servers.
 
 ### Secure Pairing
 
-Pairing uses a 6-character code that you share with your buddy out-of-band (in person, text, call). This prevents man-in-the-middle attacks:
+Pairing uses a short code that you share with your buddy out-of-band (in person, text, call):
 
 1. Generate pairing code on your machine
 2. Share code with your buddy
 3. They enter the code on their machine
-4. Cryptographic keys exchange securely
-5. Devices paired, ready to sync
+4. BuddyDrive stores the buddy relationship locally
+5. Both sides can start the daemon and attempt sync
 
-Each pairing creates unique encryption keys. Compromise one buddy, others remain secure.
+Each buddy relationship is configured independently.
 
 ### Encrypted At Rest
 
@@ -99,8 +99,8 @@ Every transferred file includes a cryptographic hash. Tampering is detected imme
 When both you and your buddy edit the same file:
 
 - **Last-write-wins** by default
-- **Version history** kept for recovery
-- **Manual resolution** option available
+- **Append-only mode** available per folder to avoid remote overwrites and deletions
+- **No built-in version history yet**
 
 ### Bandwidth Control
 
@@ -111,22 +111,22 @@ When both you and your buddy edit the same file:
 ### Large File Support
 
 - Files split into 64KB chunks
-- Resume interrupted transfers
-- Deduplication saves bandwidth
+- Resume-friendly chunked transfer flow
+- LZ4 compression when it reduces payload size
 
 ## Platform Support
 
 ### Linux
 
-Native packages for major distributions. GTK4 GUI with desktop integration.
+Build from source today. GTK4 GUI with desktop integration on Linux.
 
 ### macOS
 
-Native app bundle with menu bar integration.
+Build from source.
 
 ### Windows
 
-Standalone executable with system tray icon.
+Build from source.
 
 ### Headless
 
@@ -145,8 +145,8 @@ Run on servers, NAS boxes, or Raspberry Pi with command-line interface only.
 ### Network Requirements
 
 - Outbound internet access
-- No inbound ports needed
-- Works behind most NATs
+- Direct mode needs a reachable public TCP address
+- Relay mode needs a configured relay service and matching relay token
 - IPv4 and IPv6 supported
 
 ### Storage
@@ -172,7 +172,7 @@ Upcoming features:
 
 Current limitations to be aware of:
 
-- Sync triggers manually (auto-sync in progress)
+- Background sync depends on peers connecting successfully
 - One buddy per folder (multiple buddies planned)
 - No mobile apps yet
 - No file versioning yet
