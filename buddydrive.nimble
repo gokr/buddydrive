@@ -18,10 +18,13 @@ requires "db_connector"
 requires "mummy"
 requires "nat_traversal"
 requires "curly"
+requires "https://github.com/gokr/lz4wrapper"
 
 task test, "Run tests":
+  exec "nimble c -r tests/harness/test_sync_policy.nim"
   exec "nimble c -r tests/harness/test_peer_discovery.nim"
   exec "nimble c -r tests/harness/test_relay_fallback.nim"
+  exec "nimble c -r tests/harness/test_relay_file_sync.nim"
 
 task build, "Build release CLI":
   exec "nim c -d:release src/buddydrive.nim"
