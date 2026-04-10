@@ -7,8 +7,6 @@ bin/*
 !bin/.gitkeep
 relay/bin/*
 !relay/bin/.gitkeep
-src/buddydrive
-src/buddydrive.out
 *.o
 
 # Debian build

@@ -1,7 +1,6 @@
 import std/os except FileInfo
 import std/options
 import std/tables
-import std/strutils
 import std/sequtils
 import results
 import chronos
