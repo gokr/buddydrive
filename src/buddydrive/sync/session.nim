@@ -21,7 +21,7 @@ proc sendLocalFolderLists(
     protocol: SyncProtocol,
 ): Future[bool] {.async.} =
   for folder in applicableFolders(config, buddyId):
-    let transfer = newFileTransfer(folder, protocol)
+    let transfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
     defer: transfer.close()
     if not await transfer.sendFileList(conn):
       return false
@@ -101,7 +101,7 @@ proc syncFolder(
     conn: Connection,
     protocol: SyncProtocol,
 ): Future[bool] {.async.} =
-  let transfer = newFileTransfer(folder, protocol)
+  let transfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
   defer: transfer.close()
 
   let filesNeeded = transfer.compareWithRemote(remoteFiles)

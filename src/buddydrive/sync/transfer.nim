@@ -1,7 +1,6 @@
 import std/os except FileInfo
 import std/options
 import std/tables
-import std/times
 import std/strutils
 import std/sequtils
 import results
@@ -22,19 +21,58 @@ export index
 type
   TransferError* = object of CatchableError
   
+  Throttler* = ref object
+    bytesPerSecond*: int
+    lastTime*: Moment
+    bytesSent*: int64
+  
   FileTransfer* = ref object
     index*: FileIndex
     scanner*: FileScanner
     protocol*: SyncProtocol
+    throttler*: Throttler
 
 const
   TransferChunkSize* = 64 * 1024
+
+proc newThrottler*(bytesPerSecond: int): Throttler =
+  result = Throttler()
+  result.bytesPerSecond = bytesPerSecond
+  result.lastTime = Moment.now()
+  result.bytesSent = 0
 
 proc newFileTransfer*(folder: FolderConfig, protocol: SyncProtocol): FileTransfer =
   result = FileTransfer()
   result.scanner = newFileScanner(folder)
   result.index = newIndex(folder.name & "|" & folder.path)
   result.protocol = protocol
+  result.throttler = newThrottler(0)
+
+proc newFileTransfer*(folder: FolderConfig, protocol: SyncProtocol, bandwidthLimitKBps: int): FileTransfer =
+  result = FileTransfer()
+  result.scanner = newFileScanner(folder)
+  result.index = newIndex(folder.name & "|" & folder.path)
+  result.protocol = protocol
+  result.throttler = newThrottler(bandwidthLimitKBps * 1024)
+
+proc throttle*(t: Throttler, bytes: int) {.async.} =
+  if t.bytesPerSecond <= 0:
+    return
+  
+  let now = Moment.now()
+  let elapsed = (now - t.lastTime).nanoseconds
+  
+  if elapsed >= 1_000_000_000:
+    t.lastTime = now
+    t.bytesSent = 0
+  else:
+    t.bytesSent += bytes
+    let allowedBytes = (elapsed.int64 * t.bytesPerSecond.int64) div 1_000_000_000
+    if t.bytesSent > allowedBytes:
+      let excessBytes = t.bytesSent - allowedBytes
+      let sleepNanos = (excessBytes * 1_000_000_000) div t.bytesPerSecond.int64
+      if sleepNanos > 0:
+        await sleepAsync(chronos.nanoseconds(sleepNanos))
 
 proc close*(transfer: FileTransfer) =
   if transfer.index != nil:
@@ -134,6 +172,7 @@ proc sendFileData*(transfer: FileTransfer, conn: Connection, path: string, offse
     
     try:
       await transfer.protocol.sendMessage(conn, msg)
+      await transfer.throttler.throttle(data.len)
     except:
       return false
     

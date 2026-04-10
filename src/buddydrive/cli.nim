@@ -90,6 +90,7 @@ Examples:
   buddydrive config set relay-base-url https://buddydrive.net/relays
   buddydrive config set relay-region eu
   buddydrive config set sync-window 01:00-06:00
+  buddydrive config set bandwidth-limit 500
   buddydrive config set buddy-relay-token abc123 swift-eagle
   buddydrive config set folder-append-only docs on
   buddydrive add-folder ~/Documents --name docs
@@ -205,7 +206,7 @@ proc parseCli*(): CommandLine =
         if args.len >= 4:
           result.configKey = args[2].toLowerAscii()
           case result.configKey
-          of "relay-base-url", "relay_base_url", "relay-region", "relay_region", "sync-window", "sync_window":
+          of "relay-base-url", "relay_base_url", "relay-region", "relay_region", "sync-window", "sync_window", "bandwidth-limit", "bandwidth_limit":
             result.configValue = args[3]
           of "buddy-relay-token", "buddy_relay_token", "buddy-name", "buddy_name", "folder-append-only", "folder_append_only":
             if args.len >= 5:
@@ -282,6 +283,19 @@ proc handleConfig*(cmd: CommandLine) =
       saveConfig(cfg)
       echo "Relay region set to: ", cfg.relayRegion
       return
+    of "bandwidth-limit", "bandwidth_limit":
+      let kbps = parseInt(cmd.configValue)
+      if kbps < 0:
+        echo "Invalid bandwidth limit. Use a non-negative number."
+        return
+      cfg.bandwidthLimitKBps = kbps
+      saveConfig(cfg)
+      if kbps == 0:
+        echo "Bandwidth limit disabled (unlimited)"
+      else:
+        let mbps = (kbps * 8) div 1000
+        echo "Bandwidth limit set to: ", kbps, " KB/s (", mbps, " Mbps)"
+      return
     of "sync-window", "sync_window":
       if cmd.configValue.toLowerAscii() == "off":
         cfg.syncWindowStart = ""
@@ -332,7 +346,7 @@ proc handleConfig*(cmd: CommandLine) =
       return
     else:
       echo "Unknown config key: ", cmd.configKey
-      echo "Supported keys: relay-base-url, relay-region, sync-window, buddy-relay-token, buddy-name, folder-append-only"
+      echo "Supported keys: relay-base-url, relay-region, sync-window, bandwidth-limit, buddy-relay-token, buddy-name, folder-append-only"
       return
 
   let cfg = loadConfig()
@@ -353,6 +367,10 @@ proc handleConfig*(cmd: CommandLine) =
     echo "  Relay region: ", cfg.relayRegion
   else:
     echo "  Relay region: (not set)"
+  if cfg.bandwidthLimitKBps > 0:
+    echo "  Bandwidth limit: ", cfg.bandwidthLimitKBps, " KB/s"
+  else:
+    echo "  Bandwidth limit: unlimited"
   echo "  Sync window: ", syncWindowDescription(cfg)
   echo ""
   

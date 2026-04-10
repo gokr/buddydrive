@@ -51,6 +51,7 @@ proc loadConfig*(): AppConfig =
   result.relayRegion = ""
   result.syncWindowStart = ""
   result.syncWindowEnd = ""
+  result.bandwidthLimitKBps = 0
 
   if "network" in toml:
     result.listenPort = toml["network"]{"listen_port"}.getInt(DefaultP2PPort)
@@ -59,6 +60,7 @@ proc loadConfig*(): AppConfig =
     result.relayRegion = toml["network"]{"relay_region"}.getStr("")
     result.syncWindowStart = toml["network"]{"sync_window_start"}.getStr("")
     result.syncWindowEnd = toml["network"]{"sync_window_end"}.getStr("")
+    result.bandwidthLimitKBps = toml["network"]{"bandwidth_limit_kbps"}.getInt(0)
   
   result.folders = @[]
   if "folders" in toml:
@@ -113,7 +115,8 @@ proc saveConfig*(config: AppConfig) =
   content.add("relay_base_url = \"" & escapeToml(config.relayBaseUrl) & "\"\n")
   content.add("relay_region = \"" & escapeToml(config.relayRegion) & "\"\n")
   content.add("sync_window_start = \"" & escapeToml(config.syncWindowStart) & "\"\n")
-  content.add("sync_window_end = \"" & escapeToml(config.syncWindowEnd) & "\"\n\n")
+  content.add("sync_window_end = \"" & escapeToml(config.syncWindowEnd) & "\"\n")
+  content.add("bandwidth_limit_kbps = " & $config.bandwidthLimitKBps & "\n\n")
   
   if config.folders.len > 0:
     content.add("[[folders]]\n")

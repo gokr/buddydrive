@@ -29,6 +29,7 @@ type
     relayRegion*: string
     syncWindowStart*: string
     syncWindowEnd*: string
+    bandwidthLimitKBps*: int
     folders*: seq[FolderConfig]
     buddies*: seq[BuddyInfo]
   
@@ -101,5 +102,6 @@ proc newAppConfig*(buddy: BuddyId): AppConfig =
   result.relayRegion = ""
   result.syncWindowStart = ""
   result.syncWindowEnd = ""
+  result.bandwidthLimitKBps = 0
   result.folders = @[]
   result.buddies = @[]
