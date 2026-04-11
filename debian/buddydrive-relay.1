@@ -1,0 +1,54 @@
+.TH BUDDYDRIVE-RELAY 1 "April 2025" "BuddyDrive"
+.SH NAME
+buddydrive-relay \- TCP relay server for BuddyDrive P2P connections
+.SH DESCRIPTION
+BuddyDrive Relay is a simple TCP relay server that enables BuddyDrive peers to communicate when direct peer-to-peer connections aren't possible due to NAT or firewall restrictions.
+.PP
+The relay server:
+.IP \(bu 2
+Accepts connections from two peers with matching tokens
+.IP \(bu 2
+Validates tokens against a whitelist
+.IP \(bu 2
+Relays data bidirectionally between paired peers
+.IP \(bu 2
+Automatically disconnects when either peer leaves
+.SH SYNOPSIS
+.B buddydrive-relay
+[port]
+.SH OPTIONS
+.TP
+.I port
+Port to listen on (default: 41722)
+.SH ENVIRONMENT
+.TP
+.B BUDDYDRIVE_TOKENS
+Comma-separated list of allowed tokens. Example:
+.EX
+export BUDDYDRIVE_TOKENS="swift-eagle,brave-moose,calm-river"
+.EE
+.SH PROTOCOL
+.PP
+.nf
+Client -> Server: <token>\\n
+Server -> Client: OK\\n           (when paired)
+Server -> Client: WAIT\\n         (waiting for peer)
+Server -> Client: (disconnect)   (invalid token)
+.fi
+.PP
+After OK, all data is relayed bidirectionally.
+.SH EXAMPLES
+.TP
+Run with default port:
+buddydrive-relay
+.TP
+Run on custom port:
+buddydrive-relay 41722
+.TP
+With Docker:
+docker run -d -p 41722:41722 -e BUDDYDRIVE_TOKENS="swift-eagle" buddydrive-relay
+.SH SEE ALSO
+.BR buddydrive(1),
+.BR buddydrive-gui(1)
+.SH AUTHOR
+Goran Krampe <goran.krampe@gmail.com>

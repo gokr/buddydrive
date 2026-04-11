@@ -14,7 +14,7 @@ debian/buddydrive/
 debian/files
 debian/*.debhelper*
 debian/debhelper-build-stamp
-debian/substvars
+debian/*.substvars
 debian/tmp/
 
 # Test binaries
