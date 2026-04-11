@@ -193,7 +193,7 @@ proc parseCli*(): CommandLine =
           case result.configKey
           of "relay-base-url", "relay_base_url", "relay-region", "relay_region", "sync-window", "sync_window", "bandwidth-limit", "bandwidth_limit":
             result.configValue = args[3]
-          of "buddy-relay-token", "buddy_relay_token", "buddy-name", "buddy_name", "folder-append-only", "folder_append_only":
+          of "buddy-pairing-code", "buddy_pairing_code", "buddy-name", "buddy_name", "folder-append-only", "folder_append_only":
             if args.len >= 5:
               result.configTarget = args[3]
               result.configValue = args[4]
@@ -295,14 +295,14 @@ proc handleConfig*(cmd: CommandLine) =
       saveConfig(cfg)
       echo "Sync window set to: ", syncWindowDescription(cfg)
       return
-    of "buddy-relay-token", "buddy_relay_token":
+    of "buddy-pairing-code", "buddy_pairing_code", "pairing-code", "pairing_code":
       let idx = cfg.getBuddy(cmd.configTarget)
       if idx < 0:
         echo "Buddy not found: ", cmd.configTarget.shortId()
         return
-      cfg.buddies[idx].relayToken = cmd.configValue
+      cfg.buddies[idx].pairingCode = cmd.configValue
       saveConfig(cfg)
-      echo "Relay token set for buddy: ", cfg.buddies[idx].id.uuid.shortId()
+      echo "Pairing code set for buddy: ", cfg.buddies[idx].id.uuid.shortId()
       return
     of "buddy-name", "buddy_name":
       let idx = cfg.getBuddy(cmd.configTarget)
@@ -331,7 +331,7 @@ proc handleConfig*(cmd: CommandLine) =
       return
     else:
       echo "Unknown config key: ", cmd.configKey
-      echo "Supported keys: relay-base-url, relay-region, sync-window, bandwidth-limit, buddy-relay-token, buddy-name, folder-append-only"
+      echo "Supported keys: relay-base-url, relay-region, sync-window, bandwidth-limit, buddy-pairing-code, buddy-name, folder-append-only"
       return
 
   let cfg = loadConfig()
@@ -375,8 +375,8 @@ proc handleConfig*(cmd: CommandLine) =
     for buddy in cfg.buddies:
       echo "  ", buddy.id.name, " (", shortId(buddy.id.uuid), ")"
       echo "    ID: ", buddy.id.uuid
-      if buddy.relayToken.len > 0:
-        echo "    Relay token: ", buddy.relayToken
+      if buddy.pairingCode.len > 0:
+        echo "    Pairing code: ", buddy.pairingCode
       echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired yet."
@@ -500,16 +500,15 @@ proc handleAddBuddy*(cmd: CommandLine) =
   var cfg = loadConfig()
   var buddy: BuddyInfo
   buddy.id.uuid = cmd.buddyId
-  buddy.id.name = "unknown"
-  buddy.publicKey = ""
+  buddy.id.name = ""
+  buddy.pairingCode = cmd.pairingCode
   buddy.addedAt = getTime()
   
   cfg.addBuddy(buddy)
   
   echo "Buddy added: ", cmd.buddyId.shortId()
-  echo "Note: P2P connection will be established when both sides start the daemon."
-  echo "If using relay fallback, set a shared token with:"
-  echo "  buddydrive config set buddy-relay-token ", cmd.buddyId, " <token>"
+  echo "Pairing code stored for relay fallback."
+  echo "Start the daemon with 'buddydrive start' to connect."
 
 proc handleRemoveBuddy*(cmd: CommandLine) =
   if not config.configExists():
@@ -543,8 +542,8 @@ proc handleListBuddies*() =
   for buddy in cfg.buddies:
     echo "  ", buddy.id.name, " (", buddy.id.uuid.shortId(), ")"
     echo "    ID: ", buddy.id.uuid
-    if buddy.relayToken.len > 0:
-      echo "    Relay token: ", buddy.relayToken
+    if buddy.pairingCode.len > 0:
+      echo "    Pairing code: ", buddy.pairingCode
     echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
 
 proc handleConnect*(cmd: CommandLine) =
@@ -654,8 +653,8 @@ proc handleStatus*() =
     for buddy in cfg.buddies:
       echo "  ", buddy.id.name, " (", buddy.id.uuid.shortId(), ")"
       echo "    Status: Offline"
-      if buddy.relayToken.len > 0:
-        echo "    Relay token: ", buddy.relayToken
+      if buddy.pairingCode.len > 0:
+        echo "    Pairing code: ", buddy.pairingCode
       echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired."

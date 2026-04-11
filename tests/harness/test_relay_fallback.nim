@@ -12,14 +12,14 @@ proc makeConfig(
     selfName: string,
     otherId: string,
     otherName: string,
-    relayToken: string,
+    pairingCode: string,
 ): AppConfig =
   result = newAppConfig(newBuddyId(selfId, selfName))
   result.relayRegion = "local"
 
   var buddy: BuddyInfo
   buddy.id = newBuddyId(otherId, otherName)
-  buddy.relayToken = relayToken
+  buddy.pairingCode = pairingCode
   result.buddies = @[buddy]
 
 proc connectAndPair(config: AppConfig): Future[string] {.async.} =
@@ -28,7 +28,7 @@ proc connectAndPair(config: AppConfig): Future[string] {.async.} =
     relayListCache,
     config.relayBaseUrl,
     config.relayRegion,
-    config.buddies[0].relayToken
+    config.buddies[0].pairingCode
   )
   let conn = relayConn.conn
 

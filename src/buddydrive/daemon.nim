@@ -230,8 +230,11 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     
     echo "DHT discovery started"
     
-    asyncSpawn daemon.discovery.publishBuddy(daemon.config.buddy.uuid)
-    echo "Started buddy announcement on DHT: ", daemon.config.buddy.uuid
+    if daemon.config.buddies.len > 0:
+      asyncSpawn daemon.discovery.publishBuddy(daemon.config.buddy.uuid)
+      echo "Started buddy announcement on DHT: ", daemon.config.buddy.uuid
+    else:
+      echo "No buddies configured. Add buddies with 'buddydrive add-buddy' to start syncing."
     
     daemon.running = true
     daemon.startTime = getTime()
@@ -357,14 +360,14 @@ proc statusUpdateLoop(daemon: Daemon) {.async: (raises: [CancelledError]).} =
 proc buddyDiagnosticKey(buddyId: string): string =
   "buddy-" & buddyId
 
-proc buddyRelayToken(config: AppConfig, buddyId: string): string =
+proc buddyPairingCode(config: AppConfig, buddyId: string): string =
   for buddy in config.buddies:
     if buddy.id.uuid == buddyId:
-      return buddy.relayToken
+      return buddy.pairingCode
 
 proc connectToBuddyViaRelay(daemon: Daemon, buddyId: string): Future[bool] {.async: (raises: []).} =
-  let relayToken = buddyRelayToken(daemon.config, buddyId)
-  if daemon.config.relayRegion.len == 0 or relayToken.len == 0:
+  let pairingCode = buddyPairingCode(daemon.config, buddyId)
+  if daemon.config.relayRegion.len == 0 or pairingCode.len == 0:
     return false
 
   try:
@@ -373,7 +376,7 @@ proc connectToBuddyViaRelay(daemon: Daemon, buddyId: string): Future[bool] {.asy
       daemon.relayListCache,
       daemon.config.relayBaseUrl,
       daemon.config.relayRegion,
-      relayToken
+      pairingCode
     )
     let conn = relayConn.conn
 
@@ -424,7 +427,7 @@ proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq
     daemon.logDiagnostic(
       buddyDiagnosticKey(buddyId),
       "Direct connection to buddy " & buddyId.shortId() & " is not possible: " &
-        explainDirectConnectivityFailure(addrs) & ". Configure a forwarded TCP port and a public announce_addr on both peers, or set [network].relay_region and the buddy relay_token."
+        explainDirectConnectivityFailure(addrs) & ". Configure a forwarded TCP port and a public announce_addr on both peers, or set [network].relay_region and ensure the buddy has a pairing_code."
     )
     return false
   
@@ -459,6 +462,9 @@ proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq
 
 proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
   if not daemon.running:
+    return
+
+  if daemon.config.buddies.len == 0:
     return
 
   if not isWithinSyncWindow(daemon.config):

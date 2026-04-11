@@ -14,7 +14,7 @@ proc makeConfig(
     selfName: string,
     otherId: string,
     otherName: string,
-    relayToken: string,
+    pairingCode: string,
     folderPath: string,
 ): AppConfig =
   result = newAppConfig(newBuddyId(selfId, selfName))
@@ -22,7 +22,7 @@ proc makeConfig(
 
   var buddy: BuddyInfo
   buddy.id = newBuddyId(otherId, otherName)
-  buddy.relayToken = relayToken
+  buddy.pairingCode = pairingCode
   result.buddies = @[buddy]
 
   var folder = newFolderConfig("docs", folderPath)
@@ -35,7 +35,7 @@ proc connectAndSync(config: AppConfig): Future[void] {.async.} =
     cache,
     config.relayBaseUrl,
     config.relayRegion,
-    config.buddies[0].relayToken
+    config.buddies[0].pairingCode
   )
 
   let bc = newBuddyConnection()

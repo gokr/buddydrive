@@ -94,8 +94,7 @@ proc loadConfig*(): AppConfig =
       var buddy: BuddyInfo
       buddy.id.uuid = buddyTbl["id"].getStr()
       buddy.id.name = buddyTbl{"name"}.getStr("")
-      buddy.publicKey = buddyTbl{"public_key"}.getStr("")
-      buddy.relayToken = buddyTbl{"relay_token"}.getStr("")
+      buddy.pairingCode = buddyTbl{"pairing_code"}.getStr("")
       buddy.addedAt = parseTime(buddyTbl{"added_at"}.getStr("1970-01-01T00:00:00Z"), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
       result.buddies.add(buddy)
 
@@ -118,8 +117,7 @@ proc saveConfig*(config: AppConfig) =
   
   content.add("[buddy]\n")
   content.add("name = \"" & escapeToml(config.buddy.name) & "\"\n")
-  content.add("id = \"" & escapeToml(config.buddy.uuid) & "\"\n")
-  content.add("public_key = \"\"\n\n")
+  content.add("id = \"" & escapeToml(config.buddy.uuid) & "\"\n\n")
 
   content.add("[network]\n")
   content.add("listen_port = " & $config.listenPort & "\n")
@@ -154,8 +152,7 @@ proc saveConfig*(config: AppConfig) =
         content.add("\n[[buddies]]\n")
       content.add("id = \"" & escapeToml(buddy.id.uuid) & "\"\n")
       content.add("name = \"" & escapeToml(buddy.id.name) & "\"\n")
-      content.add("public_key = \"" & escapeToml(buddy.publicKey) & "\"\n")
-      content.add("relay_token = \"" & escapeToml(buddy.relayToken) & "\"\n")
+      content.add("pairing_code = \"" & escapeToml(buddy.pairingCode) & "\"\n")
       content.add("added_at = \"" & buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'") & "\"\n")
   
   writeFile(tempPath, content)

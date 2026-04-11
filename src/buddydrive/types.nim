@@ -9,9 +9,8 @@ type
   
   BuddyInfo* = object
     id*: BuddyId
-    publicKey*: string
+    pairingCode*: string
     addresses*: seq[string]
-    relayToken*: string
     addedAt*: Time
   
   FolderConfig* = object

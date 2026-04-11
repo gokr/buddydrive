@@ -243,7 +243,6 @@ proc configJson(): JsonNode =
     buddies.add(%*{
       "id": buddy.id.uuid,
       "name": buddy.id.name,
-      "publicKey": buddy.publicKey,
       "addedAt": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
     })
   %*{
