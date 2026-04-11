@@ -49,8 +49,9 @@ buddydrive init
 
 This creates:
 
-- Your unique buddy ID
-- A generated buddy name
+- **Buddy ID** - A UUID that uniquely identifies your instance (e.g., `fcd6295c-a912-44d4-a27b-ad898795207d`)
+- **Buddy Name** - A human-readable name (e.g., `purple-banana`)
+- **Peer ID** - A libp2p identifier for P2P networking
 - Configuration file at `~/.buddydrive/config.toml`
 
 ### Pair With a Buddy
@@ -115,7 +116,7 @@ Optional:
 
 ### Connectivity Notes
 
-BuddyDrive currently connects peers in one of two ways:
+BuddyDrive connects peers in one of two ways:
 
 1. Direct connection with a public TCP address
 2. Relay fallback with a configured relay token
@@ -126,15 +127,21 @@ For direct connections, forward the configured `listen_port` on your router and 
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
 ```
 
-For relay fallback, configure both peers with:
+For relay fallback, configure both peers with matching relay settings:
 
 ```bash
 buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
-buddydrive config set buddy-relay-token <buddy-id> <shared-token>
+buddydrive config set buddy-relay-token <buddy-id> swift-eagle
 ```
 
-Use the same `<shared-token>` on both sides for the same buddy relationship.
+**About Relay Tokens:**
+
+- A relay token is a shared secret (like `swift-eagle`) that two buddies use to connect through a relay server
+- Both buddies must configure the **same token** for their relationship
+- The relay uses tokens to pair connections - it connects two clients using matching tokens
+- Tokens are per-buddy, so you can have different tokens with different buddies
+- A public relay is available on Koyeb at `01.proxy.koyeb.app:19447` with tokens `swift-eagle` and `brave-moose`
 
 ### Check Status
 

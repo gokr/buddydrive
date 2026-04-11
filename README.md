@@ -92,6 +92,8 @@ After installation, BuddyDrive will appear in your applications menu.
 
 ## Quick Start
 
+See [TUTORIAL.md](TUTORIAL.md) for a detailed local testing guide.
+
 ```bash
 # Initialize your BuddyDrive identity
 buddydrive init
@@ -110,11 +112,49 @@ buddydrive add-buddy --id <your-id> --code <pairing-code>
 buddydrive start
 ```
 
+## Concepts
+
+### Buddy Identity
+
+When you run `buddydrive init`, your instance gets:
+
+- **Buddy ID** - A UUID (e.g., `fcd6295c-a912-44d4-a27b-ad898795207d`) that uniquely identifies your BuddyDrive instance. Share this with buddies so they can pair with you.
+- **Buddy Name** - A human-readable name generated from adjective-noun pairs (e.g., `purple-banana`, `brave-moose`). Easier to remember than the UUID.
+- **Peer ID** - A libp2p peer identifier (e.g., `16Uiu2HAm...`) used for P2P networking. Derived from your cryptographic keys.
+
+### Pairing
+
+To sync folders with someone, both sides need to add each other as buddies:
+
+1. **Generate a pairing code** on your machine with `buddydrive add-buddy --generate-code`
+2. **Share your Buddy ID and pairing code** with your buddy (in person, message, etc.)
+3. Your buddy runs `buddydrive add-buddy --id <your-id> --code <pairing-code>`
+4. Both sides repeat the process in reverse so you have each other's info
+
+### Relay Token
+
+When direct P2P connections aren't possible (NAT, firewall), BuddyDrive can use a relay server:
+
+- **Relay Token** - A shared secret (e.g., `swift-eagle`) that two buddies use to connect through a relay
+- Both buddies must configure the **same token** for the same buddy relationship
+- Tokens are per-buddy, so you can have different tokens with different buddies
+- The relay uses the token to pair connections - it only connects two clients using the same token
+
+Example configuration:
+
+```bash
+# Set relay region (eu, us, asia, or local for testing)
+buddydrive config set relay-region eu
+
+# Set a shared token for a specific buddy
+buddydrive config set buddy-relay-token <buddy-id> swift-eagle
+```
+
 ## Connectivity Notes
 
-- BuddyDrive currently connects peers when it discovers a public TCP address for the buddy, or when relay fallback is configured.
+- BuddyDrive connects peers when it discovers a public TCP address for the buddy, or when relay fallback is configured.
 - For direct connections, forward the configured `listen_port` on your router and set `[network].announce_addr` in `~/.buddydrive/config.toml` to a public multiaddr such as `/ip4/<public-ip>/tcp/41721`.
-- For relay fallback, configure the same relay base URL and region on both peers, then set a shared relay token per buddy:
+- For relay fallback, configure both peers with the same relay settings:
 
 ```bash
 buddydrive config set relay-base-url https://buddydrive.net/relays
@@ -122,7 +162,9 @@ buddydrive config set relay-region eu
 buddydrive config set buddy-relay-token <buddy-id> <shared-token>
 ```
 
-- Single-machine loopback testing is limited today. See `TUTORIAL.md` for the current local smoke-test workflow.
+A public relay is also available on Koyeb at `01.proxy.koyeb.app:19447` (tokens: `swift-eagle`, `brave-moose`). See [relay/README.md](relay/README.md) for self-hosting.
+
+See [TUTORIAL.md](TUTORIAL.md) for local testing workflow.
 
 ## Usage
 
@@ -257,12 +299,12 @@ added_at = "2026-04-10T12:00:00Z"
 
 - [ ] Delta sync (rolling hash)
 - [x] GTK4 desktop app
+- [x] Bandwidth limiting
 - [ ] System tray integration
 - [ ] Auto-start on boot
 - [ ] Package for distros (deb, rpm, brew)
 - [ ] Multiple buddies per folder
 - [ ] Selective sync (ignore patterns)
-- [ ] Bandwidth limiting
 - [ ] Version history
 
 ## Contributing
@@ -279,7 +321,7 @@ MIT
 
 ```bash
 # Install build dependencies
-sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev debhelper
+sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev debhelper dpkg-dev help2man
 
 # Build the package
 make deb
@@ -291,13 +333,16 @@ sudo dpkg -i ../buddydrive_*.deb
 ### Using systemd
 
 ```bash
-# Enable and start the service
-systemctl --user enable buddydrive
-systemctl --user start buddydrive
+# Check if service is enabled/running
+systemctl status buddydrive
 
-# Check status
-systemctl --user status buddydrive
+# Enable to start on boot
+sudo systemctl enable buddydrive
+
+# Start/stop the service
+sudo systemctl start buddydrive
+sudo systemctl stop buddydrive
 
 # View logs
-journalctl --user -u buddydrive -f
+journalctl -u buddydrive -f
 ```

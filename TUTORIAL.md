@@ -2,6 +2,13 @@
 
 This tutorial shows how to smoke-test BuddyDrive on a single machine with two isolated instances.
 
+## Key Concepts
+
+- **Buddy ID** - A UUID (e.g., `fcd6295c-a912-44d4-a27b-ad898795207d`) that identifies a BuddyDrive instance
+- **Buddy Name** - A human-readable name like `purple-banana` generated from adjective-noun pairs
+- **Peer ID** - A libp2p identifier (e.g., `16Uiu2HAm...`) used for P2P networking
+- **Relay Token** - A shared secret that two buddies use to connect through a relay server
+
 Important: a full end-to-end sync does not currently work over loopback or private-only addresses. BuddyDrive will only dial buddies when it discovers a public TCP address, or when relay fallback is configured. The steps below validate initialization, folder setup, pairing, and daemon startup on one machine. For a real file transfer test, use two machines with public reachability or configure relay fallback.
 
 ## Prerequisites
@@ -137,15 +144,27 @@ To test actual file transfer, use one of these setups:
 1. Two real machines, each with a forwarded TCP port and a public `announce_addr` in `config.toml`
 2. Relay fallback on both sides with a shared relay token
 
-Relay fallback setup uses these commands on both peers:
+### Using the Public Koyeb Relay
+
+A public relay is available at `01.proxy.koyeb.app:19447`. Configure both peers:
+
+```bash
+# On both machines - use the "local" region with custom relay
+HOME=/tmp/buddy1 ./bin/buddydrive config set relay-region local
+HOME=/tmp/buddy2 ./bin/buddydrive config set relay-region local
+
+# Set matching relay tokens for each buddy
+HOME=/tmp/buddy1 ./bin/buddydrive config set buddy-relay-token <buddy2-id> swift-eagle
+HOME=/tmp/buddy2 ./bin/buddydrive config set buddy-relay-token <buddy1-id> swift-eagle
+```
+
+For production, use `relay-base-url` and `relay-region`:
 
 ```bash
 buddydrive config set relay-base-url https://buddydrive.net/relays
-buddydrive config set relay-region <region>
+buddydrive config set relay-region eu
 buddydrive config set buddy-relay-token <buddy-id> <shared-token>
 ```
-
-Use the same `<shared-token>` on both sides for the same buddy relationship.
 
 ## Cleanup
 

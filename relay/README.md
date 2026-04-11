@@ -58,6 +58,35 @@ After OK, all data is relayed bidirectionally.
 4. Configure BuddyDrive clients to use relay:
 
 ```bash
-buddydrive config set relay.addr "/ip4/<vps-ip>/tcp/41722"
-buddydrive config set relay.token "swift-eagle"
+buddydrive config set relay-addr "/ip4/<vps-ip>/tcp/41722"
+buddydrive config set buddy-relay-token <buddy-id> <token>
 ```
+
+## Koyeb Deployment
+
+The relay can be deployed on Koyeb's free tier:
+
+```bash
+# Create app
+koyeb apps create buddydrive
+
+# Create secret for tokens
+koyeb secrets create buddydrive-tokens --value 'token1,token2'
+
+# Deploy from GitHub
+koyeb services create relay \
+  --app buddydrive \
+  --git github.com/gokr/buddydrive \
+  --git-branch master \
+  --git-builder docker \
+  --git-workdir relay \
+  --ports 41722:tcp \
+  --proxy-ports 41722:tcp \
+  --env 'BUDDYDRIVE_TOKENS={{secret.buddydrive-tokens}}' \
+  --regions fra
+
+# Find the proxy endpoint
+koyeb services describe relay --app buddydrive -o yaml | grep -A5 'proxy_ports'
+```
+
+The relay will be available at the proxy host on the public port shown (e.g., `01.proxy.koyeb.app:19447`).

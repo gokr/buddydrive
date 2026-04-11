@@ -97,7 +97,7 @@ nimble build</code></pre>
 
         <h3>Initialize</h3>
 
-        <p>First time setup creates your identity:</p>
+        <p>First time setup creates your local BuddyDrive identity:</p>
 
         <div class="code-window">
             <div class="code-header">
@@ -111,8 +111,9 @@ nimble build</code></pre>
 
         <p>This creates:</p>
         <ul>
-            <li>Your unique buddy ID</li>
-            <li>A generated buddy name</li>
+            <li><strong>Buddy ID</strong> - A UUID that uniquely identifies your instance (e.g., <code>fcd6295c-a912-44d4-a27b-ad898795207d</code>)</li>
+            <li><strong>Buddy Name</strong> - A human-readable name (e.g., <code>purple-banana</code>)</li>
+            <li><strong>Peer ID</strong> - A libp2p identifier for P2P networking</li>
             <li>Configuration file at <code>~/.buddydrive/config.toml</code></li>
         </ul>
 
@@ -196,7 +197,7 @@ Buddy added: <span class="syntax-string">fcd6295c...</span></code></pre>
 
         <h3>Connectivity Notes</h3>
 
-        <p>BuddyDrive currently connects peers in one of two ways:</p>
+        <p>BuddyDrive connects peers in one of two ways:</p>
         <ol>
             <li>Direct connection with a public TCP address</li>
             <li>Relay fallback with a configured relay token</li>
@@ -214,7 +215,7 @@ Buddy added: <span class="syntax-string">fcd6295c...</span></code></pre>
             </div>
         </div>
 
-        <p>For relay fallback, configure both peers with:</p>
+        <p>For relay fallback, configure both peers with matching relay settings:</p>
 
         <div class="code-window">
             <div class="code-header">
@@ -224,11 +225,18 @@ Buddy added: <span class="syntax-string">fcd6295c...</span></code></pre>
             <div class="code-body">
 <pre><code>buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
-buddydrive config set buddy-relay-token <span class="syntax-string">&lt;buddy-id&gt;</span> <span class="syntax-string">&lt;shared-token&gt;</span></code></pre>
+buddydrive config set buddy-relay-token <span class="syntax-string">&lt;buddy-id&gt;</span> swift-eagle</code></pre>
             </div>
         </div>
 
-        <p>Use the same <code>&lt;shared-token&gt;</code> on both sides for the same buddy relationship.</p>
+        <p><strong>About Relay Tokens:</strong></p>
+        <ul>
+            <li>A relay token is a shared secret (like <code>swift-eagle</code>) that two buddies use to connect through a relay server</li>
+            <li>Both buddies must configure the <strong>same token</strong> for their relationship</li>
+            <li>The relay uses tokens to pair connections - it connects two clients using matching tokens</li>
+            <li>Tokens are per-buddy, so you can have different tokens with different buddies</li>
+            <li>A public relay is available on Koyeb at <code>01.proxy.koyeb.app:19447</code> with tokens <code>swift-eagle</code> and <code>brave-moose</code></li>
+        </ul>
 
         <h3>Check Status</h3>
 

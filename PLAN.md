@@ -540,11 +540,11 @@ sudo systemctl start buddydrive
   - Makefile for build/package ✓
 
 ### Remaining Work
-- Test end-to-end sync between two local instances
-- Test actual DHT discovery with bootstrap nodes
-- Add relay fallback for NAT traversal
-- Phase 3: Buddy pairing protocol
-- Phase 4: File sync with encryption
+- Test end-to-end sync between two machines with real connectivity
+- Improve DHT discovery reliability with bootstrap nodes
+- Add UPnP auto-configuration for easier setup
+- Implement proper background daemon mode (currently stays in foreground)
+- Add live connection status to `buddydrive status` command
 
 ---
 
@@ -599,3 +599,14 @@ The GTK4 GUI provides comprehensive configuration:
 Integration tests for DHT discovery and relay fallback are environment-dependent:
 - Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to make tests fail hard when services unavailable
 - Without this flag, tests skip gracefully when environment doesn't support them
+
+### Public Relay
+
+A public relay is deployed on Koyeb for testing and production use:
+
+- **Endpoint**: `01.proxy.koyeb.app:19447`
+- **Tokens**: `swift-eagle`, `brave-moose`
+- **Region**: Frankfurt (fra)
+- **Source**: `relay/` directory in repository
+
+To deploy your own relay, see `relay/README.md`.
