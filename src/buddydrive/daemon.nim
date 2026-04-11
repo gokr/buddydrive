@@ -170,7 +170,7 @@ proc runDiscoveryLoop(daemon: Daemon) {.async.} =
     except CancelledError:
       return
 
-proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void] {.async: (raises: []).} =
+proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void] {.async: (raises: [CatchableError]).} =
   if daemon.running:
     return
   
@@ -256,8 +256,9 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     echo "Control server started on port ", controlPort
     
     echo "Daemon started successfully"
-  except Exception as e:
+  except CatchableError as e:
     echo "Error starting daemon: ", e.msg
+    raise e
 
 proc stop*(daemon: Daemon): Future[void] {.async: (raises: []).} =
   if not daemon.running:
