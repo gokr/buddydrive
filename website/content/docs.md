@@ -51,7 +51,6 @@ This creates:
 
 - **Buddy ID** - A UUID that uniquely identifies your instance (e.g., `fcd6295c-a912-44d4-a27b-ad898795207d`)
 - **Buddy Name** - A human-readable name (e.g., `purple-banana`)
-- **Peer ID** - A libp2p identifier for P2P networking
 - Configuration file at `~/.buddydrive/config.toml`
 
 ### Pair With a Buddy
@@ -86,7 +85,10 @@ Pairing with buddy: fcd6295c...
 Pairing code: ABCD-EFGH
 
 Buddy added: fcd6295c...
+Pairing code stored for relay fallback.
 ```
+
+The pairing code is used for both pairing confirmation and relay connections.
 
 ### Add a Folder
 
@@ -119,7 +121,7 @@ Optional:
 BuddyDrive connects peers in one of two ways:
 
 1. Direct connection with a public TCP address
-2. Relay fallback with a configured relay token
+2. Relay fallback using the pairing code
 
 For direct connections, forward the configured `listen_port` on your router and set `[network].announce_addr` in `~/.buddydrive/config.toml` to a public multiaddr such as:
 
@@ -127,21 +129,19 @@ For direct connections, forward the configured `listen_port` on your router and 
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
 ```
 
-For relay fallback, configure both peers with matching relay settings:
+For relay fallback, configure relay region. The pairing code stored when adding a buddy is used as the relay shared secret:
 
 ```bash
 buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
-buddydrive config set buddy-relay-token <buddy-id> swift-eagle
 ```
 
-**About Relay Tokens:**
+**About the Pairing Code:**
 
-- A relay token is a shared secret (like `swift-eagle`) that two buddies use to connect through a relay server
-- Both buddies must configure the **same token** for their relationship
-- The relay uses tokens to pair connections - it connects two clients using matching tokens
-- Tokens are per-buddy, so you can have different tokens with different buddies
-- A public relay is available on Koyeb at `01.proxy.koyeb.app:19447` with tokens `swift-eagle` and `brave-moose`
+- Serves as both pairing confirmation and relay shared secret
+- Both buddies must use the **same code** for their relationship
+- The relay uses codes to pair connections - it connects two clients using matching codes
+- A public relay is available on Koyeb at `01.proxy.koyeb.app:19447` with codes `swift-eagle` and `brave-moose`
 
 ### Check Status
 
@@ -153,7 +153,6 @@ Output looks like:
 
 ```
 Buddy: purple-banana (fcd6295c...)
-Peer ID: (run 'buddydrive start' to connect)
 Sync window: always
 
 Folders:

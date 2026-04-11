@@ -66,15 +66,6 @@ nimble build        # Build CLI
 nimble gui_release  # Build GUI
 ```
 
-### Build from Source
-
-```bash
-git clone https://github.com/gokr/buddydrive.git
-cd buddydrive
-nimble build        # Build CLI only
-nimble gui_release  # Build GUI (requires GTK4)
-```
-
 ### Installing the GUI
 
 After building, install with desktop integration:
@@ -119,50 +110,42 @@ buddydrive start
 When you run `buddydrive init`, your instance gets:
 
 - **Buddy ID** - A UUID (e.g., `fcd6295c-a912-44d4-a27b-ad898795207d`) that uniquely identifies your BuddyDrive instance. Share this with buddies so they can pair with you.
-- **Buddy Name** - A human-readable name generated from adjective-noun pairs (e.g., `purple-banana`, `brave-moose`). Easier to remember than the UUID.
-- **Peer ID** - A libp2p peer identifier (e.g., `16Uiu2HAm...`) used for P2P networking. Derived from your cryptographic keys.
+- **Buddy Name** - A human-readable name (e.g., `purple-banana`) that's displayed in outputs and shared during handshake. You can customize it.
 
 ### Pairing
 
-To sync folders with someone, both sides need to add each other as buddies:
+To sync folders with someone, both sides add each other:
 
-1. **Generate a pairing code** on your machine with `buddydrive add-buddy --generate-code`
-2. **Share your Buddy ID and pairing code** with your buddy (in person, message, etc.)
+1. **Generate a pairing code** with `buddydrive add-buddy --generate-code`
+2. **Share your Buddy ID and pairing code** with your buddy
 3. Your buddy runs `buddydrive add-buddy --id <your-id> --code <pairing-code>`
-4. Both sides repeat the process in reverse so you have each other's info
+4. Both sides repeat in reverse
 
-### Relay Token
+The pairing code serves two purposes:
+- Confirms you're pairing with the right person
+- Used as the shared secret for relay connections (both buddies use the same code)
 
-When direct P2P connections aren't possible (NAT, firewall), BuddyDrive can use a relay server:
+### Security
 
-- **Relay Token** - A shared secret (e.g., `swift-eagle`) that two buddies use to connect through a relay
-- Both buddies must configure the **same token** for the same buddy relationship
-- Tokens are per-buddy, so you can have different tokens with different buddies
-- The relay uses the token to pair connections - it only connects two clients using the same token
+Pairing uses a shared secret model:
+- Both buddies must have the same pairing code stored
+- The code is used during relay handshake
+- Connections are encrypted via libp2p Noise protocol
 
-Example configuration:
-
-```bash
-# Set relay region (eu, us, asia, or local for testing)
-buddydrive config set relay-region eu
-
-# Set a shared token for a specific buddy
-buddydrive config set buddy-relay-token <buddy-id> swift-eagle
-```
+**Important**: Only pair with people you trust. An attacker who knows your Buddy ID and pairing code can connect as your buddy.
 
 ## Connectivity Notes
 
 - BuddyDrive connects peers when it discovers a public TCP address for the buddy, or when relay fallback is configured.
 - For direct connections, forward the configured `listen_port` on your router and set `[network].announce_addr` in `~/.buddydrive/config.toml` to a public multiaddr such as `/ip4/<public-ip>/tcp/41721`.
-- For relay fallback, configure both peers with the same relay settings:
+- For relay fallback, configure relay region. The pairing code is used as the relay shared secret:
 
 ```bash
 buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
-buddydrive config set buddy-relay-token <buddy-id> <shared-token>
 ```
 
-A public relay is also available on Koyeb at `01.proxy.koyeb.app:19447` (tokens: `swift-eagle`, `brave-moose`). See [relay/README.md](relay/README.md) for self-hosting.
+A public relay is available on Koyeb at `01.proxy.koyeb.app:19447` (tokens: `swift-eagle`, `brave-moose`). See [relay/README.md](relay/README.md) for self-hosting.
 
 See [TUTORIAL.md](TUTORIAL.md) for local testing workflow.
 
@@ -270,7 +253,6 @@ Config file location: `~/.buddydrive/config.toml`
 [buddy]
 name = "purple-banana"
 id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-public_key = ""
 
 [network]
 listen_port = 41721
@@ -290,8 +272,7 @@ buddies = ["buddy-id-here"]
 [[buddies]]
 id = "buddy-id-here"
 name = "cranky-wrench"
-public_key = ""
-relay_token = "swift-eagle"
+pairing_code = "ABCD-EFGH"
 added_at = "2026-04-10T12:00:00Z"
 ```
 
