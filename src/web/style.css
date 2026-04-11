@@ -35,6 +35,8 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -348,4 +350,11 @@ dialog legend {
 /* Dim text */
 .dim {
   color: var(--text-dim);
+}
+
+/* Mobile */
+@media (max-width: 480px) {
+  #buddy-name, #uptime {
+    display: none;
+  }
 }

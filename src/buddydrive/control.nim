@@ -252,6 +252,14 @@ proc configJson(): JsonNode =
       "name": cfg.buddy.name,
       "id": cfg.buddy.uuid
     },
+    "network": {
+      "listen_port": cfg.listenPort,
+      "announce_addr": cfg.announceAddr,
+      "relay_base_url": cfg.relayBaseUrl,
+      "relay_region": cfg.relayRegion,
+      "sync_window_start": cfg.syncWindowStart,
+      "sync_window_end": cfg.syncWindowEnd
+    },
     "folders": folders,
     "buddies": buddies
   }

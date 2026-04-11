@@ -190,6 +190,13 @@ const initEvents = () => {
     try {
       const data = await api.get("/config");
       document.getElementById("settings-name").value = data.buddy?.name || "";
+      const net = data.network || {};
+      document.getElementById("settings-port").value = net.listen_port || "";
+      document.getElementById("settings-announce").value = net.announce_addr || "";
+      document.getElementById("settings-relay-url").value = net.relay_base_url || "";
+      document.getElementById("settings-relay-region").value = net.relay_region || "";
+      document.getElementById("settings-sync-start").value = net.sync_window_start || "";
+      document.getElementById("settings-sync-end").value = net.sync_window_end || "";
     } catch (e) {
       // leave empty
     }
