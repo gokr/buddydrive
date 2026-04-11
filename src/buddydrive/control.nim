@@ -2,12 +2,10 @@ import std/[json, net, os, random, strutils, tables, times]
 import db_connector/db_sqlite
 import types
 import config
+import control_web
 
 const
   DefaultControlPort* = 17521
-  webIndex = staticRead("../web/index.html")
-  webStyle = staticRead("../web/style.css")
-  webApp = staticRead("../web/app.js")
 
 var controlStarted = false
 var controlThread: Thread[int]
@@ -82,7 +80,7 @@ proc markControlStopped*() =
   let cfg = config.loadConfig()
   writeRuntimeStatus(cfg, "", @[], getTime(), running = false)
 
-proc httpResponse(status: int, body: string, contentType: string): string =
+proc httpResponse*(status: int, body: string, contentType: string): string =
   let statusText = case status
   of 200: "OK"
   of 400: "Bad Request"
@@ -357,14 +355,14 @@ proc pairBuddyFromBody(body: string): tuple[status: int, response: JsonNode] =
   (200, %*{"ok": true, "message": "Buddy paired successfully"})
 
 proc handleRequest(raw: string): string =
+  let webResponse = serveWebRequest(raw)
+  if webResponse.len > 0:
+    return webResponse
   let req = parseRequest(raw)
   try:
     case req.httpMethod
     of "GET":
       case req.path
-      of "/", "/index.html": httpResponse(200, webIndex, "text/html; charset=utf-8")
-      of "/style.css": httpResponse(200, webStyle, "text/css; charset=utf-8")
-      of "/app.js": httpResponse(200, webApp, "application/javascript; charset=utf-8")
       of "/status": jsonResponse(200, statusJson())
       of "/buddies": jsonResponse(200, buddiesJson())
       of "/folders": jsonResponse(200, foldersJson())
@@ -408,18 +406,24 @@ proc handleRequest(raw: string): string =
 proc controlServerMain(port: int) {.thread.} =
   let socket = newSocket(buffered = false)
   socket.setSockOpt(OptReuseAddr, true)
-  socket.bindAddr(Port(port), "127.0.0.1")
+  socket.bindAddr(Port(port), "0.0.0.0")
   socket.listen()
-  echo "Control server started on port ", port
+  echo "Control server started on port ", port, " (LAN access enabled)"
   while true:
     var client: owned(Socket)
     socket.accept(client)
     try:
+      let (address, _) = client.getPeerAddr()
       let raw = client.recv(64 * 1024)
       if raw.len > 0:
         let response = block:
           {.cast(gcsafe).}:
-            handleRequest(raw)
+            let password = if config.configExists(): config.loadConfig().buddy.name else: ""
+            let authResult = authenticateRequest(raw, address, password)
+            if authResult.len > 0:
+              authResult
+            else:
+              handleRequest(raw)
         client.send(response)
     except CatchableError:
       discard
