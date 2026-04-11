@@ -491,6 +491,8 @@ sudo systemctl start buddydrive
 7. Selective sync (ignore patterns)
 8. Bandwidth limiting
 9. Version history
+10. **Key recovery** — Save private key in human-readable text format (like cryptocurrency seed phrases). Also provide an alternative recovery path without the key (e.g. security questions combined with another factor). Add recovery instructions to the homepage.
+11. **Unencrypted folder option** — Allow setting a folder to not be encrypted (encryption remains the default)
 
 ---
 
