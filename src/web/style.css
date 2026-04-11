@@ -80,6 +80,11 @@ header {
   color: var(--warning);
 }
 
+.badge-paused {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
 /* Main */
 main {
   max-width: 800px;

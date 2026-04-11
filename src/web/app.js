@@ -2,6 +2,12 @@
 
 const REFRESH_INTERVAL = 5000;
 
+// Detect base path: if loaded from /w/<secret>/, API calls use the same prefix
+const BASE_PATH = (() => {
+  const m = window.location.pathname.match(/^(\/w\/[^/]+)\//);
+  return m ? m[1] : "";
+})();
+
 // DOM references
 const dom = {
   statusBadge: document.getElementById("status-badge"),
@@ -18,12 +24,12 @@ const dom = {
 // API helpers
 const api = {
   async get(endpoint) {
-    const res = await fetch(endpoint);
+    const res = await fetch(BASE_PATH + endpoint);
     return res.json();
   },
 
   async post(endpoint, body = {}) {
-    const res = await fetch(endpoint, {
+    const res = await fetch(BASE_PATH + endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -32,7 +38,7 @@ const api = {
   },
 
   async del(endpoint) {
-    const res = await fetch(endpoint, { method: "DELETE" });
+    const res = await fetch(BASE_PATH + endpoint, { method: "DELETE" });
     return res.json();
   },
 };
@@ -118,8 +124,22 @@ const renderBuddies = (buddies) => {
 
 const renderStatus = (data) => {
   const running = data.running || false;
-  dom.statusBadge.textContent = running ? "Running" : "Stopped";
-  dom.statusBadge.className = `badge ${running ? "badge-running" : "badge-stopped"}`;
+  const syncEnabled = data.syncEnabled !== false;
+  const syncWindow = data.syncWindow || "always";
+
+  let badgeText, badgeClass;
+  if (!running) {
+    badgeText = "Stopped";
+    badgeClass = "badge-stopped";
+  } else if (!syncEnabled) {
+    badgeText = "Sync paused";
+    badgeClass = "badge-paused";
+  } else {
+    badgeText = "Syncing";
+    badgeClass = "badge-running";
+  }
+  dom.statusBadge.textContent = badgeText;
+  dom.statusBadge.className = `badge ${badgeClass}`;
 
   const name = data.buddy?.name || "Unknown";
   dom.buddyName.textContent = name;
@@ -324,15 +344,15 @@ const initEvents = () => {
     const relayRegion = document.getElementById("settings-relay-region").value.trim();
     if (relayRegion) body.network.relay_region = relayRegion;
 
-    const syncStart = document.getElementById("settings-sync-start").value.trim();
-    if (syncStart) body.network.sync_window_start = syncStart;
+    body.network.sync_window_start = document.getElementById("settings-sync-start").value.trim();
+    body.network.sync_window_end = document.getElementById("settings-sync-end").value.trim();
 
-    const syncEnd = document.getElementById("settings-sync-end").value.trim();
-    if (syncEnd) body.network.sync_window_end = syncEnd;
-
-    await api.post("/config", body);
+    const result = await api.post("/config", body);
     closeDialog("dialog-settings");
     await refresh();
+    if (result.restartRequired) {
+      alert("Settings saved. A daemon restart is required for some changes to take effect.");
+    }
   });
 
   // Logs refresh

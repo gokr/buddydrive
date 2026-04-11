@@ -3,12 +3,14 @@ import db_connector/db_sqlite
 import types
 import config
 import control_web
+import sync/policy
 
 const
   DefaultControlPort* = 17521
 
 var controlStarted = false
 var controlThread: Thread[int]
+var configDirty* = false
 
 proc getStateDb(): DbConn =
   let path = config.getConfigDir() / "state.db"
@@ -128,7 +130,9 @@ proc statusJson(): JsonNode =
           "running": running,
           "uptime": uptime,
           "peerId": peerId,
-          "addresses": addresses
+          "addresses": addresses,
+          "syncEnabled": isWithinSyncWindow(cfg),
+          "syncWindow": syncWindowDescription(cfg)
         }
     finally:
       db.close()
@@ -143,14 +147,18 @@ proc statusJson(): JsonNode =
       "running": false,
       "uptime": 0,
       "peerId": "",
-      "addresses": []
+      "addresses": [],
+      "syncEnabled": isWithinSyncWindow(cfg),
+      "syncWindow": syncWindowDescription(cfg)
     }
   %*{
     "buddy": {"name": "Unknown", "id": ""},
     "running": false,
     "uptime": 0,
     "peerId": "",
-    "addresses": []
+    "addresses": [],
+    "syncEnabled": true,
+    "syncWindow": "always"
   }
 
 proc buddiesJson(): JsonNode =
@@ -319,13 +327,14 @@ proc removeBuddyById(uuid: string): tuple[status: int, response: JsonNode] =
 
 proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] =
   let parsed = parseJson(body)
-  var cfg = config.loadConfig()
-  
+  let oldCfg = config.loadConfig()
+  var cfg = oldCfg
+
   if parsed.hasKey("buddy"):
     let buddy = parsed["buddy"]
     if buddy.hasKey("name"):
       cfg.buddy.name = buddy["name"].getStr(cfg.buddy.name)
-  
+
   if parsed.hasKey("network"):
     let net = parsed["network"]
     if net.hasKey("listen_port"):
@@ -340,9 +349,17 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
       cfg.syncWindowStart = net["sync_window_start"].getStr(cfg.syncWindowStart)
     if net.hasKey("sync_window_end"):
       cfg.syncWindowEnd = net["sync_window_end"].getStr(cfg.syncWindowEnd)
-  
+
   config.saveConfig(cfg)
-  (200, %*{"ok": true})
+
+  let restartRequired =
+    cfg.buddy.name != oldCfg.buddy.name or
+    cfg.listenPort != oldCfg.listenPort or
+    cfg.announceAddr != oldCfg.announceAddr or
+    cfg.relayBaseUrl != oldCfg.relayBaseUrl or
+    cfg.relayRegion != oldCfg.relayRegion
+
+  (200, %*{"ok": true, "restartRequired": restartRequired})
 
 proc pairBuddyFromBody(body: string): tuple[status: int, response: JsonNode] =
   let parsed = parseJson(body)
@@ -414,7 +431,13 @@ proc controlServerMain(port: int) {.thread.} =
   socket.setSockOpt(OptReuseAddr, true)
   socket.bindAddr(Port(port), "0.0.0.0")
   socket.listen()
-  echo "Control server started on port ", port, " (LAN access enabled)"
+  echo "Control server started on port ", port
+  echo "Web GUI (localhost): http://127.0.0.1:", port, "/"
+  {.cast(gcsafe).}:
+    if config.configExists():
+      let cfg = config.loadConfig()
+      let secret = webSecret(cfg.buddy.uuid)
+      echo "Web GUI (LAN): http://<your-ip>:", port, "/w/", secret, "/"
   while true:
     var client: owned(Socket)
     socket.accept(client)
@@ -424,12 +447,17 @@ proc controlServerMain(port: int) {.thread.} =
       if raw.len > 0:
         let response = block:
           {.cast(gcsafe).}:
-            let password = if config.configExists(): config.loadConfig().buddy.name else: ""
-            let authResult = authenticateRequest(raw, address, password)
-            if authResult.len > 0:
-              authResult
-            else:
+            if isLocalhost(address):
               handleRequest(raw)
+            else:
+              if not config.configExists():
+                forbiddenResponse
+              else:
+                let rewritten = rewriteLanRequest(raw, config.loadConfig().buddy.uuid)
+                if rewritten.len == 0:
+                  forbiddenResponse
+                else:
+                  handleRequest(rewritten)
         client.send(response)
     except CatchableError:
       discard
