@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BuddyDrive</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1>BuddyDrive</h1>
+      <span id="status-badge" class="badge badge-stopped">Stopped</span>
+    </div>
+    <div class="header-right">
+      <span id="buddy-name"></span>
+      <span id="uptime" class="dim"></span>
+      <button id="btn-refresh" class="btn btn-small" title="Refresh">Refresh</button>
+      <button id="btn-settings" class="btn btn-small" title="Settings">Settings</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="card-header">
+        <h2>Folders</h2>
+        <div class="card-actions">
+          <button id="btn-sync-all" class="btn btn-small">Sync All</button>
+          <button id="btn-add-folder" class="btn btn-primary btn-small">Add Folder</button>
+        </div>
+      </div>
+      <div id="folders-list" class="list"></div>
+      <p id="folders-empty" class="empty-state" hidden>No folders configured</p>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Buddies</h2>
+        <div class="card-actions">
+          <button id="btn-pair-buddy" class="btn btn-primary btn-small">Pair with Buddy</button>
+        </div>
+      </div>
+      <div id="buddies-list" class="list"></div>
+      <p id="buddies-empty" class="empty-state" hidden>No buddies paired</p>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Logs</h2>
+        <button id="btn-refresh-logs" class="btn btn-small">Refresh</button>
+      </div>
+      <div id="logs-container" class="logs-container">
+        <pre id="logs-content"></pre>
+      </div>
+    </section>
+  </main>
+
+  <!-- Add Folder Dialog -->
+  <dialog id="dialog-add-folder">
+    <form method="dialog">
+      <h3>Add Folder</h3>
+      <label for="folder-name">Folder name</label>
+      <input type="text" id="folder-name" placeholder="My Documents" required>
+      <label for="folder-path">Folder path</label>
+      <input type="text" id="folder-path" placeholder="/home/user/Documents" required>
+      <label class="checkbox-label">
+        <input type="checkbox" id="folder-encrypt" checked>
+        Encrypt folder contents
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="btn-cancel-folder">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="btn-submit-folder">Add</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Pair Buddy Dialog -->
+  <dialog id="dialog-pair-buddy">
+    <form method="dialog">
+      <h3>Pair with Buddy</h3>
+      <label for="buddy-id">Buddy ID</label>
+      <input type="text" id="buddy-id" placeholder="UUID" required>
+      <label for="buddy-pair-name">Buddy name (optional)</label>
+      <input type="text" id="buddy-pair-name" placeholder="Friend's name">
+      <label for="buddy-code">Pairing code</label>
+      <input type="text" id="buddy-code" placeholder="XXXX-XXXX" required>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="btn-cancel-pair">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="btn-submit-pair">Pair</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Settings Dialog -->
+  <dialog id="dialog-settings">
+    <form method="dialog">
+      <h3>Settings</h3>
+
+      <fieldset>
+        <legend>Identity</legend>
+        <label for="settings-name">Your name / nickname</label>
+        <input type="text" id="settings-name" placeholder="Name">
+      </fieldset>
+
+      <fieldset>
+        <legend>Network</legend>
+        <label for="settings-port">Listen port</label>
+        <input type="number" id="settings-port" placeholder="41721">
+        <label for="settings-announce">Announce address</label>
+        <input type="text" id="settings-announce" placeholder="/ip4/203.0.113.10/tcp/41721">
+      </fieldset>
+
+      <fieldset>
+        <legend>Relay Fallback</legend>
+        <label for="settings-relay-url">Relay base URL</label>
+        <input type="text" id="settings-relay-url" placeholder="https://buddydrive.net/relays">
+        <label for="settings-relay-region">Relay region</label>
+        <input type="text" id="settings-relay-region" placeholder="eu">
+      </fieldset>
+
+      <fieldset>
+        <legend>Sync Window</legend>
+        <label for="settings-sync-start">Start time (HH:MM, empty = always)</label>
+        <input type="text" id="settings-sync-start" placeholder="HH:MM">
+        <label for="settings-sync-end">End time (HH:MM)</label>
+        <input type="text" id="settings-sync-end" placeholder="HH:MM">
+      </fieldset>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="btn-cancel-settings">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="btn-submit-settings">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

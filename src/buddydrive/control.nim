@@ -5,6 +5,9 @@ import config
 
 const
   DefaultControlPort* = 17521
+  webIndex = staticRead("../web/index.html")
+  webStyle = staticRead("../web/style.css")
+  webApp = staticRead("../web/app.js")
 
 var controlStarted = false
 var controlThread: Thread[int]
@@ -79,8 +82,7 @@ proc markControlStopped*() =
   let cfg = config.loadConfig()
   writeRuntimeStatus(cfg, "", @[], getTime(), running = false)
 
-proc jsonResponse(status: int, node: JsonNode): string =
-  let body = $node
+proc httpResponse(status: int, body: string, contentType: string): string =
   let statusText = case status
   of 200: "OK"
   of 400: "Bad Request"
@@ -88,10 +90,13 @@ proc jsonResponse(status: int, node: JsonNode): string =
   of 500: "Internal Server Error"
   else: "OK"
   result = "HTTP/1.1 " & $status & " " & statusText & "\r\n"
-  result.add("Content-Type: application/json\r\n")
+  result.add("Content-Type: " & contentType & "\r\n")
   result.add("Content-Length: " & $body.len & "\r\n")
   result.add("Connection: close\r\n\r\n")
   result.add(body)
+
+proc jsonResponse(status: int, node: JsonNode): string =
+  httpResponse(status, $node, "application/json")
 
 proc parseRequest(raw: string): tuple[httpMethod: string, path: string, body: string] =
   let parts = raw.split("\r\n\r\n", 1)
@@ -357,6 +362,9 @@ proc handleRequest(raw: string): string =
     case req.httpMethod
     of "GET":
       case req.path
+      of "/", "/index.html": httpResponse(200, webIndex, "text/html; charset=utf-8")
+      of "/style.css": httpResponse(200, webStyle, "text/css; charset=utf-8")
+      of "/app.js": httpResponse(200, webApp, "application/javascript; charset=utf-8")
       of "/status": jsonResponse(200, statusJson())
       of "/buddies": jsonResponse(200, buddiesJson())
       of "/folders": jsonResponse(200, foldersJson())
