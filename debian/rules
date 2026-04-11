@@ -8,13 +8,15 @@ export DH_VERBOSE=1
 override_dh_auto_build:
 	nimble build -d:release
 	nimble gui_release
+	help2man -i debian/buddydrive-man.include -o debian/buddydrive.1 --no-info ./bin/buddydrive
 
 override_dh_auto_install:
 	mkdir -p debian/buddydrive/usr/bin
 	cp bin/buddydrive debian/buddydrive/usr/bin/
-	cp buddydrive-gui debian/buddydrive/usr/bin/
-	mkdir -p debian/buddydrive/lib/systemd/system
-	cp debian/buddydrive.service debian/buddydrive/lib/systemd/system/
+	cp bin/buddydrive-gui debian/buddydrive/usr/bin/
+	mkdir -p debian/buddydrive/usr/share/man/man1
+	cp debian/buddydrive.1 debian/buddydrive/usr/share/man/man1/
+	cp debian/buddydrive-gui.1 debian/buddydrive/usr/share/man/man1/
 	mkdir -p debian/buddydrive/usr/share/applications
 	cp buddydrive.desktop debian/buddydrive/usr/share/applications/
 	mkdir -p debian/buddydrive/usr/share/icons/hicolor/48x48/apps

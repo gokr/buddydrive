@@ -17,7 +17,7 @@ proc newIndex*(folderName: string): FileIndex =
   result.folderName = folderName
   
   let dbPath = config.getIndexPath()
-  config.ensureConfigDir()
+  config.ensureDataDir()
   
   let db = open(dbPath, "", "", "")
   result.db = db

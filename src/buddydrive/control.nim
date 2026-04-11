@@ -10,7 +10,7 @@ var controlStarted = false
 var controlThread: Thread[int]
 
 proc getStateDb(): DbConn =
-  let path = config.getConfigDir() / "state.db"
+  let path = config.getDataDir() / "state.db"
   result = open(path, "", "", "")
   result.exec(sql"""
     CREATE TABLE IF NOT EXISTS runtime_status (
@@ -42,7 +42,7 @@ proc getStateDb(): DbConn =
   """)
 
 proc writeRuntimeStatus*(cfg: AppConfig, peerId: string, addresses: seq[string], startTime: Time, running = true) =
-  config.ensureConfigDir()
+  config.ensureDataDir()
   let db = getStateDb()
   try:
     db.exec(sql"DELETE FROM runtime_status")
@@ -54,7 +54,7 @@ proc writeRuntimeStatus*(cfg: AppConfig, peerId: string, addresses: seq[string],
     db.close()
 
 proc writeLiveStatus*(buddyStatuses: seq[BuddyStatus], folderStatuses: seq[SyncStatus]) =
-  config.ensureConfigDir()
+  config.ensureDataDir()
   let db = getStateDb()
   try:
     db.exec(sql"DELETE FROM buddy_state")
@@ -106,7 +106,7 @@ proc parseRequest(raw: string): tuple[httpMethod: string, path: string, body: st
     result.body = parts[1]
 
 proc statusJson(): JsonNode =
-  let statePath = config.getConfigDir() / "state.db"
+  let statePath = config.getDataDir() / "state.db"
   if fileExists(statePath):
     let db = getStateDb()
     try:
@@ -153,7 +153,7 @@ proc statusJson(): JsonNode =
   }
 
 proc buddiesJson(): JsonNode =
-  let statePath = config.getConfigDir() / "state.db"
+  let statePath = config.getDataDir() / "state.db"
   if fileExists(statePath):
     let db = getStateDb()
     try:
@@ -188,7 +188,7 @@ proc buddiesJson(): JsonNode =
 proc foldersJson(): JsonNode =
   var liveFolders: Table[string, JsonNode] = initTable[string, JsonNode]()
   
-  let statePath = config.getConfigDir() / "state.db"
+  let statePath = config.getDataDir() / "state.db"
   if fileExists(statePath):
     let db = getStateDb()
     try:
@@ -421,13 +421,13 @@ proc controlServerMain(port: int) {.thread.} =
 proc startControlServer*(port: int = DefaultControlPort) =
   if controlStarted:
     return
-  config.ensureConfigDir()
-  writeFile(config.getConfigDir() / "port", $port)
+  config.ensureDataDir()
+  writeFile(config.getDataDir() / "port", $port)
   controlStarted = true
   createThread(controlThread, controlServerMain, port)
 
 proc stopControlServer*() =
   markControlStopped()
-  let portPath = config.getConfigDir() / "port"
+  let portPath = config.getDataDir() / "port"
   if fileExists(portPath):
     removeFile(portPath)

@@ -6,25 +6,24 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=%u
-Group=%u
 ExecStart=/usr/bin/buddydrive start
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
 
-# Environment
-Environment="HOME=/home/%u"
+# Environment - separate config and data directories
+Environment="BUDDYDRIVE_CONFIG_DIR=/etc/buddydrive"
+Environment="BUDDYDRIVE_DATA_DIR=/var/lib/buddydrive"
 
 # Security
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=no
-ReadWritePaths=/home/%u/.buddydrive
+ProtectHome=yes
+ReadWritePaths=/var/lib/buddydrive
 
 # Logging
 StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

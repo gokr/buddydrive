@@ -1,6 +1,6 @@
 bin/buddydrive usr/bin
-buddydrive-gui usr/bin
-debian/buddydrive.service lib/systemd/system
+bin/buddydrive-gui usr/bin
+debian/buddydrive.conf usr/lib/tmpfiles.d
 buddydrive.desktop usr/share/applications
 icons/hicolor/48x48/apps/buddydrive.png usr/share/icons/hicolor/48x48/apps
 icons/hicolor/128x128/apps/buddydrive.png usr/share/icons/hicolor/128x128/apps

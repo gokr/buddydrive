@@ -30,6 +30,6 @@ install: build build-gui
 	install -Dm644 icons/hicolor/512x512/apps/buddydrive.png $(DESTDIR)/usr/share/icons/hicolor/512x512/apps/buddydrive.png
 
 deb: clean build build-gui
-	dpkg-buildpackage -us -uc -b
+	dpkg-buildpackage -us -uc -b -d
 
 package: deb

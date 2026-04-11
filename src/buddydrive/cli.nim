@@ -84,21 +84,6 @@ Commands:
   status                    Show sync status
   logs                      Show recent logs
   help                      Show this help
-
-Examples:
-  buddydrive init
-  buddydrive config set relay-base-url https://buddydrive.net/relays
-  buddydrive config set relay-region eu
-  buddydrive config set sync-window 01:00-06:00
-  buddydrive config set bandwidth-limit 500
-  buddydrive config set buddy-relay-token abc123 swift-eagle
-  buddydrive config set folder-append-only docs on
-  buddydrive add-folder ~/Documents --name docs
-  buddydrive add-buddy --generate-code
-  buddydrive add-buddy --id abc123 --code XYZ789
-  buddydrive connect /ip4/127.0.0.1/tcp/12345
-  buddydrive start
-  buddydrive status
 """
 
 proc parseCli*(): CommandLine =

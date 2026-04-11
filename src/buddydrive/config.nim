@@ -16,22 +16,34 @@ const INDEX_FILE* = "index.db"
 const LOG_FILE* = "buddydrive.log"
 
 proc getConfigDir*(): string =
-  result = getHomeDir() / CONFIG_DIR
+  result = getEnv("BUDDYDRIVE_CONFIG_DIR")
+  if result.len == 0:
+    result = getHomeDir() / CONFIG_DIR
+
+proc getDataDir*(): string =
+  result = getEnv("BUDDYDRIVE_DATA_DIR")
+  if result.len == 0:
+    result = getConfigDir()
 
 proc getConfigPath*(): string =
   result = getConfigDir() / CONFIG_FILE
 
 proc getStatePath*(): string =
-  result = getConfigDir() / STATE_FILE
+  result = getDataDir() / STATE_FILE
 
 proc getIndexPath*(): string =
-  result = getConfigDir() / INDEX_FILE
+  result = getDataDir() / INDEX_FILE
 
 proc getLogPath*(): string =
-  result = getConfigDir() / LOG_FILE
+  result = getDataDir() / LOG_FILE
 
 proc ensureConfigDir*() =
   let dir = getConfigDir()
+  if not dir.dirExists():
+    createDir(dir)
+
+proc ensureDataDir*() =
+  let dir = getDataDir()
   if not dir.dirExists():
     createDir(dir)
 
