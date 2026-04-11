@@ -80,7 +80,8 @@ proc markControlStopped*() =
   let cfg = config.loadConfig()
   writeRuntimeStatus(cfg, "", @[], getTime(), running = false)
 
-proc httpResponse*(status: int, body: string, contentType: string): string =
+proc jsonResponse(status: int, node: JsonNode): string =
+  let body = $node
   let statusText = case status
   of 200: "OK"
   of 400: "Bad Request"
@@ -88,13 +89,10 @@ proc httpResponse*(status: int, body: string, contentType: string): string =
   of 500: "Internal Server Error"
   else: "OK"
   result = "HTTP/1.1 " & $status & " " & statusText & "\r\n"
-  result.add("Content-Type: " & contentType & "\r\n")
+  result.add("Content-Type: application/json\r\n")
   result.add("Content-Length: " & $body.len & "\r\n")
   result.add("Connection: close\r\n\r\n")
   result.add(body)
-
-proc jsonResponse(status: int, node: JsonNode): string =
-  httpResponse(status, $node, "application/json")
 
 proc parseRequest(raw: string): tuple[httpMethod: string, path: string, body: string] =
   let parts = raw.split("\r\n\r\n", 1)
