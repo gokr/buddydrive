@@ -1,10 +1,10 @@
 # BuddyDrive Control API
 
-REST API served by the daemon on `127.0.0.1:17521` (configurable).
+REST API served by the daemon on `127.0.0.1:17521` by default. The actual port is written to `~/.buddydrive/port` after startup.
 
 ## Authentication
 
-None required - only accessible from localhost. The port is written to `~/.buddydrive/port` after startup.
+None. The control server only binds to localhost.
 
 ## Endpoints
 
@@ -13,6 +13,7 @@ None required - only accessible from localhost. The port is written to `~/.buddy
 Overall daemon status.
 
 **Response:**
+
 ```json
 {
   "buddy": {
@@ -21,16 +22,17 @@ Overall daemon status.
   },
   "running": true,
   "uptime": 3600,
-  "peerId": "QmXxxx...",
-  "addresses": ["/ip4/192.168.1.100/tcp/4001/p2p/QmXxxx..."]
+  "peerId": "16Uiu2HAm...",
+  "addresses": ["/ip4/203.0.113.10/tcp/41721/p2p/16Uiu2HAm..."]
 }
 ```
 
 ### GET /buddies
 
-List all configured buddies.
+List configured buddies plus any live status written by the daemon.
 
 **Response:**
+
 ```json
 {
   "buddies": [
@@ -45,44 +47,12 @@ List all configured buddies.
 }
 ```
 
-### POST /buddies
-
-Add a new buddy.
-
-**Request:**
-```json
-{
-  "name": "cranky-wrench",
-  "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
-  "pairingCode": "X7K9-M2P4"
-}
-```
-
-**Response:**
-```json
-{
-  "ok": true,
-  "buddy": {
-    "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
-    "name": "cranky-wrench"
-  }
-}
-```
-
-### DELETE /buddies/:id
-
-Remove a buddy.
-
-**Response:**
-```json
-{"ok": true}
-```
-
 ### POST /buddies/pairing-code
 
-Generate a new pairing code.
+Generate a pairing code using the current local identity.
 
 **Response:**
+
 ```json
 {
   "buddyId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -92,11 +62,45 @@ Generate a new pairing code.
 }
 ```
 
-### GET /folders
+### POST /buddies/pair
 
-List all configured folders.
+Add a buddy through the local API.
+
+**Request:**
+
+```json
+{
+  "buddyId": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+  "buddyName": "cranky-wrench",
+  "code": "X7K9-M2P4"
+}
+```
 
 **Response:**
+
+```json
+{
+  "ok": true,
+  "message": "Buddy paired successfully"
+}
+```
+
+### DELETE /buddies/:id
+
+Remove a buddy.
+
+**Response:**
+
+```json
+{"ok": true}
+```
+
+### GET /folders
+
+List configured folders plus any live sync status written by the daemon.
+
+**Response:**
+
 ```json
 {
   "folders": [
@@ -122,6 +126,7 @@ List all configured folders.
 Add a folder.
 
 **Request:**
+
 ```json
 {
   "name": "docs",
@@ -132,14 +137,9 @@ Add a folder.
 ```
 
 **Response:**
+
 ```json
-{
-  "ok": true,
-  "folder": {
-    "name": "docs",
-    "path": "/home/user/Documents"
-  }
-}
+{"ok": true}
 ```
 
 ### DELETE /folders/:name
@@ -147,71 +147,81 @@ Add a folder.
 Remove a folder.
 
 **Response:**
+
 ```json
 {"ok": true}
 ```
 
 ### POST /sync/:folderName
 
-Trigger manual sync for a folder.
+Trigger sync for a folder name.
 
 **Response:**
+
 ```json
 {
   "ok": true,
-  "syncId": "sync-123",
-  "message": "Sync started"
+  "message": "Sync started",
+  "folder": "docs"
 }
-```
-
-### GET /sync/:folderName
-
-Get sync status for a folder.
-
-**Response:**
-```json
-{
-  "folder": "docs",
-  "status": "syncing",
-  "progress": 85,
-  "filesTotal": 1500,
-  "filesSynced": 1275,
-  "bytesTotal": 2500000000,
-  "bytesSynced": 2125000000,
-  "currentFile": "project/report.pdf",
-  "startedAt": "2026-04-09T14:30:00Z",
-  "errors": []
-}
-```
-
-### GET /sync/:folderName/cancel
-
-Cancel ongoing sync.
-
-**Response:**
-```json
-{"ok": true}
 ```
 
 ### GET /logs
 
-Get recent log entries.
-
-**Query params:**
-- `count` - Number of lines (default: 100, max: 1000)
-- `level` - Filter by level: debug, info, warn, error
+Get recent log lines.
 
 **Response:**
+
 ```json
 {
   "logs": [
     {
-      "timestamp": "2026-04-09T14:30:00Z",
-      "level": "info",
-      "message": "Connected to buddy: cranky-wrench"
+      "raw": "2026-04-09T14:30:00Z INFO Connected to buddy: cranky-wrench"
     }
   ]
 }
+```
+
+### GET /config
+
+Show current saved configuration.
+
+**Response:**
+
+```json
+{
+  "buddy": {
+    "name": "purple-banana",
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+  },
+  "folders": [],
+  "buddies": []
+}
+```
+
+### POST /config
+
+Update selected config fields.
+
+**Request:**
+
+```json
+{
+  "buddy": {
+    "name": "purple-banana"
+  },
+  "network": {
+    "announce_addr": "/ip4/203.0.113.10/tcp/41721",
+    "relay_base_url": "https://buddydrive.net/relays",
+    "relay_region": "eu"
+  }
+}
+```
+
+**Response:**
+
+```json
+{"ok": true}
 ```
 
 ### POST /config/reload
@@ -219,24 +229,9 @@ Get recent log entries.
 Reload configuration from disk.
 
 **Response:**
+
 ```json
 {"ok": true}
-```
-
-### GET /config
-
-Show current configuration.
-
-**Response:**
-```json
-{
-  "buddy": {
-    "name": "purple-banana",
-    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-  },
-  "folders": [...],
-  "buddies": [...]
-}
 ```
 
 ## Error Responses
@@ -251,9 +246,16 @@ All errors follow this format:
 ```
 
 Common error codes:
-- `CONFIG_NOT_FOUND` - No config file
-- `FOLDER_NOT_FOUND` - Folder doesn't exist
-- `BUDDY_NOT_FOUND` - Buddy doesn't exist
-- `SYNC_IN_PROGRESS` - Sync already running
-- `INVALID_REQUEST` - Bad JSON body
-- `PAIRING_FAILED` - Pairing rejected
+
+- `FOLDER_NOT_FOUND` - folder doesn't exist
+- `BUDDY_NOT_FOUND` - buddy doesn't exist
+- `INVALID_REQUEST` - bad or incomplete JSON body
+- `NOT_FOUND` - endpoint not found
+- `INTERNAL_ERROR` - server-side exception while handling the request
+
+## Notes
+
+- The API is intentionally localhost-only and has no extra authentication layer.
+- `POST /buddies/pair` requires a `code` field.
+- Recovery-specific operations are handled by the CLI today, not the control API.
+- There is no separate `GET /sync/:folder` endpoint in the current implementation; live status is exposed through `GET /folders` and `GET /buddies`.

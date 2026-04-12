@@ -4,9 +4,9 @@ This tutorial shows how to smoke-test BuddyDrive on a single machine with two is
 
 ## Key Concepts
 
-- **Buddy ID** - A UUID (e.g., `fcd6295c-a912-44d4-a27b-ad898795207d`) that identifies a BuddyDrive instance
-- **Buddy Name** - A human-readable name (e.g., `purple-banana`) that's displayed and shared during handshake
-- **Pairing Code** - A shared secret (e.g., `ABCD-EFGH`) used both for pairing confirmation and relay connections
+- **Buddy ID** - a UUID that identifies a BuddyDrive instance
+- **Buddy Name** - a human-readable name shared during handshake
+- **Pairing Code** - a shared secret used both for pairing confirmation and relay fallback
 
 Important: a full end-to-end sync does not currently work over loopback or private-only addresses. BuddyDrive will only dial buddies when it discovers a public TCP address, or when relay fallback is configured. The steps below validate initialization, folder setup, pairing, and daemon startup on one machine. For a real file transfer test, use two machines with public reachability or configure relay fallback.
 
@@ -69,11 +69,11 @@ Copy the `ID:` value from each command.
 
 ## Step 6: Pair Both Sides
 
-BuddyDrive currently accepts a buddy ID and pairing code, then stores the buddy entry locally, so for testing you should add each side to the other.
+BuddyDrive currently accepts a buddy ID and pairing code, then stores the buddy entry locally, so for testing you should add each side to the other. Use the same pairing code on both sides if you want relay fallback to work later.
 
 ```bash
 HOME=/tmp/buddy1 ./bin/buddydrive add-buddy --id <BUDDY2_UUID> --code TEST-0001
-HOME=/tmp/buddy2 ./bin/buddydrive add-buddy --id <BUDDY1_UUID> --code TEST-0002
+HOME=/tmp/buddy2 ./bin/buddydrive add-buddy --id <BUDDY1_UUID> --code TEST-0001
 ```
 
 ## Step 7: Verify the Saved Configuration
@@ -159,12 +159,45 @@ HOME=/tmp/buddy2 ./bin/buddydrive config set relay-region local
 
 The same pairing code connects both buddies through the relay.
 
-For production, use the public relay:
+For production, use the public relay list:
 
 ```bash
 buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
 ```
+
+## Restore
+
+### Restore a Missing File From Your Buddy
+
+Once both sides can sync, BuddyDrive restores missing local files as part of normal sync. In practice that means:
+
+1. A file exists in Buddy B's folder
+2. The same file is missing from Buddy A's folder
+3. The next successful sync recreates the file on Buddy A
+
+Append-only only protects existing local files from being overwritten. It does not block creating a file that is missing locally.
+
+### Restore Config On A Replacement Machine
+
+On the original machine, set up recovery once:
+
+```bash
+./bin/buddydrive setup-recovery
+```
+
+That command generates a 12-word recovery phrase, asks you to verify part of it, stores recovery metadata in `config.toml`, and syncs an encrypted copy of your config to the relay.
+
+On a replacement machine:
+
+```bash
+./bin/buddydrive recover
+./bin/buddydrive start
+```
+
+Enter the same 12-word phrase. If relay recovery succeeds, BuddyDrive writes the restored config locally. Starting the daemon then lets normal sync recreate the missing files in your configured folders.
+
+Current limitation: `recover` first tries the relay and then prompts for buddy fallback details, but the buddy-backed config fetch path is not implemented yet.
 
 ## Cleanup
 

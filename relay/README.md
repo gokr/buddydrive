@@ -1,14 +1,16 @@
 # BuddyDrive Relay
 
-A simple TCP relay server for BuddyDrive P2P sync when direct connections aren't possible.
+A simple TCP relay server for BuddyDrive when direct connections are not possible.
 
 ## How It Works
 
-1. Client connects and sends a token (newline-terminated)
-2. Server validates token against whitelist
-3. If valid and no peer waiting, client waits
-4. When matching peer connects, both receive "OK" and bidirectional relay begins
-5. Either side disconnects → relay ends
+1. Client connects and sends a token followed by `\n`
+2. Server validates the token against the whitelist
+3. If valid and no peer is waiting, the client waits
+4. When a matching peer connects, both receive `OK`
+5. All further bytes are relayed bidirectionally until one side disconnects
+
+On the BuddyDrive side, the buddy `pairing_code` is reused as this relay token.
 
 ## Usage
 
@@ -41,26 +43,51 @@ docker-compose up -d
 
 ## Protocol
 
-```
+```text
 Client -> Server: <token>\n
-Server -> Client: OK\n           (when paired)
-Server -> Client: WAIT\n         (waiting for peer)
-Server -> Client: (disconnect)   (invalid token)
+Server -> Client: WAIT\n
+Server -> Client: OK\n
+Server -> Client: (disconnect)   # invalid token
+```
 
-After OK, all data is relayed bidirectionally.
+After `OK`, all data is relayed bidirectionally.
+
+## Configuring BuddyDrive Clients
+
+Both buddies need the same pairing code stored for their relationship.
+
+For local testing, BuddyDrive has a built-in `local` relay mapping:
+
+```bash
+buddydrive config set relay-region local
+buddydrive config set buddy-pairing-code <buddy-id> <pairing-code>
+```
+
+For hosted relay discovery, BuddyDrive expects an HTTP relay list service. Configure:
+
+```bash
+buddydrive config set relay-base-url https://example.com/relays
+buddydrive config set relay-region eu
+buddydrive config set buddy-pairing-code <buddy-id> <pairing-code>
+```
+
+BuddyDrive fetches `<relay-base-url>/<relay-region>` and expects JSON like:
+
+```json
+{
+  "relays": [
+    "/dns4/relay.example.com/tcp/41722"
+  ],
+  "ttl_seconds": 3600
+}
 ```
 
 ## VPS Deployment
 
-1. Get a VPS with public IP (Hetzner, DigitalOcean, Vultr ~$4-6/mo)
+1. Get a VPS with a public IP
 2. Install Docker
-3. Deploy with your tokens
-4. Configure BuddyDrive clients to use relay:
-
-```bash
-buddydrive config set relay-addr "/ip4/<vps-ip>/tcp/41722"
-buddydrive config set buddy-relay-token <buddy-id> <token>
-```
+3. Deploy the relay with your allowed tokens
+4. Optionally expose a small HTTP relay-list endpoint for your clients
 
 ## Koyeb Deployment
 
@@ -84,9 +111,6 @@ koyeb services create relay \
   --proxy-ports 41722:tcp \
   --env 'BUDDYDRIVE_TOKENS={{secret.buddydrive-tokens}}' \
   --regions fra
-
-# Find the proxy endpoint
-koyeb services describe relay --app buddydrive -o yaml | grep -A5 'proxy_ports'
 ```
 
-The relay will be available at the proxy host on the public port shown (e.g., `01.proxy.koyeb.app:19447`).
+The relay will be available at the proxy host on the public port shown by Koyeb.
