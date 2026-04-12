@@ -186,20 +186,32 @@ proc sendFileData*(transfer: FileTransfer, conn: Connection, path: string, offse
 
 proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): Future[bool] {.async.} =
   let fullPath = transfer.scanner.rootPath / path
-  
+  let tmpPath = fullPath & TempSuffix
+
   createDir(fullPath.parentDir())
-  
+
   var totalReceived: int64 = 0
+  var expectedSize = int64(-1)
   var success = true
-  
+
   while true:
     let msgOpt = await transfer.protocol.receiveMessage(conn)
     if msgOpt.isNone or msgOpt.get().kind != msgFileData:
       success = false
       break
-    
+
     let msg = msgOpt.get()
-    
+
+    if msg.dataOffset != totalReceived:
+      success = false
+      break
+
+    if expectedSize < 0:
+      expectedSize = msg.totalSize
+    elif msg.totalSize != expectedSize:
+      success = false
+      break
+
     var payload = msg.data
     if msg.dataCompression == ckLz4:
       try:
@@ -208,15 +220,32 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): F
         success = false
         break
 
-    if not writeFileChunk(fullPath, msg.dataOffset, payload):
+    if not writeFileChunk(tmpPath, msg.dataOffset, payload):
       success = false
       break
-    
+
     totalReceived += payload.len
-    
+
     if msg.done:
       break
-  
+
+  if success:
+    if expectedSize >= 0 and totalReceived != expectedSize:
+      success = false
+
+  if success:
+    discard flushAndClose(tmpPath)
+    try:
+      moveFile(tmpPath, fullPath)
+    except:
+      success = false
+
+  if not success:
+    try:
+      removeFile(tmpPath)
+    except:
+      discard
+
   let ack = newFileAck(success, totalReceived)
   try:
     await transfer.protocol.sendMessage(conn, ack)
@@ -225,7 +254,7 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): F
 
   if success and fileExists(fullPath):
     transfer.index.addFile(transfer.scanner.scanFile(fullPath), synced = true)
-  
+
   return success
 
 proc syncFile*(transfer: FileTransfer, conn: Connection, fileInfo: FileInfo): Future[bool] {.async.} =

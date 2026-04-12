@@ -495,6 +495,10 @@ sudo systemctl start buddydrive
 11. **Unencrypted folder option** — Allow setting a folder to not be encrypted (encryption remains the default)
 12. Can we simplify the info to be sent to buddy with only one item, like buddy nickname/token
 13. Improve crash-resilience, see file `Crash-Safety-During-File-Sync.md`
+    - [DONE] Atomic writes: temp file (`.buddytmp`) + best-effort fsync + rename
+    - [DONE] Startup cleanup of leftover `.buddytmp` files
+    - [DONE] Ignore `.buddytmp` files during scans
+    - [SKIPPED] Transfer resumption from saved offset for large files
 ---
 
 ## Recovery System

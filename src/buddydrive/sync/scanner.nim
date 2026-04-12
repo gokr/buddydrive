@@ -1,8 +1,13 @@
 import std/os except FileInfo
-import std/[times, strutils, hashes, tables]
+import std/[times, strutils, hashes, tables, syncio]
+when defined(posix):
+  import std/posix_utils
 import ../types
 
 export types
+
+const
+  TempSuffix* = ".buddytmp"
 
 type
   ScannerError* = object of CatchableError
@@ -51,7 +56,7 @@ proc scanDirectory*(scanner: FileScanner): seq[types.FileInfo] =
     return result
   
   for path in walkDirRec(scanner.rootPath, relative = false):
-    if path.fileExists():
+    if path.fileExists() and not path.endsWith(TempSuffix):
       result.add(scanner.scanFile(path))
 
 proc scanChanges*(scanner: FileScanner, previous: seq[types.FileInfo]): seq[FileChange] =
@@ -109,10 +114,34 @@ proc writeFileChunk*(path: string, offset: int64, data: seq[byte]): bool =
         let createFile = open(path, fmWrite)
         createFile.close()
         f = open(path, fmReadWriteExisting)
-    
+
     defer: f.close()
-    
+
     f.setFilePos(offset)
     result = f.writeBytes(data, 0, data.len) == data.len
   except:
     result = false
+
+proc flushAndClose*(path: string): bool =
+  ## Best-effort durability barrier before atomic rename.
+  try:
+    let f = open(path, fmReadWriteExisting)
+    defer: f.close()
+    when defined(posix):
+      fsync(int(getFileHandle(f)))
+    else:
+      flushFile(f)
+    true
+  except:
+    false
+
+proc cleanupTempFiles*(rootPath: string) =
+  ## Remove leftover .buddytmp files from interrupted transfers.
+  if not dirExists(rootPath):
+    return
+  for path in walkDirRec(rootPath, relative = false):
+    if path.endsWith(TempSuffix):
+      try:
+        removeFile(path)
+      except:
+        discard

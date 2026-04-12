@@ -15,6 +15,7 @@ import p2p/rawrelay
 import sync/policy
 import sync/session
 import config
+import sync/scanner
 import control
 import nat
 import recovery
@@ -210,7 +211,10 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     return
   
   echo "Starting daemon..."
-  
+
+  for folder in daemon.config.folders:
+    cleanupTempFiles(folder.path)
+
   try:
     var announceAddrs: seq[MultiAddress] = @[]
     

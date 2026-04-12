@@ -29,6 +29,7 @@ proc testAppendOnly() =
   localFile.encryptedPath = localFile.path
   localFile.size = 10
   localFile.mtime = 100
+  for i in 0..<32: localFile.hash[i] = byte(i)
 
   var remoteNew: FileInfo
   remoteNew.path = "new.txt"
@@ -42,7 +43,9 @@ proc testAppendOnly() =
   remoteUpdated.size = 99
   remoteUpdated.mtime = 300
 
+  # New file always synced
   doAssert shouldSyncRemoteFile(folder, remoteNew, false)
+  # Existing local file is preserved in append-only mode
   doAssert not shouldSyncRemoteFile(folder, remoteUpdated, true, localFile)
 
   folder.appendOnly = false
