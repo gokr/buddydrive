@@ -1,4 +1,4 @@
-import std/[times, strutils, options, hashes]
+import std/[times, strutils, options, hashes, base64]
 import chronos
 import curly
 import webby/httpheaders
@@ -150,7 +150,8 @@ proc syncConfigToRelay*(config: AppConfig, relayUrl: string): Future[bool] {.asy
   let url = relayUrl.strip(chars = {'/'}) & "/kv/" & pubkey
   
   try:
-    let response = client.put(url, emptyHttpHeaders(), encryptedConfig.toOpenArray(0, encryptedConfig.len - 1), CONFIG_SYNC_TIMEOUT)
+    let encoded = encode(encryptedConfig)
+    let response = client.put(url, emptyHttpHeaders(), encoded.toOpenArray(0, encoded.len - 1), CONFIG_SYNC_TIMEOUT)
     if response.code >= 200 and response.code < 300:
       return true
     else:
@@ -167,7 +168,7 @@ proc fetchConfigFromRelay*(publicKeyB58: string, relayUrl: string): Future[Optio
   try:
     let response = client.get(url, emptyHttpHeaders(), CONFIG_SYNC_TIMEOUT)
     if response.code == 200:
-      return some(response.body)
+      return some(decode(response.body))
     else:
       return none(string)
   except Exception as e:
