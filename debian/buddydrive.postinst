@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+# Create directories if tmpfiles.d didn't run yet
+mkdir -p /etc/buddydrive
+mkdir -p /var/lib/buddydrive
+
+# Initialize config if it doesn't exist
+if [ ! -f /etc/buddydrive/config.toml ]; then
+    BUDDYDRIVE_CONFIG_DIR=/etc/buddydrive \
+    BUDDYDRIVE_DATA_DIR=/var/lib/buddydrive \
+    /usr/bin/buddydrive init
+fi
+
+#DEBHELPER#
+
+exit 0
