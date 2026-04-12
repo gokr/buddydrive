@@ -1,5 +1,11 @@
-import std/[strutils, times, options]
+import std/[strutils, times]
+import std/options as std_options
 import db_connector/db_mysql
+import db_connector/mysql
+
+type Option*[T] = std_options.Option[T]
+
+const CLIENT_SSL = 2048'u32
 
 type
   KvStoreError* = object of CatchableError
@@ -37,6 +43,20 @@ proc parseConnectionString(connStr: string): tuple[host: string, port: int, user
   result.port = parseInt(hostPort[1])
   result.database = hostParts[1]
 
+proc openSsl(connection, user, password, database: string): DbConn =
+  var res = mysql.init(nil)
+  if res == nil:
+    raise newException(KvStoreError, "could not init mysql")
+  discard mysql.sslSet(res, nil, nil, nil, nil, nil)
+  let colonPos = connection.find(':')
+  let host = if colonPos < 0: connection else: substr(connection, 0, colonPos - 1)
+  let port: mysql.cuint = if colonPos < 0: mysql.cuint(0) else: mysql.cuint(substr(connection, colonPos + 1).parseInt)
+  if mysql.real_connect(res, host, user, password, database, port, nil, CLIENT_SSL.int) == nil:
+    var errmsg = $mysql.error(res)
+    mysql.close(res)
+    raise newException(KvStoreError, errmsg)
+  result = DbConn(res)
+
 proc initKvStore*(connStr: string): KvStore =
   result = KvStore()
   result.connectionStr = connStr
@@ -45,7 +65,7 @@ proc initKvStore*(connStr: string): KvStore =
   let connection = parsed.host & ":" & $parsed.port
   
   try:
-    result.db = open(connection, parsed.user, parsed.password, parsed.database)
+    result.db = openSsl(connection, parsed.user, parsed.password, parsed.database)
     result.connected = true
     
     result.db.exec(sql"""
