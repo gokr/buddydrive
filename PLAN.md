@@ -524,7 +524,7 @@ Add a recovery system to BuddyDrive that allows users to recover their configura
 ### TiDB Connection
 
 ```
-mysql://kgBvFzeMm5AB3UV.root:z8zUaQX9l7EhPmml@gateway01.eu-central-1.prod.aws.tidbcloud.com:4000/sys
+Set via `TIDB_CONNECTION_STRING` environment variable (stored in Koyeb secrets)
 ```
 
 Default relay URL: `https://01.proxy.koyeb.app`
