@@ -4,6 +4,9 @@ import ../types
 
 export types
 
+const
+  TempSuffix* = ".buddytmp"
+
 type
   ScannerError* = object of CatchableError
   
@@ -109,10 +112,31 @@ proc writeFileChunk*(path: string, offset: int64, data: seq[byte]): bool =
         let createFile = open(path, fmWrite)
         createFile.close()
         f = open(path, fmReadWriteExisting)
-    
+
     defer: f.close()
-    
+
     f.setFilePos(offset)
     result = f.writeBytes(data, 0, data.len) == data.len
   except:
     result = false
+
+proc flushAndClose*(path: string): bool =
+  ## Open, fsync, and close a file to ensure data is persisted to disk.
+  try:
+    let f = open(path, fmRead)
+    defer: f.close()
+    flushFile(f)
+    true
+  except:
+    false
+
+proc cleanupTempFiles*(rootPath: string) =
+  ## Remove leftover .buddytmp files from interrupted transfers.
+  if not dirExists(rootPath):
+    return
+  for path in walkDirRec(rootPath, relative = false):
+    if path.endsWith(TempSuffix):
+      try:
+        removeFile(path)
+      except:
+        discard

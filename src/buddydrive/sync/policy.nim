@@ -45,5 +45,6 @@ proc shouldSyncRemoteFile*(folder: FolderConfig, remote: FileInfo, localFound: b
   if not localFound:
     return true
   if folder.appendOnly:
-    return false
+    # Allow re-sync if local file appears corrupt (hash mismatch)
+    return remote.hash != local.hash
   remote.mtime > local.mtime or remote.size != local.size
