@@ -1,5 +1,6 @@
 nimble.develop
 nimbledeps
+nimble.paths
 
 # Build artifacts
 bin/*
