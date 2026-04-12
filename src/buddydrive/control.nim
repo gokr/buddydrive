@@ -471,8 +471,7 @@ proc syncConfigHandler(): tuple[status: int, response: JsonNode] =
   if not cfg.recovery.enabled:
     return (400, %*{"error": "Recovery not set up", "code": "NOT_SETUP"})
   
-  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: "https://01.proxy.koyeb.app"
-  let synced = waitFor syncConfigToRelay(cfg, relayUrl)
+  let synced = waitFor syncConfigToRelay(cfg, DefaultKvApiUrl)
   
   if synced:
     (200, %*{"ok": true, "message": "Config synced to relay"})
