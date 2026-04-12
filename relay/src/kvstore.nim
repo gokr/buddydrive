@@ -1,18 +1,15 @@
 import std/[strutils, times]
 import std/options as std_options
-import db_connector/db_mysql
-import db_connector/mysql
+import debby/mysql
 
 type Option*[T] = std_options.Option[T]
-
-const CLIENT_SSL = 2048'u32
 
 type
   KvStoreError* = object of CatchableError
   
   KvStore* = ref object
     connectionStr: string
-    db: DbConn
+    db: Db
     connected: bool
 
 proc parseConnectionString(connStr: string): tuple[host: string, port: int, user: string, password: string, database: string] =
@@ -43,37 +40,21 @@ proc parseConnectionString(connStr: string): tuple[host: string, port: int, user
   result.port = parseInt(hostPort[1])
   result.database = hostParts[1]
 
-proc openSsl(connection, user, password, database: string): DbConn =
-  var res = mysql.init(nil)
-  if res == nil:
-    raise newException(KvStoreError, "could not init mysql")
-  discard mysql.sslSet(res, nil, nil, nil, nil, nil)
-  let colonPos = connection.find(':')
-  let host = if colonPos < 0: connection else: substr(connection, 0, colonPos - 1)
-  let port: mysql.cuint = if colonPos < 0: mysql.cuint(0) else: mysql.cuint(substr(connection, colonPos + 1).parseInt)
-  if mysql.real_connect(res, host, user, password, database, port, nil, CLIENT_SSL.int) == nil:
-    var errmsg = $mysql.error(res)
-    mysql.close(res)
-    raise newException(KvStoreError, errmsg)
-  result = DbConn(res)
-
 proc initKvStore*(connStr: string): KvStore =
   result = KvStore()
   result.connectionStr = connStr
   
   let parsed = parseConnectionString(connStr)
-  let connection = parsed.host & ":" & $parsed.port
   
   try:
-    result.db = openSsl(connection, parsed.user, parsed.password, parsed.database)
+    result.db = openDatabase(parsed.database, parsed.host, parsed.port, parsed.user, parsed.password)
     result.connected = true
     
-    result.db.exec(sql"""
+    result.db.query("""
       CREATE TABLE IF NOT EXISTS config_store (
         public_key_b58 VARCHAR(128) PRIMARY KEY,
         encrypted_config LONGBLOB NOT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_updated (updated_at)
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     """)
     
@@ -91,8 +72,8 @@ proc storeConfig*(kv: KvStore, pubkeyB58: string, encryptedBlob: string): bool =
     return false
   
   try:
-    kv.db.exec(sql"DELETE FROM config_store WHERE public_key_b58 = ?", pubkeyB58)
-    kv.db.exec(sql"INSERT INTO config_store (public_key_b58, encrypted_config) VALUES (?, ?)", 
+    kv.db.query("DELETE FROM config_store WHERE public_key_b58 = ?", pubkeyB58)
+    kv.db.query("INSERT INTO config_store (public_key_b58, encrypted_config) VALUES (?, ?)", 
                pubkeyB58, encryptedBlob)
     return true
   except Exception as e:
@@ -104,14 +85,10 @@ proc fetchConfig*(kv: KvStore, pubkeyB58: string): Option[tuple[data: string, up
     return none(tuple[data: string, updatedAt: Time])
   
   try:
-    let rows = kv.db.getAllRows(sql"SELECT encrypted_config, updated_at FROM config_store WHERE public_key_b58 = ?", pubkeyB58)
-    if rows.len > 0:
-      let data = rows[0][0]
-      let timestampStr = rows[0][1]
-      let timestamp = parseTime(timestampStr, "yyyy-MM-dd HH:mm:ss", utc())
-      return some((data: data, updatedAt: timestamp))
-    else:
-      return none(tuple[data: string, updatedAt: Time])
+    let rows = kv.db.query("SELECT encrypted_config, updated_at FROM config_store WHERE public_key_b58 = ?", pubkeyB58)
+    for row in rows:
+      return some((data: row[0], updatedAt: getTime()))
+    return none(tuple[data: string, updatedAt: Time])
   except Exception as e:
     echo "Error fetching config: ", e.msg
     return none(tuple[data: string, updatedAt: Time])
@@ -121,8 +98,8 @@ proc deleteConfig*(kv: KvStore, pubkeyB58: string): bool =
     return false
   
   try:
-    let rowsAffected = kv.db.execAffectedRows(sql"DELETE FROM config_store WHERE public_key_b58 = ?", pubkeyB58)
-    return rowsAffected > 0
+    kv.db.query("DELETE FROM config_store WHERE public_key_b58 = ?", pubkeyB58)
+    return true
   except Exception as e:
     echo "Error deleting config: ", e.msg
     return false
@@ -132,50 +109,22 @@ proc configExists*(kv: KvStore, pubkeyB58: string): bool =
     return false
   
   try:
-    let rows = kv.db.getAllRows(sql"SELECT 1 FROM config_store WHERE public_key_b58 = ? LIMIT 1", pubkeyB58)
-    return rows.len > 0
+    let rows = kv.db.query("SELECT 1 FROM config_store WHERE public_key_b58 = ? LIMIT 1", pubkeyB58)
+    for _ in rows:
+      return true
+    return false
   except Exception as e:
     echo "Error checking config existence: ", e.msg
     return false
-
-proc listConfigs*(kv: KvStore, limit: int = 100): seq[tuple[pubkeyB58: string, updatedAt: Time]] =
-  if not kv.connected:
-    return @[]
-  
-  try:
-    let rows = kv.db.getAllRows(sql"SELECT public_key_b58, updated_at FROM config_store ORDER BY updated_at DESC LIMIT ?", $limit)
-    result = @[]
-    for row in rows:
-      let pubkey = row[0]
-      let timestampStr = row[1]
-      let timestamp = parseTime(timestampStr, "yyyy-MM-dd HH:mm:ss", utc())
-      result.add((pubkeyB58: pubkey, updatedAt: timestamp))
-  except Exception as e:
-    echo "Error listing configs: ", e.msg
-    return @[]
-
-proc cleanupOldConfigs*(kv: KvStore, daysOld: int = 365): int =
-  if not kv.connected:
-    return 0
-  
-  try:
-    let rowsAffected = kv.db.execAffectedRows(
-      sql"DELETE FROM config_store WHERE updated_at < DATE_SUB(NOW(), INTERVAL ? DAY)", 
-      $daysOld
-    )
-    return int(rowsAffected)
-  except Exception as e:
-    echo "Error cleaning up old configs: ", e.msg
-    return 0
 
 proc getConfigCount*(kv: KvStore): int =
   if not kv.connected:
     return 0
   
   try:
-    let rows = kv.db.getAllRows(sql"SELECT COUNT(*) FROM config_store")
-    if rows.len > 0:
-      return parseInt(rows[0][0])
+    let rows = kv.db.query("SELECT COUNT(*) FROM config_store")
+    for row in rows:
+      return parseInt(row[0])
     return 0
   except Exception as e:
     echo "Error getting config count: ", e.msg

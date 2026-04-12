@@ -7,8 +7,7 @@ binDir = "bin"
 bin = @["relay"]
 
 requires "nim >= 2.2.0"
-requires "db_connector"
-requires "mummy"
+requires "https://github.com/gokr/debby"
 
 task build, "Build release binary":
   exec "nim c -d:release src/relay.nim"

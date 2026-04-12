@@ -1,4 +1,4 @@
-FROM nimlang/nim:2.2.0-alpine AS builder
+FROM nimlang/nim:2.2.8-alpine AS builder
 
 RUN apk add --no-cache mariadb-connector-c-dev git
 
@@ -10,12 +10,12 @@ RUN nimble install -y --depsOnly
 COPY src/ ./src/
 RUN nim c -d:release -d:withKvStore --threads:on --mm:arc -o:/app/buddydrive-relay src/relay.nim
 
-FROM alpine:3.20
+FROM ubuntu:24.04
 
-RUN apk add --no-cache mariadb-connector-c
-
-RUN ln -s /usr/lib/libmariadb.so.3 /usr/lib/libmariadbclient.so || true
-RUN ln -s /usr/lib/libmariadb.so.3 /usr/lib/libmysqlclient.so || true
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends libmysqlclient21 ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
