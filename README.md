@@ -86,7 +86,7 @@ After installation, BuddyDrive will appear in your applications menu.
 
 ## Quick Start
 
-See [TUTORIAL.md](TUTORIAL.md) for a detailed local testing guide.
+See [docs/TUTORIAL.md](docs/TUTORIAL.md) for a detailed local testing guide.
 
 ```bash
 # Initialize your BuddyDrive identity

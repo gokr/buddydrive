@@ -494,7 +494,7 @@ sudo systemctl start buddydrive
 10. **Key recovery** — Save private key in human-readable text format (like cryptocurrency seed phrases). Also provide an alternative recovery path without the key (e.g. security questions combined with another factor). Add recovery instructions to the homepage.
 11. **Unencrypted folder option** — Allow setting a folder to not be encrypted (encryption remains the default)
 12. Can we simplify the info to be sent to buddy with only one item, like buddy nickname/token
-13. Improve crash-resilience, see file Crash-Safety-During-File-Sync.md
+13. Improve crash-resilience, see file `Crash-Safety-During-File-Sync.md`
 ---
 
 ## Recovery System
@@ -720,4 +720,4 @@ A public relay is deployed on Koyeb for testing and production use:
 - **Region**: Frankfurt (fra)
 - **Source**: `relay/` directory in repository
 
-To deploy your own relay, see `relay/README.md`.
+To deploy your own relay, see `../relay/README.md`.

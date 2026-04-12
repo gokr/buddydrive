@@ -93,6 +93,13 @@ relay/src/
 - `~/.buddydrive/state.db` — Runtime state (SQLite)
 - `~/.buddydrive/index.db` — File metadata index (SQLite)
 
+### GUI / Control API
+
+- Use direct GTK4, not Owlkettle
+- The GUI should read the control API port from `~/.buddydrive/port`
+- Dynamic daemon state lives in `state.db`; static configuration lives in `config.toml`
+- GTK4 text entry widgets use `gtk_editable_get_text`
+
 ## Conventions
 
 ### Nim Style
@@ -137,7 +144,7 @@ relay/src/
 
 ## Recovery System (in progress)
 
-See PLAN.md for full details. Key points:
+See `docs/PLAN.md` for full details. Key points:
 
 - BIP39 12-word mnemonic as single recovery secret
 - Master key stored plaintext in config.toml
