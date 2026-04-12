@@ -14,6 +14,9 @@ FROM alpine:3.20
 
 RUN apk add --no-cache mariadb-connector-c
 
+RUN ln -s /usr/lib/libmariadb.so.3 /usr/lib/libmariadbclient.so || true
+RUN ln -s /usr/lib/libmariadb.so.3 /usr/lib/libmysqlclient.so || true
+
 WORKDIR /app
 
 COPY --from=builder /app/buddydrive-relay /app/buddydrive-relay
