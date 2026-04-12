@@ -234,8 +234,8 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): F
       success = false
 
   if success:
-    discard flushAndClose(tmpPath)
     try:
+      flushAndClose(tmpPath)
       moveFile(tmpPath, fullPath)
     except:
       success = false

@@ -122,18 +122,14 @@ proc writeFileChunk*(path: string, offset: int64, data: seq[byte]): bool =
   except:
     result = false
 
-proc flushAndClose*(path: string): bool =
-  ## Best-effort durability barrier before atomic rename.
-  try:
-    let f = open(path, fmReadWriteExisting)
-    defer: f.close()
-    when defined(posix):
-      fsync(int(getFileHandle(f)))
-    else:
-      flushFile(f)
-    true
-  except:
-    false
+proc flushAndClose*(path: string) =
+  ## Durability barrier before atomic rename. Raises on failure.
+  let f = open(path, fmReadWriteExisting)
+  defer: f.close()
+  when defined(posix):
+    fsync(int(getFileHandle(f)))
+  else:
+    flushFile(f)
 
 proc cleanupTempFiles*(rootPath: string) =
   ## Remove leftover .buddytmp files from interrupted transfers.
