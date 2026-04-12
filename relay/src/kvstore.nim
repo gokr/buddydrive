@@ -1,5 +1,5 @@
-import std/[os, strutils, times, options]
-import std/db_mysql
+import std/[strutils, times, options]
+import db_connector/db_mysql
 
 type
   KvStoreError* = object of CatchableError
@@ -7,6 +7,7 @@ type
   KvStore* = ref object
     connectionStr: string
     db: DbConn
+    connected: bool
 
 proc parseConnectionString(connStr: string): tuple[host: string, port: int, user: string, password: string, database: string] =
   var conn = connStr
@@ -41,9 +42,11 @@ proc initKvStore*(connStr: string): KvStore =
   result.connectionStr = connStr
   
   let parsed = parseConnectionString(connStr)
+  let connection = parsed.host & ":" & $parsed.port
   
   try:
-    result.db = open(parsed.database, parsed.user, parsed.password, parsed.host, parsed.port)
+    result.db = open(connection, parsed.user, parsed.password, parsed.database)
+    result.connected = true
     
     result.db.exec(sql"""
       CREATE TABLE IF NOT EXISTS config_store (
@@ -59,12 +62,12 @@ proc initKvStore*(connStr: string): KvStore =
     raise newException(KvStoreError, "Failed to connect to database: " & e.msg)
 
 proc close*(kv: KvStore) =
-  if kv.db != nil:
+  if kv.connected:
     kv.db.close()
-    kv.db = nil
+    kv.connected = false
 
 proc storeConfig*(kv: KvStore, pubkeyB58: string, encryptedBlob: string): bool =
-  if kv.db == nil:
+  if not kv.connected:
     return false
   
   try:
@@ -77,7 +80,7 @@ proc storeConfig*(kv: KvStore, pubkeyB58: string, encryptedBlob: string): bool =
     return false
 
 proc fetchConfig*(kv: KvStore, pubkeyB58: string): Option[tuple[data: string, updatedAt: Time]] =
-  if kv.db == nil:
+  if not kv.connected:
     return none(tuple[data: string, updatedAt: Time])
   
   try:
@@ -94,7 +97,7 @@ proc fetchConfig*(kv: KvStore, pubkeyB58: string): Option[tuple[data: string, up
     return none(tuple[data: string, updatedAt: Time])
 
 proc deleteConfig*(kv: KvStore, pubkeyB58: string): bool =
-  if kv.db == nil:
+  if not kv.connected:
     return false
   
   try:
@@ -105,7 +108,7 @@ proc deleteConfig*(kv: KvStore, pubkeyB58: string): bool =
     return false
 
 proc configExists*(kv: KvStore, pubkeyB58: string): bool =
-  if kv.db == nil:
+  if not kv.connected:
     return false
   
   try:
@@ -116,7 +119,7 @@ proc configExists*(kv: KvStore, pubkeyB58: string): bool =
     return false
 
 proc listConfigs*(kv: KvStore, limit: int = 100): seq[tuple[pubkeyB58: string, updatedAt: Time]] =
-  if kv.db == nil:
+  if not kv.connected:
     return @[]
   
   try:
@@ -132,7 +135,7 @@ proc listConfigs*(kv: KvStore, limit: int = 100): seq[tuple[pubkeyB58: string, u
     return @[]
 
 proc cleanupOldConfigs*(kv: KvStore, daysOld: int = 365): int =
-  if kv.db == nil:
+  if not kv.connected:
     return 0
   
   try:
@@ -146,7 +149,7 @@ proc cleanupOldConfigs*(kv: KvStore, daysOld: int = 365): int =
     return 0
 
 proc getConfigCount*(kv: KvStore): int =
-  if kv.db == nil:
+  if not kv.connected:
     return 0
   
   try:

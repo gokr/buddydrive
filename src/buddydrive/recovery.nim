@@ -47,7 +47,13 @@ proc mnemonicToSeed*(mnemonic: string): array[64, byte] =
   let words = mnemonic.strip().splitWhitespace()
   let normalized = words.mapIt(it.toLowerAscii()).join(" ")
   
-  let salt = toBytes("mnemonic")
+  let saltLen = int(crypto_pwhash_saltbytes())
+  var salt = newSeq[byte](saltLen)
+  let saltStr = "mnemonic"
+  for i in 0 ..< min(saltStr.len, saltLen):
+    salt[i] = byte(saltStr[i])
+  for i in saltStr.len ..< saltLen:
+    salt[i] = byte(i)
   
   let entropy = crypto_pwhash(
     normalized,
@@ -120,27 +126,28 @@ proc base58Encode*(data: seq[byte]): string =
     else:
       break
 
-proc derivePublicKeyB58*(seed: array[64, byte]): string =
-  var pk: string
-  var sk: string
-  (pk, sk) = crypto_box_keypair()
-  result = base58Encode(toBytes(pk))
+proc derivePublicKeyB58*(masterKey: array[32, byte]): string =
+  var masterKeyStr = newString(32)
+  for i in 0 ..< 32:
+    masterKeyStr[i] = char(masterKey[i])
+  let hash = crypto_generichash(masterKeyStr, 32)
+  var hashBytes = newSeq[byte](hash.len)
+  for i in 0 ..< hash.len:
+    hashBytes[i] = byte(hash[i])
+  base58Encode(hashBytes)
 
 proc encryptConfigBlob*(config: string, masterKey: array[32, byte]): string =
   var masterKeyStr = newString(32)
   for i in 0 ..< 32:
     masterKeyStr[i] = char(masterKey[i])
-  
-  let nonce = randombytes(crypto_secretbox_noncebytes())
-  let encrypted = crypto_secretbox_easy(masterKeyStr, config)
-  result = nonce & encrypted
+  result = crypto_secretbox_easy(masterKeyStr, config)
 
 proc decryptConfigBlob*(encrypted: string, masterKey: array[32, byte]): string =
   var masterKeyStr = newString(32)
   for i in 0 ..< 32:
     masterKeyStr[i] = char(masterKey[i])
   
-  if encrypted.len < crypto_secretbox_noncebytes():
+  if encrypted.len < int(crypto_secretbox_noncebytes()) + int(crypto_secretbox_macbytes()):
     raise newException(ValueError, "Encrypted data too short")
   
   result = crypto_secretbox_open_easy(masterKeyStr, encrypted)
@@ -151,7 +158,7 @@ proc setupRecovery*(): tuple[mnemonic: string, recovery: RecoveryConfig] =
   let masterKey = deriveMasterKey(seed)
   
   result.recovery.enabled = true
-  result.recovery.publicKeyB58 = derivePublicKeyB58(seed)
+  result.recovery.publicKeyB58 = derivePublicKeyB58(masterKey)
   result.recovery.masterKey = bytesToHex(masterKey)
 
 proc recoverFromMnemonic*(mnemonic: string): RecoveryConfig =
@@ -159,7 +166,7 @@ proc recoverFromMnemonic*(mnemonic: string): RecoveryConfig =
   let masterKey = deriveMasterKey(seed)
   
   result.enabled = true
-  result.publicKeyB58 = derivePublicKeyB58(seed)
+  result.publicKeyB58 = derivePublicKeyB58(masterKey)
   result.masterKey = bytesToHex(masterKey)
 
 proc verifyMnemonic*(mnemonic: string, storedMasterKey: string): bool =

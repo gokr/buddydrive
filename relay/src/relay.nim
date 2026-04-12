@@ -3,6 +3,15 @@ import std/[os, strutils, selectors, tables, sets, locks, nativesockets, times]
 when defined(withKvStore):
   import kvstore
   import kvstore_api
+  import std/typedthreads
+
+when defined(withKvStore):
+  var kvStoreRef: KvStore
+  var kvApiPort: int
+
+  proc kvApiThread {.thread.} =
+    {.cast(gcsafe).}:
+      runKvApi(kvStoreRef, kvApiPort)
 
 const DefaultPort = 41722
 const MaxTokenLen = 64
@@ -278,7 +287,6 @@ proc run(port: int) =
 
 when isMainModule:
   var port = DefaultPort
-  var kvPort = 8080
   
   if paramCount() > 0:
     try:
@@ -291,16 +299,20 @@ when isMainModule:
     if kvConnStr.len > 0:
       echo "Starting KV store with TiDB..."
       try:
-        let kv = initKvStore(kvConnStr)
+        kvStoreRef = initKvStore(kvConnStr)
         echo "KV store initialized"
         
         if paramCount() > 1:
           try:
-            kvPort = parseInt(paramStr(2))
+            kvApiPort = parseInt(paramStr(2))
           except:
             discard
         
-        echo "KV API port: ", kvPort
+        echo "KV API port: ", kvApiPort
+        
+        var kvThread: Thread[void]
+        createThread(kvThread, kvApiThread)
+        echo "KV API thread started"
       except Exception as e:
         echo "Failed to initialize KV store: ", e.msg
         echo "Running relay-only mode"

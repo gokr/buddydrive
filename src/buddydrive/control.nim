@@ -1,7 +1,10 @@
 import std/[json, net, os, random, strutils, tables, times]
+import chronos
 import db_connector/db_sqlite
 import types
 import config
+import recovery
+import sync/config_sync
 
 const
   DefaultControlPort* = 17521
@@ -350,6 +353,106 @@ proc pairBuddyFromBody(body: string): tuple[status: int, response: JsonNode] =
   cfg.addBuddy(buddy)
   (200, %*{"ok": true, "message": "Buddy paired successfully"})
 
+proc setupRecoveryHandler(): tuple[status: int, response: JsonNode] =
+  if not config.configExists():
+    return (400, %*{"error": "No config found. Run init first.", "code": "NO_CONFIG"})
+  
+  var cfg = config.loadConfig()
+  if cfg.recovery.enabled:
+    return (400, %*{"error": "Recovery already enabled", "code": "ALREADY_SETUP"})
+  
+  let (mnemonic, recovery) = setupRecovery()
+  cfg.recovery = recovery
+  config.saveConfig(cfg)
+  
+  let words = mnemonic.splitWhitespace()
+  (200, %*{
+    "ok": true,
+    "mnemonic": mnemonic,
+    "words": words,
+    "publicKey": recovery.publicKeyB58,
+    "masterKey": recovery.masterKey
+  })
+
+proc verifyRecoveryWordHandler(body: string): tuple[status: int, response: JsonNode] =
+  if not config.configExists():
+    return (400, %*{"error": "No config found", "code": "NO_CONFIG"})
+  
+  let cfg = config.loadConfig()
+  if not cfg.recovery.enabled:
+    return (400, %*{"error": "Recovery not set up", "code": "NOT_SETUP"})
+  
+  let parsed = parseJson(body)
+  let index = parsed{"index"}.getInt(-1)
+  let word = parsed{"word"}.getStr("")
+  
+  if index < 0 or index >= 12:
+    return (400, %*{"error": "index must be 0-11", "code": "INVALID_INDEX"})
+  if word.len == 0:
+    return (400, %*{"error": "word is required", "code": "MISSING_WORD"})
+  
+  let expected = getWordForIndex(findWordIndex(word.toLowerAscii()))
+  let correct = word.toLowerAscii() == expected.toLowerAscii()
+  
+  (200, %*{"ok": true, "correct": correct})
+
+proc recoverHandler(body: string): tuple[status: int, response: JsonNode] =
+  let parsed = parseJson(body)
+  let mnemonic = parsed{"mnemonic"}.getStr("")
+  
+  if mnemonic.splitWhitespace().len != 12:
+    return (400, %*{"error": "Must provide 12-word mnemonic", "code": "INVALID_MNEMONIC"})
+  
+  if not validateMnemonic(mnemonic):
+    return (400, %*{"error": "Invalid mnemonic words", "code": "INVALID_MNEMONIC"})
+  
+  let recovery = recoverFromMnemonic(mnemonic)
+  let masterKey = hexToBytes(recovery.masterKey)
+  
+  if not config.configExists():
+    return (400, %*{"error": "No config file to verify against", "code": "NO_CONFIG"})
+  
+  let cfg = config.loadConfig()
+  if not verifyMnemonic(mnemonic, cfg.recovery.masterKey):
+    return (400, %*{"error": "Mnemonic does not match stored master key", "code": "MISMATCH"})
+  
+  (200, %*{
+    "ok": true,
+    "publicKey": recovery.publicKeyB58,
+    "masterKey": recovery.masterKey
+  })
+
+proc exportRecoveryHandler(): tuple[status: int, response: JsonNode] =
+  if not config.configExists():
+    return (400, %*{"error": "No config found", "code": "NO_CONFIG"})
+  
+  let cfg = config.loadConfig()
+  if not cfg.recovery.enabled:
+    return (400, %*{"error": "Recovery not set up", "code": "NOT_SETUP"})
+  
+  (200, %*{
+    "ok": true,
+    "publicKey": cfg.recovery.publicKeyB58,
+    "masterKey": cfg.recovery.masterKey,
+    "enabled": cfg.recovery.enabled
+  })
+
+proc syncConfigHandler(): tuple[status: int, response: JsonNode] =
+  if not config.configExists():
+    return (400, %*{"error": "No config found", "code": "NO_CONFIG"})
+  
+  let cfg = config.loadConfig()
+  if not cfg.recovery.enabled:
+    return (400, %*{"error": "Recovery not set up", "code": "NOT_SETUP"})
+  
+  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: "https://01.proxy.koyeb.app"
+  let synced = waitFor syncConfigToRelay(cfg, relayUrl)
+  
+  if synced:
+    (200, %*{"ok": true, "message": "Config synced to relay"})
+  else:
+    (500, %*{"error": "Failed to sync config to relay", "code": "SYNC_FAILED"})
+
 proc handleRequest(raw: string): string =
   let req = parseRequest(raw)
   try:
@@ -361,6 +464,9 @@ proc handleRequest(raw: string): string =
       of "/folders": jsonResponse(200, foldersJson())
       of "/config": jsonResponse(200, configJson())
       of "/logs": jsonResponse(200, logsJson())
+      of "/recovery":
+        let resp = exportRecoveryHandler()
+        jsonResponse(resp.status, resp.response)
       else: jsonResponse(404, %*{"error": "Not found", "code": "NOT_FOUND"})
     of "POST":
       case req.path
@@ -376,6 +482,21 @@ proc handleRequest(raw: string): string =
         jsonResponse(200, %*{"ok": true})
       of "/folders":
         let resp = addFolderFromBody(req.body)
+        jsonResponse(resp.status, resp.response)
+      of "/recovery/setup":
+        let resp = setupRecoveryHandler()
+        jsonResponse(resp.status, resp.response)
+      of "/recovery/verify-word":
+        let resp = verifyRecoveryWordHandler(req.body)
+        jsonResponse(resp.status, resp.response)
+      of "/recovery/recover":
+        let resp = recoverHandler(req.body)
+        jsonResponse(resp.status, resp.response)
+      of "/recovery/export":
+        let resp = exportRecoveryHandler()
+        jsonResponse(resp.status, resp.response)
+      of "/recovery/sync-config":
+        let resp = syncConfigHandler()
         jsonResponse(resp.status, resp.response)
       else:
         if req.path.startsWith("/sync/"):

@@ -613,15 +613,38 @@ buddydrive export-recovery   # Export recovery info (mnemonic, public key)
 
 - Phase 1: BIP39 wordlist + `RecoveryConfig` type + `recovery` field on `AppConfig` — COMPLETE
 - Phase 2: `recovery.nim` (mnemonic gen, validation, key derivation, config encrypt/decrypt, base58) — COMPLETE
-- Phase 3: `config_sync.nim` (relay sync, buddy sync, recovery logic) — IN PROGRESS (GC-safety build error)
-- Phase 4: Relay KV store (`kvstore.nim` + `kvstore_api.nim`) — COMPLETE
+- Phase 3: `config_sync.nim` (relay sync, buddy sync, recovery logic) — COMPLETE
+- Phase 4: Relay KV store (`kvstore.nim` + `kvstore_api.nim` using Mummy) — COMPLETE
 - Phase 5: `config.nim` loads/saves `[recovery]` section — COMPLETE
 - Phase 6: CLI commands (`setup-recovery`, `recover`, `sync-config`, `export-recovery`) — COMPLETE
-- Phase 7: `daemon.nim` derive folder keys from master key — TODO
-- Phase 8: Docs update — TODO
+- Phase 7: `daemon.nim` loads master key on startup — COMPLETE
+- Phase 8: REST API recovery endpoints — COMPLETE
+- Phase 9: Tests — IN PROGRESS
 
 ### Remaining Work
-- Fix GC-safety build error in `config_sync.nim` (async proc calls non-GC-safe `loadConfig`)
+
+- Update Koyeb relay deployment with TiDB env var + second proxy port for KV HTTP API
+- GTK GUI: BIP39 recovery dialog with word grid and verification of random words
+- End-to-end test of full recovery flow against Koyeb relay
+- Update docs (README, TUTORIAL, website) with recovery documentation
+
+### Test Coverage
+
+**Existing tests:**
+- `test_sync_policy.nim` — sync window, append-only policy (PASSING)
+- `test_recovery.nim` — BIP39 mnemonic gen, validation, key derivation determinism, hex round-trip, setup/verify, recover-from-mnemonic, encrypt/decrypt round-trip, wrong key rejection, full recovery flow, word helpers (PASSING)
+- `test_kv_api.nim` — KV API PUT/GET/DELETE, overwrite, missing key 404, /health (compiles, needs Koyeb KV API)
+- `test_config_sync_e2e.nim` — sync to relay + recover, attemptRecovery flow, wrong mnemonic, idempotent sync (compiles, needs Koyeb KV API)
+- `test_relay_file_sync.nim` — forward sync A→B, reverse sync B→A (restores missing files), append-only folder (compiles, needs relay)
+- `test_relay_fallback.nim` — relay pairing (compiles, needs relay)
+- `test_peer_discovery.nim` — DHT discovery (needs port availability)
+
+**Tests still to add:**
+- REST API recovery endpoint tests (POST /recovery/setup, /recovery/verify-word, /recovery/recover, GET /recovery, POST /recovery/sync-config)
+- CLI integration test: run `buddydrive setup-recovery` and `buddydrive recover` as subprocesses
+- Buddy-to-buddy config sync test (once `syncConfigToBuddy` is implemented)
+- Relay with `-d:withKvStore` local integration test (start relay + KV API, test against it)
+- Test that `buddydrive init --with-recovery` generates mnemonic and verifies
 - Clean up unused imports in `recovery.nim`
 - Update `daemon.nim` to derive folder keys from master key on startup
 - Update Koyeb relay deployment with TiDB connection string env var
