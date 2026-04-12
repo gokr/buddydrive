@@ -1,4 +1,4 @@
-import std/[times, tables, strutils, sequtils]
+import std/[os, times, tables, strutils, sequtils]
 import std/options
 import results
 import chronos
@@ -14,6 +14,7 @@ import p2p/pairing
 import p2p/rawrelay
 import sync/policy
 import sync/session
+import config
 import control
 import nat
 import recovery
@@ -26,6 +27,7 @@ type
   
   Daemon* = ref object
     config*: AppConfig
+    configMtime*: times.Time
     node*: BuddyNode
     discovery*: DiscoveryService
     syncProtocol*: SyncProtocol
@@ -47,7 +49,11 @@ proc newDaemon*(config: AppConfig): Daemon =
   result.buddyConnections = initTable[string, BuddyConnection]()
   result.diagnostics = initTable[string, string]()
   result.relayListCache = initRelayListCache()
-  
+  try:
+    result.configMtime = getLastModificationTime(getConfigPath())
+  except CatchableError:
+    result.configMtime = getTime()
+
   if config.recovery.enabled and config.recovery.masterKey.len > 0:
     result.masterKey = some(hexToBytes(config.recovery.masterKey))
 
@@ -163,9 +169,32 @@ proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
 
 proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).}
 
+proc reloadConfigIfChanged(daemon: Daemon) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    try:
+      let path = getConfigPath()
+      let mtime = getLastModificationTime(path)
+      if mtime > daemon.configMtime:
+        daemon.config = loadConfig()
+        daemon.configMtime = mtime
+        echo "Config reloaded from disk"
+        if isWithinSyncWindow(daemon.config):
+          daemon.logDiagnostic(
+            syncWindowDiagnosticKey(),
+            "Sync window is open (" & syncWindowDescription(daemon.config) & "); syncing is enabled."
+          )
+        else:
+          daemon.logDiagnostic(
+            syncWindowDiagnosticKey(),
+            "Sync window is closed (" & syncWindowDescription(daemon.config) & "); syncing is paused."
+          )
+    except CatchableError as e:
+      echo "Config reload failed: ", e.msg
+
 proc runDiscoveryLoop(daemon: Daemon) {.async.} =
   while daemon.running:
     try:
+      daemon.reloadConfigIfChanged()
       await daemon.connectToBuddies()
     except CancelledError:
       return
