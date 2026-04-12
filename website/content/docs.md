@@ -15,7 +15,6 @@ title: Getting Started
 **Linux:**
 
 ```bash
-# Build from source
 git clone https://github.com/gokr/buddydrive
 cd buddydrive
 nimble build
@@ -24,7 +23,6 @@ nimble build
 **macOS:**
 
 ```bash
-# Build from source
 git clone https://github.com/gokr/buddydrive
 cd buddydrive
 nimble build
@@ -33,7 +31,6 @@ nimble build
 **Windows:**
 
 ```powershell
-# Build from source
 git clone https://github.com/gokr/buddydrive
 cd buddydrive
 nimble build
@@ -41,16 +38,14 @@ nimble build
 
 ### Initialize
 
-First time setup creates your local BuddyDrive identity:
-
 ```bash
 buddydrive init
 ```
 
 This creates:
 
-- **Buddy ID** - A UUID that uniquely identifies your instance (e.g., `fcd6295c-a912-44d4-a27b-ad898795207d`)
-- **Buddy Name** - A human-readable name (e.g., `purple-banana`)
+- **Buddy ID** - a UUID that uniquely identifies your instance
+- **Buddy Name** - a human-readable name
 - Configuration file at `~/.buddydrive/config.toml`
 
 ### Pair With a Buddy
@@ -61,38 +56,15 @@ This creates:
 buddydrive add-buddy --generate-code
 ```
 
-Output looks like:
-
-```
-Generating pairing code...
-
-Share this with your buddy:
-  Your Buddy ID: fcd6295c-a912-44d4-a27b-ad898795207d
-  Your Name: purple-banana
-  Pairing Code: ABCD-EFGH
-```
-
 **On your buddy's machine:**
 
 ```bash
 buddydrive add-buddy --id <your-buddy-id> --code ABCD-EFGH
 ```
 
-If successful:
-
-```
-Pairing with buddy: fcd6295c...
-Pairing code: ABCD-EFGH
-
-Buddy added: fcd6295c...
-Pairing code stored for relay fallback.
-```
-
-The pairing code is used for both pairing confirmation and relay connections.
+The pairing code is used for both pairing confirmation and relay fallback.
 
 ### Add a Folder
-
-Configure a folder to sync:
 
 ```bash
 buddydrive add-folder ~/Documents --name docs
@@ -100,10 +72,33 @@ buddydrive add-folder ~/Documents --name docs
 
 Options:
 
-- `--name` - Friendly name for the folder (required)
-- `--no-encrypt` - Disable encryption
-- `--append-only` - Only accept new incoming files for that folder
-- `--buddy <id>` - Restrict the folder to a specific buddy
+- `--name` - friendly name for the folder
+- `--no-encrypt` - disable the folder's encryption flag in config
+- `--append-only` - only accept new incoming files for that folder
+- `--buddy <id>` - restrict the folder to a specific buddy
+
+### Set Up Recovery
+
+Enable recovery on the machine you want to protect:
+
+```bash
+buddydrive setup-recovery
+```
+
+BuddyDrive shows a 12-word recovery phrase, asks you to verify part of it, stores recovery metadata in `config.toml`, and syncs an encrypted config blob to the relay.
+
+### Restore On a New Machine
+
+On a replacement machine:
+
+```bash
+buddydrive recover
+buddydrive start
+```
+
+Enter the same 12-word recovery phrase. If relay recovery succeeds, BuddyDrive restores your config locally. Starting the daemon then lets normal sync recreate missing files.
+
+Current limitation: the CLI prompts for buddy fallback details if relay recovery fails, but that buddy-backed fetch path is not implemented yet.
 
 ### Start the Daemon
 
@@ -113,15 +108,15 @@ buddydrive start
 
 Optional:
 
-- `--port <control-port>` - Change the local control API port
-- `--daemon` - Accepted, but currently continues in the foreground
+- `--port <control-port>` - change the local control API port
+- `--daemon` - accepted, but currently continues in the foreground
 
 ### Connectivity Notes
 
 BuddyDrive connects peers in one of two ways:
 
 1. Direct connection with a public TCP address
-2. Relay fallback using the pairing code
+2. Relay fallback using the stored pairing code
 
 For direct connections, forward the configured `listen_port` on your router and set `[network].announce_addr` in `~/.buddydrive/config.toml` to a public multiaddr such as:
 
@@ -129,37 +124,17 @@ For direct connections, forward the configured `listen_port` on your router and 
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
 ```
 
-For relay fallback, configure relay region. The pairing code stored when adding a buddy is used as the relay shared secret:
+For relay fallback:
 
 ```bash
 buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
 ```
 
-**About the Pairing Code:**
-
-- Serves as both pairing confirmation and relay shared secret
-- Both buddies must use the **same code** for their relationship
-- The relay uses codes to pair connections - it connects two clients using matching codes
-- A public relay is available on Koyeb at `01.proxy.koyeb.app:19447` with codes `swift-eagle` and `brave-moose`
-
 ### Check Status
 
 ```bash
 buddydrive status
-```
-
-Output looks like:
-
-```
-Buddy: purple-banana (fcd6295c...)
-Sync window: always
-
-Folders:
-  docs
-    Path: /home/you/Documents
-    Encrypted: true
-    Append-only: false
 ```
 
 ### Current CLI Limitations
@@ -168,6 +143,7 @@ Folders:
 - `buddydrive stop` is a placeholder command today
 - `buddydrive status` shows configured state, not live daemon connectivity
 - `buddydrive connect` does not perform a manual direct dial yet
+- `buddydrive export-recovery` shows stored recovery metadata, not the original 12-word phrase
 
 ## GUI
 
@@ -177,34 +153,26 @@ Folders:
 buddydrive-gui
 ```
 
-Or from your desktop menu: BuddyDrive
-
 ### Features
 
 - **Status panel** - daemon running, identity, uptime
 - **Folders list** - configured folders and sync status
 - **Buddies list** - paired buddies and their stored configuration
-- **Add folder dialog** - select path, name, encryption, and append-only mode
+- **Add folder dialog** - select path, name, encryption flag, and append-only mode
 - **Pair dialog** - generate or enter pairing details
-
-### Controls
-
-- **Refresh** - reload status from the local control API
-- **Sync All** - trigger sync actions from the GUI
-- **Remove** - remove folder or buddy entries
 
 ## CLI Reference
 
 ### Commands
 
-```
+```text
 buddydrive init                        Initialize BuddyDrive
 buddydrive config                      Show configuration
 buddydrive config set <key> ...        Update configuration values
 buddydrive add-folder <path>           Add folder to sync
-  --name <name>                        Folder name (required)
-  --no-encrypt                         Don't encrypt files
-  --append-only                        Only sync new files
+  --name <name>                        Folder name
+  --no-encrypt                         Disable folder encryption flag
+  --append-only                        Only sync new files into that folder
   --buddy <id>                         Restrict folder to buddy
 buddydrive remove-folder <name>        Remove folder
 buddydrive list-folders                List configured folders
@@ -221,6 +189,10 @@ buddydrive start                       Start sync daemon
 buddydrive stop                        Stop placeholder command
 buddydrive status                      Show configured status
 buddydrive logs                        Show recent logs
+buddydrive setup-recovery              Generate recovery phrase and sync encrypted config
+buddydrive recover                     Restore config from recovery phrase
+buddydrive sync-config                 Manually sync encrypted config to relay/buddies
+buddydrive export-recovery             Show stored recovery metadata
 buddydrive help                        Show help
 ```
 
@@ -238,17 +210,18 @@ buddydrive add-folder ~/Documents --name docs --append-only
 # Configure relay fallback
 buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
-buddydrive config set buddy-relay-token abc123 swift-eagle
+buddydrive config set buddy-pairing-code abc123 swift-eagle
+
+# Set up recovery
+buddydrive setup-recovery
+
+# Restore on a new machine
+buddydrive recover
 
 # Check what's configured
 buddydrive list-folders
 buddydrive list-buddies
 buddydrive config
-
-# Start and inspect logs
-buddydrive start --port 17521
-buddydrive status
-buddydrive logs
 ```
 
 ## Configuration
@@ -259,7 +232,11 @@ Config stored at `~/.buddydrive/config.toml`:
 [buddy]
 name = "Alice"
 id = "fcd6295c-a912-44d4-a27b-ad898795207d"
-public_key = ""
+
+[recovery]
+enabled = true
+public_key = "6J8h2qFvExampleRecoveryKey"
+master_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [network]
 listen_port = 41721
@@ -268,6 +245,7 @@ relay_base_url = "https://buddydrive.net/relays"
 relay_region = "eu"
 sync_window_start = ""
 sync_window_end = ""
+bandwidth_limit_kbps = 0
 
 [[folders]]
 name = "docs"
@@ -279,12 +257,9 @@ buddies = ["bob-uuid"]
 [[buddies]]
 id = "bob-uuid"
 name = "Bob"
-public_key = ""
-relay_token = "swift-eagle"
+pairing_code = "swift-eagle"
 added_at = "2026-04-10T12:00:00Z"
 ```
-
-Edit with care. Better to use CLI commands.
 
 ## Files
 
@@ -301,10 +276,7 @@ Edit with care. Better to use CLI commands.
 ### Daemon won't start
 
 ```bash
-# Check logs
-cat ~/.buddydrive/buddydrive.log
-
-# Check config
+buddydrive logs
 buddydrive config
 ```
 
@@ -314,38 +286,17 @@ buddydrive config
 2. Both peers need `buddydrive start` running
 3. Check stored buddies with `buddydrive list-buddies`
 4. For direct mode, verify port forwarding and `announce_addr`
-5. For relay mode, verify `relay-region`, `relay-base-url`, and matching relay tokens
+5. For relay mode, verify `relay-region`, `relay-base-url`, and matching pairing codes
 
 ### Files not syncing
 
 1. Check daemon logs with `buddydrive logs`
 2. Check folder configuration with `buddydrive list-folders`
 3. Remember `buddydrive status` does not show live connection state yet
-4. Single-machine loopback tests are limited unless you use relay fallback
-
-### Reset everything
-
-```bash
-# Stop foreground daemon with Ctrl+C if running
-
-# Backup config if needed
-cp ~/.buddydrive/config.toml ~/buddydrive-backup.toml
-
-# Remove all state
-rm -rf ~/.buddydrive
-
-# Start fresh
-buddydrive init
-```
+4. Missing files are restored through normal sync after connectivity returns
 
 ## Next Steps
 
 - Read [Features](/features) for capabilities
-- Read [Security](/security) for encryption details
+- Read [Security](/security) for current security scope
 - Read [How It Works](/how-it-works) for architecture
-
-## Getting Help
-
-- GitHub Issues: bug reports, feature requests
-- Documentation: this site
-- Community: discussions, questions

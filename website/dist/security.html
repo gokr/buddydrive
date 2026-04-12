@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Security - BuddyDrive</title>
-    <meta name="description" content="How BuddyDrive protects your data with end-to-end encryption, secure pairing, and zero-knowledge architecture.">
+    <meta name="description" content="What BuddyDrive protects today, how recovery works, and where the current sync path still depends on trust.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -34,19 +34,12 @@
     <header class="page-header">
         <div class="container">
             <h1>Security</h1>
-            <p>Your data should only be readable by you.</p>
+            <p>What is protected today, and what still depends on trusting your buddy.</p>
         </div>
     </header>
 
     <main class="content-page">
-        <h2>Your Security Matters</h2>
-
-        <p>BuddyDrive is designed around a simple principle: <strong>your data should only be readable by you.</strong></p>
-
-        <h2>Encryption Overview</h2>
-
-        <p>BuddyDrive uses industry-standard cryptography:</p>
-
+        <h2>What Exists Today</h2>
         <table class="comparison-table">
             <thead>
                 <tr>
@@ -56,229 +49,71 @@
                 </tr>
             </thead>
             <tbody>
-                <tr>
-                    <td>Key Exchange</td>
-                    <td>X25519</td>
-                    <td>Secure pairing</td>
-                </tr>
-                <tr>
-                    <td>File Encryption</td>
-                    <td>XSalsa20-Poly1305</td>
-                    <td>Encrypt file contents</td>
-                </tr>
-                <tr>
-                    <td>Integrity</td>
-                    <td>Blake2b</td>
-                    <td>Detect tampering</td>
-                </tr>
-                <tr>
-                    <td>Authentication</td>
-                    <td>Poly1305</td>
-                    <td>Verify file authenticity</td>
-                </tr>
+                <tr><td>Direct peer transport</td><td>libp2p Noise</td><td>Encrypt direct libp2p connections</td></tr>
+                <tr><td>Recovery config backup</td><td>libsodium <code>crypto_secretbox</code></td><td>Encrypt config synced to relay</td></tr>
+                <tr><td>Pairing code</td><td>Shared secret</td><td>Match buddies and relay fallback sessions</td></tr>
+                <tr><td>Recovery phrase</td><td>12-word mnemonic</td><td>Re-derive recovery metadata on a new machine</td></tr>
             </tbody>
         </table>
 
-        <p>All cryptography provided by <strong>libsodium</strong>, the same library used by Signal, WireGuard, and many security-focused applications.</p>
-
-        <h2>How Encryption Works</h2>
-
-        <h3>Pairing</h3>
-        <p>When you pair with a buddy:</p>
+        <h2>Recovery Phrase And Master Key</h2>
         <ol>
-            <li>Your machine generates a <strong>keypair</strong> (public + private key)</li>
-            <li>A <strong>6-character code</strong> is derived from your public key</li>
-            <li>You share this code with your buddy (in person, text, etc.)</li>
-            <li>Your buddy's machine generates their own keypair</li>
-            <li>Both machines exchange public keys securely</li>
-            <li>A <strong>shared secret</strong> is derived using X25519</li>
-            <li>This secret encrypts all future communication</li>
+            <li>BuddyDrive generates a 12-word recovery phrase</li>
+            <li>It derives a master key from that phrase</li>
+            <li>It stores recovery metadata in <code>config.toml</code></li>
+            <li>It encrypts your serialized config before syncing it to the relay</li>
         </ol>
-        <p>The pairing code is only used once. After pairing, all communication uses cryptographic keys.</p>
+        <p>When you later run <code>buddydrive recover</code>, BuddyDrive uses the same 12 words to derive the same recovery material, fetches the encrypted config from the relay, decrypts it locally, and writes the restored config.</p>
 
-        <h3>File Encryption</h3>
-        <p>Before a file leaves your machine:</p>
-        <ol>
-            <li>Generate a random <strong>symmetric key</strong> for this file</li>
-            <li>Encrypt the file contents with XSalsa20-Poly1305</li>
-            <li>Encrypt the symmetric key with the shared secret</li>
-            <li>Calculate Blake2b hash for integrity</li>
-            <li>Send encrypted blob to your buddy</li>
-        </ol>
-        <p>Your buddy receives encrypted file contents (unreadable), encrypted file key, and cryptographic hash. They cannot read your file. They can only store it.</p>
-
-        <h3>At Rest</h3>
-        <p>Files stored on your buddy's machine:</p>
+        <h2>Pairing And Direct Connections</h2>
         <ul>
-            <li>Encrypted contents</li>
-            <li>Randomized filenames (not your original filename)</li>
-            <li>No directory structure visible</li>
-            <li>Timestamps obscured</li>
-        </ul>
-        <p>Even with physical access to your buddy's storage, your files are protected.</p>
-
-        <h2>What Your Buddy Can See</h2>
-
-        <p>Your buddy <strong>can see</strong>:</p>
-        <ul>
-            <li>That you have synced X files</li>
-            <li>Total storage used</li>
-            <li>When sync activity occurred</li>
+            <li>You share the pairing code out-of-band with someone you trust</li>
+            <li>Both sides store it for that buddy relationship</li>
+            <li>Relay fallback uses it to match the two peers</li>
+            <li>Direct libp2p connections use Noise transport encryption once connected</li>
         </ul>
 
-        <p>Your buddy <strong>cannot see</strong>:</p>
+        <h2>Current Scope And Limits</h2>
         <ul>
-            <li>Your filenames</li>
-            <li>Your folder structure</li>
-            <li>Your file contents</li>
-            <li>Any metadata</li>
+            <li>Direct libp2p transport is encrypted by Noise</li>
+            <li>Recovery config blobs synced to the relay are encrypted with the recovery master key</li>
+            <li>Restore works by recovering config first and then letting normal sync recreate missing files</li>
+            <li>Append-only protects existing local files from remote overwrite</li>
+        </ul>
+        <p>Current limitation: application-level encryption for synced folder contents is not wired into the active sync path yet. Pair only with buddies you trust to hold your files.</p>
+
+        <h2>What Your Buddy Can See Today</h2>
+        <p>Your buddy can see:</p>
+        <ul>
+            <li>The folders and files you sync with them</li>
+            <li>File contents they receive through normal sync</li>
+            <li>Total storage use and sync timing</li>
+        </ul>
+        <p>Your buddy cannot see:</p>
+        <ul>
+            <li>The encrypted recovery config stored in the relay without your recovery phrase</li>
+            <li>Your other buddies' configuration unless you share it with them</li>
         </ul>
 
         <h2>Threat Model</h2>
-
-        <h3>What We Protect Against</h3>
-
-        <p><strong>Network interception:</strong> All traffic is encrypted. An attacker on your WiFi or ISP cannot read your files.</p>
-
-        <p><strong>Physical access to buddy's machine:</strong> Your buddy cannot read your files even with their own hardware.</p>
-
-        <p><strong>Compromised buddy device:</strong> If your buddy's machine is hacked, your files remain encrypted.</p>
-
-        <p><strong>Replay attacks:</strong> Each message has unique authentication. Old messages cannot be replayed.</p>
-
-        <h3>What We Don't Protect Against</h3>
-
-        <p><strong>Your machine compromised:</strong> If malware reads your files before encryption, BuddyDrive cannot help. Use standard security practices.</p>
-
-        <p><strong>Social engineering:</strong> If you pair with an attacker, they can store your encrypted files. Only pair with people you trust.</p>
-
-        <p><strong>Denial of service:</strong> An attacker could prevent sync but cannot read your data.</p>
-
-        <h2>Secure Pairing Guidelines</h2>
-
-        <p>Only pair with people you trust:</p>
-        <ol>
-            <li><strong>Share codes verbally</strong> or in person when possible</li>
-            <li><strong>Verify identity</strong> through a second channel</li>
-            <li><strong>Use unique codes</strong> - each pairing gets its own code</li>
-            <li><strong>Check fingerprints</strong> - both machines show buddy ID</li>
-        </ol>
-
-        <h2>Audit and Transparency</h2>
-
-        <p>BuddyDrive is 100% open source:</p>
-        <ul>
-            <li>All cryptography code is public</li>
-            <li>No hidden backdoors</li>
-            <li>No proprietary components</li>
-            <li>Community-reviewed</li>
-        </ul>
-
-        <p>You can verify exactly how your data is protected.</p>
-
-        <h3>Key Dependencies</h3>
-        <table class="comparison-table">
-            <thead>
-                <tr>
-                    <th>Library</th>
-                    <th>Trust Level</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>libsodium</td>
-                    <td>Widely audited, used by Signal</td>
-                </tr>
-                <tr>
-                    <td>libp2p</td>
-                    <td>Developed by Protocol Labs</td>
-                </tr>
-                <tr>
-                    <td>GTK4</td>
-                    <td>Official GNOME toolkit</td>
-                </tr>
-            </tbody>
-        </table>
-
-        <h2>Privacy</h2>
-
-        <p>BuddyDrive collects <strong>no data</strong>:</p>
-        <ul>
-            <li>No telemetry</li>
-            <li>No analytics</li>
-            <li>No crash reports (unless you opt-in)</li>
-            <li>No registration</li>
-            <li>No accounts</li>
-        </ul>
-        <p>We don't even have a server to collect data on.</p>
+        <p><strong>Network interception on direct libp2p connections:</strong> Noise protects direct peer transport.</p>
+        <p><strong>Relay compromise for config backup:</strong> the relay stores an encrypted config blob; without the recovery phrase-derived master key it should not be readable.</p>
+        <p><strong>Lost machine:</strong> recovery lets you rebuild config on a replacement device and then resync missing files.</p>
+        <p><strong>Untrusted buddies:</strong> if you pair with someone you do not trust, they can receive your synced files.</p>
 
         <h2>Security Checklist</h2>
-
-        <p>Before using BuddyDrive in production:</p>
-
         <ul class="checklist">
             <li>Pair only with trusted buddies</li>
             <li>Verify buddy ID after pairing</li>
+            <li>Write down the 12-word recovery phrase and store it offline</li>
             <li>Keep your system updated</li>
             <li>Use strong local passwords</li>
             <li>Consider full-disk encryption on your machine</li>
             <li>Regularly check sync activity</li>
         </ul>
 
-        <h2>Compare to Alternatives</h2>
-
-        <table class="comparison-table">
-            <thead>
-                <tr>
-                    <th>Feature</th>
-                    <th>BuddyDrive</th>
-                    <th>Cloud Storage</th>
-                    <th>NAS</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>End-to-end encrypted</td>
-                    <td><strong>Yes</strong></td>
-                    <td>Usually no</td>
-                    <td>No</td>
-                </tr>
-                <tr>
-                    <td>Zero knowledge</td>
-                    <td><strong>Yes</strong></td>
-                    <td>Varies</td>
-                    <td>No</td>
-                </tr>
-                <tr>
-                    <td>Offsite backup</td>
-                    <td><strong>Yes</strong></td>
-                    <td>Yes</td>
-                    <td>No</td>
-                </tr>
-                <tr>
-                    <td>Free</td>
-                    <td><strong>Yes</strong></td>
-                    <td>No</td>
-                    <td>Yes (hardware)</td>
-                </tr>
-                <tr>
-                    <td>No third party</td>
-                    <td><strong>Yes</strong></td>
-                    <td>No</td>
-                    <td>Yes</td>
-                </tr>
-                <tr>
-                    <td>Works behind NAT</td>
-                    <td><strong>Yes</strong></td>
-                    <td>Yes</td>
-                    <td>Maybe</td>
-                </tr>
-            </tbody>
-        </table>
-
         <h2>Bottom Line</h2>
-
-        <p>Your files are encrypted before they leave your machine, during transfer, and at rest on your buddy's machine. <strong>Only you can decrypt them.</strong></p>
+        <p>BuddyDrive already protects direct libp2p transport and encrypts relay-backed recovery config with your master key. Recovery and restore are now part of the product, but synced folder contents should still be treated as visible to the buddy who stores them in the current implementation.</p>
     </main>
 
     <footer class="footer">

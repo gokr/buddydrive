@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BuddyDrive - Backup your life, with a friend</title>
-    <meta name="description" content="Secure, encrypted peer-to-peer folder sync. Keep your photos, documents, and files safe with offsite backups hosted by someone you trust.">
+    <meta name="description" content="Peer-to-peer folder sync with relay-backed restore, a 12-word recovery phrase, and missing-file restore through normal sync.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -41,11 +41,11 @@
             <div class="hero-content">
                 <div class="hero-badge">
                     <span class="badge-dot"></span>
-                    100% Open Source
+                    Recovery And Restore Included
                 </div>
                 <h1 class="hero-title"><span class="gradient-text">Backup your life, with a friend</span></h1>
                 <p class="hero-subtitle">
-                    Secure, encrypted peer-to-peer folder sync. Keep your photos, documents, and files safe with offsite backups hosted by someone you trust. No cloud subscription. No monthly fees. Your data stays yours.
+                    Peer-to-peer folder sync with relay-backed restore. Keep your documents, photos, and other important folders on a trusted buddy machine, then rebuild a lost machine with a 12-word recovery phrase and resync missing files.
                 </p>
                 <div class="hero-cta">
                     <a href="docs.html" class="btn btn-primary">Get Started</a>
@@ -61,38 +61,38 @@
     <section class="features">
         <div class="container">
             <h2 class="section-title">Why BuddyDrive?</h2>
-            <p class="section-subtitle">Your NAS can burn. Your external drive can fail. Ransomware can encrypt everything. BuddyDrive is different.</p>
-            
+            <p class="section-subtitle">Offsite backup with someone you trust, plus a recovery path when a machine is lost.</p>
+
             <div class="feature-grid">
                 <div class="feature-card">
-                    <div class="feature-icon">🔥</div>
+                    <div class="feature-icon">Offsite</div>
                     <h3>Real Offsite Protection</h3>
-                    <p>Fire, flood, theft—your backup is safe at your buddy's house. Physical separation is real protection.</p>
+                    <p>Fire, flood, theft, and dead disks are easier to survive when a buddy has the other copy.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🔐</div>
-                    <h3>End-to-End Encrypted</h3>
-                    <p>Files are encrypted before they leave your machine. Your buddy can't read them. Even if someone intercepts the data, they see only noise.</p>
+                    <div class="feature-icon">12W</div>
+                    <h3>Recovery Phrase</h3>
+                    <p>Set up a 12-word recovery phrase once and restore config on a replacement machine later.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">💰</div>
-                    <h3>Zero Monthly Fees</h3>
-                    <p>Use hardware you already own. No subscription. No hidden costs. Free forever.</p>
+                    <div class="feature-icon">Sync</div>
+                    <h3>Restore Missing Files</h3>
+                    <p>After config recovery, normal sync can recreate files that are missing locally but still exist on your buddy.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🤝</div>
-                    <h3>Trust Someone You Know</h3>
-                    <p>Pair with a friend, family member, or colleague. No third party ever touches your data.</p>
+                    <div class="feature-icon">Pair</div>
+                    <h3>Simple Pairing</h3>
+                    <p>A single pairing code identifies the relationship and is reused for relay fallback.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🦠</div>
-                    <h3>Ransomware Resistant</h3>
-                    <p>Encrypted backups can't be held hostage. Your files are safe even if your machine is compromised.</p>
+                    <div class="feature-icon">Rule</div>
+                    <h3>Append-Only Option</h3>
+                    <p>Protect an existing local copy from remote overwrite while still allowing missing files to be recreated.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🌐</div>
-                    <h3>Peer-to-Peer</h3>
-                    <p>No central server. Direct connection between trusted devices. Works behind most home routers.</p>
+                    <div class="feature-icon">OSS</div>
+                    <h3>Open Source</h3>
+                    <p>No accounts, no subscription, and no black box between you and your data.</p>
                 </div>
             </div>
         </div>
@@ -105,7 +105,7 @@
                 <div class="step">
                     <div class="step-number">1</div>
                     <h3>Install</h3>
-                    <p>Install BuddyDrive on both machines—yours and your buddy's.</p>
+                    <p>Install BuddyDrive on both machines.</p>
                 </div>
                 <div class="step">
                     <div class="step-number">2</div>
@@ -114,13 +114,13 @@
                 </div>
                 <div class="step">
                     <div class="step-number">3</div>
-                    <h3>Select</h3>
-                    <p>Choose which folders to sync—photos, documents, whatever matters.</p>
+                    <h3>Protect</h3>
+                    <p>Select folders to sync and enable recovery if you want a rebuild path.</p>
                 </div>
                 <div class="step">
                     <div class="step-number">4</div>
-                    <h3>Relax</h3>
-                    <p>Changes sync automatically, encrypted end-to-end.</p>
+                    <h3>Restore</h3>
+                    <p>Recover config with 12 words, then let sync recreate what is missing.</p>
                 </div>
             </div>
         </div>
@@ -142,24 +142,20 @@
                         <td><strong>Free, forever</strong></td>
                     </tr>
                     <tr>
-                        <td>Data stored on company servers</td>
-                        <td><strong>Data stored with your buddy</strong></td>
+                        <td>Vendor-managed restore</td>
+                        <td><strong>Your own 12-word recovery phrase</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Data on company servers</td>
+                        <td><strong>Data with your buddy</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Account required</td>
+                        <td><strong>No account required</strong></td>
                     </tr>
                     <tr>
                         <td>Trust the provider</td>
                         <td><strong>Trust someone you know</strong></td>
-                    </tr>
-                    <tr>
-                        <td>Bandwidth limits</td>
-                        <td><strong>No limits</strong></td>
-                    </tr>
-                    <tr>
-                        <td>Privacy policies change</td>
-                        <td><strong>End-to-end encrypted</strong></td>
-                    </tr>
-                    <tr>
-                        <td>Subscription required</td>
-                        <td><strong>Open source, no account needed</strong></td>
                     </tr>
                 </tbody>
             </table>
@@ -169,7 +165,7 @@
     <section class="cta-section">
         <div class="container">
             <h2>Who Is This For?</h2>
-            <p>Families backing up precious photos. Friends protecting each other's data. Small teams syncing project files. Privacy advocates. Budget-conscious users. Anyone who wants offsite backup without cloud costs.</p>
+            <p>Families, friends, and small teams that want offsite sync, a practical restore path, and fewer subscriptions.</p>
             <div class="hero-cta">
                 <a href="docs.html" class="btn btn-primary">Get Started</a>
                 <a href="security.html" class="btn btn-secondary">Security Details</a>

@@ -7,34 +7,32 @@ tagline: Backup your life, with a friend
 
 **Title:** BuddyDrive
 **Subtitle:** Backup your life, with a friend.
-**Description:** Secure, encrypted peer-to-peer folder sync. Keep your photos, documents, and files safe with offsite backups hosted by someone you trust. No cloud subscription. No monthly fees. Your data stays yours.
+**Description:** Peer-to-peer folder sync with relay-backed restore. Keep your documents, photos, and other important folders on a trusted buddy machine, then rebuild a lost machine with a 12-word recovery phrase and resync missing files.
 
 **CTA Primary:** Get Started
 **CTA Secondary:** Learn More
 
 ## Why BuddyDrive?
 
-Your NAS can burn. Your external drive can fail. Ransomware can encrypt everything. And cloud backups cost money every month, storing your data on servers you don't control.
+Your NAS can burn. Your external drive can fail. Ransomware can encrypt everything. And cloud backups cost money every month, storing your data on servers you do not control.
 
 **BuddyDrive is different.**
 
-Pair with a friend, family member, or trusted colleague. Your data lives on *their* machine, encrypted. Their data lives on *yours*. Simple. Private. Free.
+Pair with a friend, family member, or trusted colleague. Keep an offsite copy on their machine. Use a recovery phrase to get your config back when a machine dies. Let sync restore what is missing.
 
 ### Real Offsite Protection
 
 - **Fire, flood, theft** - your backup is safe at your buddy's house
-- **Ransomware** - encrypted backups can't be held hostage
+- **Restore after loss** - a 12-word recovery phrase rebuilds your config on a new machine
 - **Zero monthly fees** - use hardware you already own
-- **No third party** - direct peer-to-peer, no servers in the middle
+- **No accounts** - no cloud dashboard, no subscription, no vendor lock-in
 
 ## How It Works
 
 1. **Install BuddyDrive** on both machines
 2. **Pair devices** using a simple code
-3. **Select folders** to sync - photos, documents, whatever matters
-4. **Relax** - changes sync automatically, encrypted end-to-end
-
-Your buddy's computer becomes your offsite backup. Their computer becomes yours. Both of you get protection without paying a cloud provider.
+3. **Select folders** to sync and optionally enable recovery
+4. **Restore when needed** - recover config with 12 words, then let sync recreate missing files
 
 ## The Problem With Cloud Backups
 
@@ -43,55 +41,41 @@ Your buddy's computer becomes your offsite backup. Their computer becomes yours.
 | $5-20/month forever | Free, forever |
 | Data stored on company servers | Data stored with your buddy |
 | Trust the provider | Trust someone you know |
-| Bandwidth limits | No limits |
-| Privacy policies change | End-to-end encrypted |
-
-## The Problem With Local Backups
-
-External drives and NAS boxes are great until:
-- Your house catches fire
-- A thief takes everything
-- Ransomware encrypts all connected drives
-- The drive simply fails
-
-**Offsite backup matters.** BuddyDrive makes it free and private.
+| Account required | No account required |
+| Recover through vendor | Recover with your own 12 words |
 
 ## Features
 
-### End-to-End Encryption
+### Direct Transport Encryption
 
-Every file is encrypted before it leaves your machine. Your buddy can't read your files. You can't read theirs. Even if someone intercepts the data, they see only noise.
+Direct libp2p peer connections use Noise transport encryption, and relay-backed config backups are encrypted with your recovery master key before upload.
 
-### Peer-to-Peer
+### Recovery Phrase
 
-No central server. No company in the middle. Direct connection between trusted devices. Your data never touches a third party.
+Set up a 12-word recovery phrase once. BuddyDrive derives a master key from it, syncs an encrypted copy of your config to the relay, and lets you restore config on a replacement machine.
 
 ### Automatic Sync
 
-Set it up once, forget about it. Changed files sync automatically in the background. New photos? Synced. Updated documents? Synced.
+Changed files sync automatically in the background. If a file is missing locally but still exists on your buddy, the next successful sync can restore it.
 
-### Selective Sync
+### Append-Only Protection
 
-Choose exactly which folders to share. Family photos with grandma. Work documents with a colleague. You control what syncs where.
-
-### Works Behind NAT
-
-BuddyDrive uses modern peer discovery to connect through home routers. No port forwarding. No configuration. It just works.
+Mark a folder append-only when you want incoming sync to add missing files without overwriting the local copy that is already there.
 
 ### Open Source
 
-100% open source. Audit the code. Contribute improvements. No hidden backdoors. No surveillance. Your privacy is guaranteed by design, not by promise.
+100% open source. Audit the code. Contribute improvements. No hidden backdoors. No telemetry.
 
 ## Who Is This For?
 
-- **Families** - backup precious photos with relatives
+- **Families** - offsite backup with people you already trust
 - **Friends** - mutual backup without cloud costs
-- **Small teams** - sync project files securely
-- **Privacy advocates** - no third party ever touches your data
-- **Budget-conscious** - free alternative to cloud storage
+- **Small teams** - simple shared folder sync and restore
+- **Privacy-conscious users** - local control over recovery secrets
+- **Budget-conscious users** - free alternative to another subscription
 
 ## Get Started
 
-BuddyDrive runs on Linux, macOS, and Windows. Install it on two machines, pair them, and start syncing.
+BuddyDrive runs on Linux, macOS, and Windows. Install it on two machines, pair them, set up recovery, and start syncing.
 
 [Download Now](/docs) or read the [full feature list](/features).
