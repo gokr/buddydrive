@@ -55,8 +55,24 @@ proc testCleanupOnNonexistentDir() =
   # Should not raise
   cleanupTempFiles("/tmp/buddydrive_nonexistent_dir_12345")
 
+proc testScanDirectoryIgnoresTempFiles() =
+  let tmpDir = getTempDir() / "buddydrive_test_scan_ignore"
+  createDir(tmpDir)
+  defer: removeDir(tmpDir)
+
+  writeFile(tmpDir / "good.txt", "keep me")
+  writeFile(tmpDir / ("partial.txt" & TempSuffix), "ignore me")
+
+  var folder = newFolderConfig("docs", tmpDir)
+  let scanner = newFileScanner(folder)
+  let files = scanner.scanDirectory()
+
+  doAssert files.len == 1
+  doAssert files[0].path == "good.txt"
+
 when isMainModule:
   testWriteToTempThenRename()
   testCleanupRemovesTempFiles()
   testCleanupOnNonexistentDir()
+  testScanDirectoryIgnoresTempFiles()
   echo "crash safety ok"

@@ -1,5 +1,7 @@
 import std/os except FileInfo
-import std/[times, strutils, hashes, tables]
+import std/[times, strutils, hashes, tables, syncio]
+when defined(posix):
+  import std/posix_utils
 import ../types
 
 export types
@@ -54,7 +56,7 @@ proc scanDirectory*(scanner: FileScanner): seq[types.FileInfo] =
     return result
   
   for path in walkDirRec(scanner.rootPath, relative = false):
-    if path.fileExists():
+    if path.fileExists() and not path.endsWith(TempSuffix):
       result.add(scanner.scanFile(path))
 
 proc scanChanges*(scanner: FileScanner, previous: seq[types.FileInfo]): seq[FileChange] =
@@ -121,11 +123,14 @@ proc writeFileChunk*(path: string, offset: int64, data: seq[byte]): bool =
     result = false
 
 proc flushAndClose*(path: string): bool =
-  ## Open, fsync, and close a file to ensure data is persisted to disk.
+  ## Best-effort durability barrier before atomic rename.
   try:
-    let f = open(path, fmRead)
+    let f = open(path, fmReadWriteExisting)
     defer: f.close()
-    flushFile(f)
+    when defined(posix):
+      fsync(int(getFileHandle(f)))
+    else:
+      flushFile(f)
     true
   except:
     false

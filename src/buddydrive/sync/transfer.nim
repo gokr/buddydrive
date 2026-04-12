@@ -191,6 +191,7 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): F
   createDir(fullPath.parentDir())
 
   var totalReceived: int64 = 0
+  var expectedSize = int64(-1)
   var success = true
 
   while true:
@@ -200,6 +201,16 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): F
       break
 
     let msg = msgOpt.get()
+
+    if msg.dataOffset != totalReceived:
+      success = false
+      break
+
+    if expectedSize < 0:
+      expectedSize = msg.totalSize
+    elif msg.totalSize != expectedSize:
+      success = false
+      break
 
     var payload = msg.data
     if msg.dataCompression == ckLz4:
@@ -217,6 +228,10 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): F
 
     if msg.done:
       break
+
+  if success:
+    if expectedSize >= 0 and totalReceived != expectedSize:
+      success = false
 
   if success:
     discard flushAndClose(tmpPath)

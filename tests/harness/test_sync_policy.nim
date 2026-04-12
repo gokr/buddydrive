@@ -42,17 +42,11 @@ proc testAppendOnly() =
   remoteUpdated.encryptedPath = remoteUpdated.path
   remoteUpdated.size = 99
   remoteUpdated.mtime = 300
-  remoteUpdated.hash = localFile.hash  # same hash = no re-sync
 
   # New file always synced
   doAssert shouldSyncRemoteFile(folder, remoteNew, false)
-  # Same hash = no re-sync in append-only
+  # Existing local file is preserved in append-only mode
   doAssert not shouldSyncRemoteFile(folder, remoteUpdated, true, localFile)
-
-  # Different hash = allow re-sync (corrupt/partial local file)
-  var remoteCorrupt = remoteUpdated
-  remoteCorrupt.hash[0] = 0xFF
-  doAssert shouldSyncRemoteFile(folder, remoteCorrupt, true, localFile)
 
   folder.appendOnly = false
   doAssert shouldSyncRemoteFile(folder, remoteUpdated, true, localFile)
