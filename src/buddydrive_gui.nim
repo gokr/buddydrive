@@ -17,6 +17,7 @@ type
   GtkApplication* = pointer
   GtkApplicationWindow* = pointer
   GtkScrolledWindow* = pointer
+  GtkGrid* = pointer
   GApplication* = pointer
   GObject* = pointer
   GCallback* = pointer
@@ -64,6 +65,13 @@ proc gtkProgressBarSetShowText*(bar: GtkProgressBar, showText: cint) {.cdecl, im
 proc gtkScrolledWindowNew*(): GtkScrolledWindow {.cdecl, importc: "gtk_scrolled_window_new".}
 proc gtkScrolledWindowSetChild*(window: GtkScrolledWindow, child: GtkWidget) {.cdecl, importc: "gtk_scrolled_window_set_child".}
 proc gtkScrolledWindowSetPolicy*(window: GtkScrolledWindow, hscrollbar: cint, vscrollbar: cint) {.cdecl, importc: "gtk_scrolled_window_set_policy".}
+proc gtkGridNew*(): GtkGrid {.cdecl, importc: "gtk_grid_new".}
+proc gtkGridAttach*(grid: GtkGrid, child: GtkWidget, left: cint, top: cint, width: cint, height: cint) {.cdecl, importc: "gtk_grid_attach".}
+proc gtkGridColumnSetSpacing*(grid: GtkGrid, spacing: cint) {.cdecl, importc: "gtk_grid_set_column_spacing".}
+proc gtkGridRowSetSpacing*(grid: GtkGrid, spacing: cint) {.cdecl, importc: "gtk_grid_set_row_spacing".}
+proc gtkWidgetSetHalign*(widget: GtkWidget, align: cint) {.cdecl, importc: "gtk_widget_set_halign".}
+proc gtkLabelSetWrap*(label: GtkLabel, wrap: cint) {.cdecl, importc: "gtk_label_set_wrap".}
+proc gtkLabelSetWrapMode*(label: GtkLabel, mode: cint) {.cdecl, importc: "gtk_label_set_wrap_mode".}
 proc gTimeoutAdd*(interval: cuint, function: GSourceFunc, data: pointer): cuint {.cdecl, importc: "g_timeout_add".}
 
 const
@@ -106,6 +114,7 @@ type
     statusLabel: GtkLabel
     buddyNameLabel: GtkLabel
     uptimeLabel: GtkLabel
+    recoveryStatusLabel: GtkLabel
     running: bool
 
 var
@@ -263,6 +272,11 @@ proc refreshUI(userData: pointer): cint {.cdecl.} =
   let statusText = if state.running: "Running" else: "Stopped"
   gtkLabelSetText(state.statusLabel, cstring(statusText))
   
+  let recoveryJson = apiGet("/recovery")
+  let recoveryEnabled = recoveryJson{"enabled"}.getBool(false)
+  let recoveryText = if recoveryEnabled: "Recovery enabled" else: "Not set up"
+  gtkLabelSetText(state.recoveryStatusLabel, cstring(recoveryText))
+  
   if state.running:
     let foldersJson = apiGet("/folders")
     let folders = foldersJson{"folders"}.getElems()
@@ -303,6 +317,20 @@ type
     relayRegionEntry: pointer
     syncStartEntry: pointer
     syncEndEntry: pointer
+
+  SetupRecoveryData = object
+    dialog: GtkWindow
+    phase: cint
+    mnemonicWords: ptr UncheckedArray[ptr UncheckedArray[char]]
+    wordGrid: GtkGrid
+    wordEntries: ptr UncheckedArray[pointer]
+    verifyIndices: ptr UncheckedArray[cint]
+    verifyLabel: GtkLabel
+    mnemonicStr: ptr UncheckedArray[char]
+
+  RecoverData = object
+    dialog: GtkWindow
+    wordEntries: ptr UncheckedArray[pointer]
 
 proc allocStr(s: string): pointer =
   result = allocShared0(s.len + 1)
@@ -612,6 +640,163 @@ proc showSettingsDialog() =
   
   gtkWidgetShow(dialog)
 
+proc showSetupRecoveryDialog() =
+  let dialog = gtkDialogNew()
+  gtkWindowSetTitle(dialog, "Set Up Recovery")
+  gtkWindowSetModal(dialog, 1)
+  gtkWindowSetTransientFor(dialog, state.window)
+  gtkWindowSetDefaultSize(dialog, 600, 500)
+  
+  discard gtkDialogAddButton(dialog, "Cancel", GTK_RESPONSE_CANCEL)
+  discard gtkDialogAddButton(dialog, "Verify Words", -10)
+  
+  let content = gtkDialogGetContentArea(dialog)
+  gtkWidgetSetMarginStart(content, 16)
+  gtkWidgetSetMarginEnd(content, 16)
+  gtkWidgetSetMarginTop(content, 16)
+  gtkWidgetSetMarginBottom(content, 16)
+  
+  let result = apiPost("/recovery/setup")
+  let mnemonic = result{"mnemonic"}.getStr("")
+  let words = result{"words"}.getElems()
+  
+  let warningLabel = gtkLabelNew("Write down these 12 words and keep them safe.\nAnyone with these words can recover your data.")
+  gtkWidgetAddCssClass(warningLabel, "warning")
+  gtkWidgetSetMarginBottom(warningLabel, 16)
+  gtkBoxAppend(content, warningLabel)
+  
+  let grid = gtkGridNew()
+  gtkGridColumnSetSpacing(grid, 12)
+  gtkGridRowSetSpacing(grid, 8)
+  
+  var wordEntries = cast[ptr UncheckedArray[pointer]](allocShared0(12 * sizeof(pointer)))
+  
+  for i in 0 ..< 12:
+    let numLabel = gtkLabelNew(cstring($ (i + 1) & "."))
+    gtkWidgetAddCssClass(numLabel, "dim-label")
+    gtkGridAttach(grid, numLabel, cint(0), cint(i), 1, 1)
+    
+    let wordText = if i < words.len: words[i].getStr("") else: ""
+    let wordLabel = gtkLabelNew(cstring(wordText))
+    gtkWidgetAddCssClass(wordLabel, "heading")
+    gtkGridAttach(grid, wordLabel, cint(1), cint(i), 1, 1)
+    
+    let entry = gtkEntryNew()
+    gtkEntrySetPlaceholderText(entry, "type word here")
+    gtkGridAttach(grid, entry, cint(2), cint(i), 1, 1)
+    wordEntries[i] = entry
+  
+  gtkBoxAppend(content, grid)
+  
+  let verifyLabel = gtkLabelNew("")
+  gtkWidgetSetMarginTop(verifyLabel, 12)
+  gtkBoxAppend(content, verifyLabel)
+  
+  let mnemonicCopy = cast[ptr UncheckedArray[char]](allocShared0(mnemonic.len + 1))
+  copyMem(mnemonicCopy, mnemonic.cstring, mnemonic.len)
+  
+  let data = cast[ptr SetupRecoveryData](allocShared0(sizeof(SetupRecoveryData)))
+  data.dialog = dialog
+  data.phase = 0
+  data.wordGrid = grid
+  data.wordEntries = wordEntries
+  data.verifyLabel = verifyLabel
+  data.mnemonicStr = mnemonicCopy
+  
+  proc onSetupRecoveryResponse(w: GtkWindow, responseId: cint, userData: pointer) {.cdecl.} =
+    let d = cast[ptr SetupRecoveryData](userData)
+    
+    if responseId == -10:
+      var correct = 0
+      var checked = 0
+      for i in 0 ..< 12:
+        let typed = $gtkEditableGetText(d.wordEntries[i])
+        if typed.len > 0:
+          inc checked
+          let result = apiPost("/recovery/verify-word", %*{"index": i, "word": typed})
+          if result{"correct"}.getBool(false):
+            inc correct
+      
+      if checked == 0:
+        gtkLabelSetText(d.verifyLabel, "Please type some words to verify.")
+      elif correct == checked:
+        gtkLabelSetText(d.verifyLabel, "All words correct! Recovery is set up.")
+        discard apiPost("/recovery/sync-config")
+        discard refreshUI(nil)
+      else:
+        gtkLabelSetText(d.verifyLabel, cstring($correct & " of " & $checked & " words correct. Try again."))
+    else:
+      gtkWidgetSetVisible(d.dialog, 0)
+      deallocShared(userData)
+  
+  discard gSignalConnect(cast[GObject](dialog), "response", cast[GCallback](onSetupRecoveryResponse), cast[pointer](data))
+  
+  gtkWidgetShow(dialog)
+
+proc showRecoverDialog() =
+  let dialog = gtkDialogNew()
+  gtkWindowSetTitle(dialog, "Recover from Mnemonic")
+  gtkWindowSetModal(dialog, 1)
+  gtkWindowSetTransientFor(dialog, state.window)
+  gtkWindowSetDefaultSize(dialog, 600, 500)
+  
+  discard gtkDialogAddButton(dialog, "Cancel", GTK_RESPONSE_CANCEL)
+  discard gtkDialogAddButton(dialog, "Recover", GTK_RESPONSE_OK)
+  
+  let content = gtkDialogGetContentArea(dialog)
+  gtkWidgetSetMarginStart(content, 16)
+  gtkWidgetSetMarginEnd(content, 16)
+  gtkWidgetSetMarginTop(content, 16)
+  gtkWidgetSetMarginBottom(content, 16)
+  
+  let infoLabel = gtkLabelNew("Enter your 12-word recovery phrase:")
+  gtkWidgetSetMarginBottom(infoLabel, 12)
+  gtkBoxAppend(content, infoLabel)
+  
+  let grid = gtkGridNew()
+  gtkGridColumnSetSpacing(grid, 12)
+  gtkGridRowSetSpacing(grid, 8)
+  
+  var wordEntries = cast[ptr UncheckedArray[pointer]](allocShared0(12 * sizeof(pointer)))
+  
+  for i in 0 ..< 12:
+    let numLabel = gtkLabelNew(cstring($ (i + 1) & "."))
+    gtkWidgetAddCssClass(numLabel, "dim-label")
+    gtkGridAttach(grid, numLabel, cint(0), cint(i), 1, 1)
+    
+    let entry = gtkEntryNew()
+    gtkGridAttach(grid, entry, cint(1), cint(i), 1, 1)
+    wordEntries[i] = entry
+  
+  gtkBoxAppend(content, grid)
+  
+  let data = cast[ptr RecoverData](allocShared0(sizeof(RecoverData)))
+  data.dialog = dialog
+  data.wordEntries = wordEntries
+  
+  proc onRecoverResponse(w: GtkWindow, responseId: cint, userData: pointer) {.cdecl.} =
+    let d = cast[ptr RecoverData](userData)
+    if responseId == GTK_RESPONSE_OK:
+      var words: seq[string] = @[]
+      for i in 0 ..< 12:
+        let word = $gtkEditableGetText(d.wordEntries[i])
+        words.add(word)
+      
+      let mnemonic = words.join(" ")
+      let result = apiPost("/recovery/recover", %*{"mnemonic": mnemonic})
+      
+      if result{"ok"}.getBool(false):
+        discard apiPost("/recovery/sync-config")
+        discard refreshUI(nil)
+    else:
+      gtkWidgetSetVisible(d.dialog, 0)
+      deallocShared(userData)
+  
+  discard gSignalConnect(cast[GObject](dialog), "response", cast[GCallback](onRecoverResponse), cast[pointer](data))
+  
+  gtkWidgetShow(dialog)
+  gtkWidgetGrabFocus(wordEntries[0])
+
 proc createMainWindow(app: GtkApplication): GtkWindow =
   let window = gtkApplicationWindowNew(app)
   gtkWindowSetTitle(window, "BuddyDrive")
@@ -696,6 +881,29 @@ proc createMainWindow(app: GtkApplication): GtkWindow =
   
   gtkBoxAppend(mainBox, settingsCard.box)
   
+  let recoveryCard = createSectionCard("Recovery")
+  
+  state.recoveryStatusLabel = gtkLabelNew("Not set up")
+  gtkWidgetAddCssClass(state.recoveryStatusLabel, "dim-label")
+  gtkWidgetSetMarginBottom(state.recoveryStatusLabel, 8)
+  gtkBoxAppend(recoveryCard.content, state.recoveryStatusLabel)
+  
+  let recoveryBtnBox = gtkBoxNew(GTKORIENTATIONHORIZONTAL, 8)
+  
+  let setupRecoveryBtn = gtkButtonNewWithLabel("Set Up Recovery...")
+  gtkWidgetAddCssClass(setupRecoveryBtn, "suggested-action")
+  gtkBoxAppend(recoveryBtnBox, setupRecoveryBtn)
+  
+  let recoverBtn = gtkButtonNewWithLabel("Recover from Mnemonic...")
+  gtkBoxAppend(recoveryBtnBox, recoverBtn)
+  
+  let exportRecoveryBtn = gtkButtonNewWithLabel("Export Recovery Info")
+  gtkBoxAppend(recoveryBtnBox, exportRecoveryBtn)
+  
+  gtkBoxAppend(recoveryCard.content, recoveryBtnBox)
+  
+  gtkBoxAppend(mainBox, recoveryCard.box)
+  
   proc onRefreshClick(btn: GtkButton, userData: pointer) {.cdecl.} =
     discard refreshUI(nil)
   
@@ -724,6 +932,21 @@ proc createMainWindow(app: GtkApplication): GtkWindow =
     showSettingsDialog()
   
   discard gSignalConnect(cast[GObject](settingsBtn), "clicked", cast[GCallback](onSettingsClick), nil)
+  
+  proc onSetupRecoveryClick(btn: GtkButton, userData: pointer) {.cdecl.} =
+    showSetupRecoveryDialog()
+  
+  discard gSignalConnect(cast[GObject](setupRecoveryBtn), "clicked", cast[GCallback](onSetupRecoveryClick), nil)
+  
+  proc onRecoverClick(btn: GtkButton, userData: pointer) {.cdecl.} =
+    showRecoverDialog()
+  
+  discard gSignalConnect(cast[GObject](recoverBtn), "clicked", cast[GCallback](onRecoverClick), nil)
+  
+  proc onExportRecoveryClick(btn: GtkButton, userData: pointer) {.cdecl.} =
+    discard apiGet("/recovery")
+  
+  discard gSignalConnect(cast[GObject](exportRecoveryBtn), "clicked", cast[GCallback](onExportRecoveryClick), nil)
   
   gtkWindowSetChild(window, mainBox)
   result = window
