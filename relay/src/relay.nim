@@ -18,24 +18,6 @@ const MaxTokenLen = 64
 const BufferSize = 64 * 1024
 const IdleTimeoutMs = 300000 # 5 minutes
 
-var Whitelist: HashSet[string]
-
-proc loadWhitelist() =
-  let whitelistEnv = getEnv("BUDDYDRIVE_TOKENS", "")
-  if whitelistEnv.len == 0:
-    echo "WARNING: BUDDYDRIVE_TOKENS environment variable not set"
-    echo "No tokens will be accepted!"
-    Whitelist = initHashSet[string]()
-    return
-  
-  Whitelist = initHashSet[string]()
-  for token in whitelistEnv.split(','):
-    let t = token.strip()
-    if t.len > 0:
-      Whitelist.incl(t)
-  
-  echo "Loaded ", Whitelist.len, " token(s)"
-
 type
   ConnectionState = enum
     AwaitingToken,
@@ -159,11 +141,6 @@ proc handleClient(server: var RelayServer, fd: int, listenFd: SocketHandle) =
     data.recvBuffer = data.recvBuffer[newlinePos + 1 ..^ 1]
     data.state = WaitingForPeer
     
-    if data.token notin Whitelist:
-      echo "Rejecting invalid token: ", data.token
-      server.closeClient(fd)
-      return
-    
     withLock server.lock:
       if data.token in server.waitingClients:
         let peerFd = server.waitingClients[data.token]
@@ -212,15 +189,7 @@ proc checkIdleClients(server: var RelayServer, now: int64) =
     server.closeClient(fd)
 
 proc run(port: int) =
-  loadWhitelist()
-  
   echo "BuddyDrive Relay starting on port ", port
-  if Whitelist.len > 0:
-    echo "Allowed tokens:"
-    for token in Whitelist:
-      echo "  ", token
-  else:
-    echo "No tokens configured - all connections will be rejected"
   echo ""
   
   var server = newRelayServer()
@@ -249,7 +218,6 @@ proc run(port: int) =
   server.selector.registerHandle(listenFd, {Read}, nil)
   
   echo "Listening for connections..."
-  echo "Set BUDDYDRIVE_TOKENS env var with comma-separated tokens."
   echo "Idle timeout: ", IdleTimeoutMs div 1000, " seconds"
   echo ""
   

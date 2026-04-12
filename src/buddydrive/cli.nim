@@ -736,10 +736,9 @@ proc handleSetupRecovery*() =
   echo "Recovery set up successfully!"
   echo "Public key: ", recovery.publicKeyB58
   
-  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: "https://01.proxy.koyeb.app"
   echo "Syncing config to relay..."
   
-  let synced = waitFor syncConfigToRelay(cfg, relayUrl)
+  let synced = waitFor syncConfigToRelay(cfg, DefaultKvApiUrl)
   if synced:
     echo "Config synced to relay."
   else:
@@ -761,9 +760,8 @@ proc handleRecover*() =
   echo "Attempting to recover from relay..."
   
   let recovery = recoverFromMnemonic(mnemonic)
-  let relayUrl = "https://01.proxy.koyeb.app"
   
-  let configOpt = waitFor attemptRecovery(mnemonic, relayUrl, "eu")
+  let configOpt = waitFor attemptRecovery(mnemonic, DefaultKvApiUrl, "eu")
   
   if configOpt.isSome:
     let cfg = configOpt.get()
@@ -789,7 +787,7 @@ proc handleRecover*() =
     if buddyId.len > 0 and pairingCode.len > 0:
       echo ""
       echo "Attempting to recover from buddy..."
-      let buddyConfigOpt = waitFor attemptRecoveryFromBuddy(mnemonic, buddyId, pairingCode, relayUrl, "eu")
+      let buddyConfigOpt = waitFor attemptRecoveryFromBuddy(mnemonic, buddyId, pairingCode, DefaultKvApiUrl, "eu")
       
       if buddyConfigOpt.isSome:
         let cfg = buddyConfigOpt.get()
@@ -818,10 +816,10 @@ proc handleSyncConfig*() =
     echo "Recovery not enabled. Run 'buddydrive setup-recovery' first."
     return
   
-  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: "https://01.proxy.koyeb.app"
-  echo "Syncing config to relay: ", relayUrl
+  let kvUrl = DefaultKvApiUrl
+  echo "Syncing config to relay: ", kvUrl
   
-  let success = waitFor syncConfigToRelay(cfg, relayUrl)
+  let success = waitFor syncConfigToRelay(cfg, kvUrl)
   
   if success:
     echo "Config synced successfully!"
@@ -829,7 +827,7 @@ proc handleSyncConfig*() =
     echo "Failed to sync config to relay."
   
   echo "Syncing config to buddies..."
-  let buddyCount = waitFor syncConfigToAllBuddies(cfg, relayUrl, cfg.relayRegion)
+  let buddyCount = waitFor syncConfigToAllBuddies(cfg, DefaultKvApiUrl, cfg.relayRegion)
   echo "Config synced to ", buddyCount, " buddy/buddies."
 
 proc handleExportRecovery*() =

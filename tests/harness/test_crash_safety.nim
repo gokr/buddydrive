@@ -20,7 +20,7 @@ proc testWriteToTempThenRename() =
   doAssert fileExists(tmpPath)
 
   # Fsync + rename
-  doAssert flushAndClose(tmpPath)
+  flushAndClose(tmpPath)
   moveFile(tmpPath, finalPath)
 
   doAssert fileExists(finalPath)

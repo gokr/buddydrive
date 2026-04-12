@@ -27,7 +27,6 @@ WORKDIR /app
 
 COPY --from=builder /app/buddydrive-relay /app/buddydrive-relay
 
-ENV BUDDYDRIVE_TOKENS=""
 ENV BUDDYDRIVE_PORT=41722
 ENV TIDB_CONNECTION_STRING=""
 

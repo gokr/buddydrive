@@ -15,6 +15,7 @@ type
     relayAvailable*: bool
 
 const CONFIG_SYNC_TIMEOUT = 10
+const DefaultKvApiUrl* = "https://buddydrive-tankfeud-ddaec82a.koyeb.app"
 
 proc hashConfig*(config: AppConfig): string =
   let content = $config.buddy.uuid & $config.buddy.name & $config.folders.len & $config.buddies.len
