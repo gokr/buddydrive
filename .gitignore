@@ -6,6 +6,7 @@ bin/*
 !bin/.gitkeep
 relay/bin/*
 !relay/bin/.gitkeep
+relay/src/relay
 *.out
 *.o
 
