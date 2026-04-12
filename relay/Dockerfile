@@ -1,6 +1,11 @@
-FROM nimlang/nim:2.2.8-alpine AS builder
+FROM ubuntu:24.04 AS builder
 
-RUN apk add --no-cache mariadb-connector-c-dev git
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends gcc build-essential libc6-dev \
+    ca-certificates curl git xz-utils libssl-dev libmariadb-dev
+
+RUN curl https://nim-lang.org/choosenim/init.sh -sSf | bash -s -- -y
+ENV PATH=/root/.nimble/bin:/root/.choosenim/toolchains/nim-2.2.8/bin:$PATH
 
 WORKDIR /app
 
