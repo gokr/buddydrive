@@ -1,4 +1,5 @@
 import std/[times, tables, strutils, sequtils]
+import std/options
 import results
 import chronos
 import libp2p
@@ -15,6 +16,7 @@ import sync/policy
 import sync/session
 import control
 import nat
+import recovery
 
 export results
 export node
@@ -34,6 +36,7 @@ type
     statusUpdateFut*: Future[void]
     running*: bool
     startTime*: Time
+    masterKey*: Option[array[32, byte]]
 
 const BuddyDiscoveryInterval* = chronos.seconds(15)
 
@@ -44,6 +47,9 @@ proc newDaemon*(config: AppConfig): Daemon =
   result.buddyConnections = initTable[string, BuddyConnection]()
   result.diagnostics = initTable[string, string]()
   result.relayListCache = initRelayListCache()
+  
+  if config.recovery.enabled and config.recovery.masterKey.len > 0:
+    result.masterKey = some(hexToBytes(config.recovery.masterKey))
 
 proc isPrivateOrLoopback(ma: MultiAddress): bool =
   let s = $ma

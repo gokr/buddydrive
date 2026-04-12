@@ -1,5 +1,9 @@
 import std/[os, strutils, selectors, tables, sets, locks, nativesockets, times]
 
+when defined(withKvStore):
+  import kvstore
+  import kvstore_api
+
 const DefaultPort = 41722
 const MaxTokenLen = 64
 const BufferSize = 64 * 1024
@@ -274,9 +278,33 @@ proc run(port: int) =
 
 when isMainModule:
   var port = DefaultPort
+  var kvPort = 8080
+  
   if paramCount() > 0:
     try:
       port = parseInt(paramStr(1))
     except:
       discard
+  
+  when defined(withKvStore):
+    let kvConnStr = getEnv("TIDB_CONNECTION_STRING", "")
+    if kvConnStr.len > 0:
+      echo "Starting KV store with TiDB..."
+      try:
+        let kv = initKvStore(kvConnStr)
+        echo "KV store initialized"
+        
+        if paramCount() > 1:
+          try:
+            kvPort = parseInt(paramStr(2))
+          except:
+            discard
+        
+        echo "KV API port: ", kvPort
+      except Exception as e:
+        echo "Failed to initialize KV store: ", e.msg
+        echo "Running relay-only mode"
+    else:
+      echo "TIDB_CONNECTION_STRING not set, running relay-only mode"
+  
   run(port)

@@ -57,6 +57,9 @@ proc loadConfig*(): AppConfig =
   
   result.buddy.uuid = toml["buddy"]["id"].getStr()
   result.buddy.name = toml["buddy"]["name"].getStr("")
+  result.recovery.enabled = false
+  result.recovery.publicKeyB58 = ""
+  result.recovery.masterKey = ""
   result.listenPort = DefaultP2PPort
   result.announceAddr = ""
   result.relayBaseUrl = ""
@@ -64,6 +67,11 @@ proc loadConfig*(): AppConfig =
   result.syncWindowStart = ""
   result.syncWindowEnd = ""
   result.bandwidthLimitKBps = 0
+
+  if "recovery" in toml:
+    result.recovery.enabled = toml["recovery"]{"enabled"}.getBool(false)
+    result.recovery.publicKeyB58 = toml["recovery"]{"public_key"}.getStr("")
+    result.recovery.masterKey = toml["recovery"]{"master_key"}.getStr("")
 
   if "network" in toml:
     result.listenPort = toml["network"]{"listen_port"}.getInt(DefaultP2PPort)
@@ -118,6 +126,12 @@ proc saveConfig*(config: AppConfig) =
   content.add("[buddy]\n")
   content.add("name = \"" & escapeToml(config.buddy.name) & "\"\n")
   content.add("id = \"" & escapeToml(config.buddy.uuid) & "\"\n\n")
+
+  if config.recovery.enabled:
+    content.add("[recovery]\n")
+    content.add("enabled = true\n")
+    content.add("public_key = \"" & escapeToml(config.recovery.publicKeyB58) & "\"\n")
+    content.add("master_key = \"" & escapeToml(config.recovery.masterKey) & "\"\n\n")
 
   content.add("[network]\n")
   content.add("listen_port = " & $config.listenPort & "\n")

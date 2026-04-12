@@ -496,6 +496,74 @@ sudo systemctl start buddydrive
 
 ---
 
+## Recovery System
+
+### Goal
+
+Add a recovery system to BuddyDrive that allows users to recover their configuration and files if their machine is lost/destroyed, using a BIP39 12-word mnemonic as the single recovery secret.
+
+### Design Decisions
+
+- **Pairing code** reused as relay token (auto-generated XXXX-XXXX) — serves dual purpose: pairing confirmation + relay shared secret (`relayToken` renamed to `pairingCode`)
+- **BIP39 12-word mnemonic** — the single recovery secret; user must write it down and verify by typing back 3 random words during setup
+- **Asymmetric master key** (public + private) generated from mnemonic — stored in plaintext in config.toml (if attacker has machine access, they already have all files)
+- **Single master key for all folders** — no per-folder keys; buddies never decrypt files, they only store encrypted blobs
+- **Config is encrypted** with master key before syncing to relay and to all connected buddies for recovery
+- **Relay KV store** stores the encrypted config file with the **public key** (Base58) as the lookup key — optional for the user but **default is true**
+- **Recovery only needs the 12 words** — no need to remember a buddy ID + pairing code. The mnemonic regenerates the asymmetric key, fetches the encrypted config from relay, decrypts it, and sync restores all folders
+- **Buddy fallback**: if relay unavailable, recover from a buddy (need buddy ID + pairing code) — secondary path only
+- **No selective restore** — sync automatically recreates missing local files
+- **Recovery is opt-in** by default
+- **GTK GUI** should have a nice recovery dialog with word grid and verification
+- **Config sync** happens during sync window (nightly) if config changed, and also via manual `buddydrive sync-config`
+- **First config sync** should happen immediately after setup
+- **No signing** needed for relay config uploads
+- **No test recovery** during setup (redundant if verification step passes)
+
+### TiDB Connection
+
+```
+mysql://kgBvFzeMm5AB3UV.root:z8zUaQX9l7EhPmml@gateway01.eu-central-1.prod.aws.tidbcloud.com:4000/sys
+```
+
+Default relay URL: `https://01.proxy.koyeb.app`
+
+### Recovery CLI Commands
+
+```bash
+buddydrive setup-recovery    # Generate mnemonic, verify, encrypt config, sync to relay
+buddydrive recover           # Enter mnemonic, fetch encrypted config from relay, decrypt, restore
+buddydrive sync-config       # Manually push encrypted config to relay
+buddydrive export-recovery   # Export recovery info (mnemonic, public key)
+```
+
+### Recovery Files
+
+| File | Purpose |
+|------|---------|
+| `src/buddydrive/recovery.nim` | BIP39 mnemonic, key derivation, config encryption |
+| `src/buddydrive/sync/config_sync.nim` | Config sync to relay/buddies, recovery logic |
+| `relay/src/kvstore.nim` | TiDB MySQL interface for config KV store |
+| `relay/src/kvstore_api.nim` | HTTP API for KV store (GET/PUT/DELETE /kv/<pubkey>) |
+| `wordlists/bip39_english.txt` | BIP39 English wordlist (2048 words) |
+
+### Build/Lib Discoveries
+
+- `curly` HTTP library requires `--mm:arc or --mm:orc` and `--threads:on`
+- `curly` timeout is passed as a parameter to get/put/post/delete, not set on the client object
+- `curly` delete signature: `delete(curl: Curly, url: string, headers: sink HttpHeaders = emptyHttpHeaders(), timeout = 60): Response`
+- `curly` put signature: `put(curl: Curly, url: string, headers: sink HttpHeaders = emptyHttpHeaders(), body: openarray[char] = "".toOpenArray(0, -1), timeout = 60): Response`
+- `libsodium`'s `crypto_pwhash` signature: `crypto_pwhash(passwd: string, salt: openArray[byte], outlen: Natural, alg = phaDefault, opslimit = ..., memlimit = ...): seq[byte]`
+- `libsodium`'s `crypto_generichash` signature: `crypto_generichash(data: string, hashlen: int = ..., key: string = ""): seq[byte]` — NOT `crypto_generichash_blake2b`
+- `crypto_generichash` returns `seq[byte]` not `string`, so assignment to `array[32, byte]` requires explicit `byte()` casts
+- Nim's `reversed()` returns `seq[char]` not `string`, so base58 encoding needed manual reversal
+- Chronos async procs have strict exception tracking — calls to functions that can raise `SodiumError` must be wrapped in try/except
+- Chronos async procs also enforce GC-safety — `deserializeConfigFromSync` calls `loadConfig` which calls `parseFile` which is not GC-safe, causing build failure
+- `webby/httpheaders` needed for `emptyHttpHeaders()` used by curly
+- `std/options` needed for `Option`/`some`/`none`
+
+---
+
 ## Development Log
 
 ### 2026-04-09
@@ -541,7 +609,24 @@ sudo systemctl start buddydrive
   - systemd service unit file ✓
   - Makefile for build/package ✓
 
+### Recovery System Progress
+
+- Phase 1: BIP39 wordlist + `RecoveryConfig` type + `recovery` field on `AppConfig` — COMPLETE
+- Phase 2: `recovery.nim` (mnemonic gen, validation, key derivation, config encrypt/decrypt, base58) — COMPLETE
+- Phase 3: `config_sync.nim` (relay sync, buddy sync, recovery logic) — IN PROGRESS (GC-safety build error)
+- Phase 4: Relay KV store (`kvstore.nim` + `kvstore_api.nim`) — COMPLETE
+- Phase 5: `config.nim` loads/saves `[recovery]` section — COMPLETE
+- Phase 6: CLI commands (`setup-recovery`, `recover`, `sync-config`, `export-recovery`) — COMPLETE
+- Phase 7: `daemon.nim` derive folder keys from master key — TODO
+- Phase 8: Docs update — TODO
+
 ### Remaining Work
+- Fix GC-safety build error in `config_sync.nim` (async proc calls non-GC-safe `loadConfig`)
+- Clean up unused imports in `recovery.nim`
+- Update `daemon.nim` to derive folder keys from master key on startup
+- Update Koyeb relay deployment with TiDB connection string env var
+- Update docs (README, TUTORIAL, website) with recovery documentation
+- Test full recovery flow end-to-end
 - Test end-to-end sync between two machines with real connectivity
 - Improve DHT discovery reliability with bootstrap nodes
 - Add UPnP auto-configuration for easier setup

@@ -4,6 +4,7 @@ import std/parseopt
 import std/random
 import std/times
 import std/sequtils
+import std/options
 import uuids
 import chronos
 import libp2p/multiaddress
@@ -11,7 +12,9 @@ import types
 import config
 import daemon
 import control
+import recovery
 import sync/policy
+import sync/config_sync
 
 proc generateBuddyName*(): string
 proc generateUuid*(): string
@@ -33,6 +36,10 @@ type
     cmdStop
     cmdStatus
     cmdLogs
+    cmdSetupRecovery
+    cmdRecover
+    cmdSyncConfig
+    cmdExportRecovery
     cmdHelp
   
   CommandLine* = object
@@ -61,6 +68,7 @@ Usage: buddydrive <command> [options]
 
 Commands:
   init                      Initialize BuddyDrive (generate identity)
+    --with-recovery         Set up recovery during init
   config                    Show current configuration
   config set <key> ...      Update configuration values
   add-folder <path>         Add a folder to sync
@@ -83,6 +91,10 @@ Commands:
   stop                      Stop sync daemon
   status                    Show sync status
   logs                      Show recent logs
+  setup-recovery            Set up recovery with BIP39 mnemonic
+  recover                   Restore from BIP39 mnemonic
+  sync-config               Manually sync config to relay/buddies
+  export-recovery           Show recovery phrase again
   help                      Show this help
 """
 
@@ -180,6 +192,10 @@ proc parseCli*(): CommandLine =
     of "stop": cmdStop
     of "status": cmdStatus
     of "logs": cmdLogs
+    of "setup-recovery": cmdSetupRecovery
+    of "recover": cmdRecover
+    of "sync-config": cmdSyncConfig
+    of "export-recovery": cmdExportRecovery
     of "help": cmdHelp
     else: cmdHelp
   
@@ -669,6 +685,177 @@ proc handleLogs*() =
   echo "Recent logs from: ", logPath
   echo "---"
   echo readFile(logPath)
+
+proc handleSetupRecovery*() =
+  if not config.configExists():
+    echo "No config found. Run 'buddydrive init' first."
+    return
+  
+  echo "Setting up recovery..."
+  echo ""
+  
+  let (mnemonic, recovery) = setupRecovery()
+  let words = mnemonic.split(" ")
+  
+  echo "Your recovery phrase:"
+  echo ""
+  echo "┌─────────────────────────────────────────────────────┐"
+  for i in 0 ..< words.len:
+    let lineStart = if i mod 4 == 0: "│" else: ""
+    let lineEnd = if i mod 4 == 3: "│\n" else: ""
+    if i mod 4 == 0:
+      stdout.write("│ ")
+    stdout.write($(i + 1) & ". " & words[i] & "  ")
+    if i mod 4 == 3:
+      echo ""
+  echo "└─────────────────────────────────────────────────────┘"
+  echo ""
+  echo "⚠ Write down these 12 words and keep them safe."
+  echo "  Anyone with this phrase can access your synced files."
+  echo ""
+  
+  echo "Type your recovery phrase to confirm you wrote it down:"
+  echo "(Enter 3 words: word 3, word 7, word 11)"
+  stdout.write("Word 3: ")
+  let word3 = stdin.readLine().strip().toLowerAscii()
+  stdout.write("Word 7: ")
+  let word7 = stdin.readLine().strip().toLowerAscii()
+  stdout.write("Word 11: ")
+  let word11 = stdin.readLine().strip().toLowerAscii()
+  
+  if word3 != words[2].toLowerAscii() or word7 != words[6].toLowerAscii() or word11 != words[10].toLowerAscii():
+    echo ""
+    echo "Words don't match. Please try again with 'buddydrive setup-recovery'"
+    return
+  
+  var cfg = loadConfig()
+  cfg.recovery = recovery
+  saveConfig(cfg)
+  
+  echo ""
+  echo "Recovery set up successfully!"
+  echo "Public key: ", recovery.publicKeyB58
+  
+  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: "https://01.proxy.koyeb.app"
+  echo "Syncing config to relay..."
+  
+  let synced = waitFor syncConfigToRelay(cfg, relayUrl)
+  if synced:
+    echo "Config synced to relay."
+  else:
+    echo "Failed to sync config to relay."
+
+proc handleRecover*() =
+  echo "Recovery Mode"
+  echo "============="
+  echo ""
+  echo "Enter your 12-word recovery phrase:"
+  stdout.write("> ")
+  let mnemonic = stdin.readLine().strip()
+  
+  if not validateMnemonic(mnemonic):
+    echo "Invalid recovery phrase. Must be 12 words separated by spaces."
+    return
+  
+  echo ""
+  echo "Attempting to recover from relay..."
+  
+  let recovery = recoverFromMnemonic(mnemonic)
+  let relayUrl = "https://01.proxy.koyeb.app"
+  
+  let configOpt = waitFor attemptRecovery(mnemonic, relayUrl, "eu")
+  
+  if configOpt.isSome:
+    let cfg = configOpt.get()
+    saveConfig(cfg)
+    echo ""
+    echo "Recovery successful!"
+    echo ""
+    echo "Identity: ", cfg.buddy.name
+    echo "Buddies: ", cfg.buddies.len
+    echo "Folders: ", cfg.folders.len
+    echo ""
+    echo "Run 'buddydrive start' to sync your folders."
+  else:
+    echo ""
+    echo "Could not recover from relay."
+    echo ""
+    echo "To recover from a buddy, provide their info:"
+    stdout.write("Buddy ID: ")
+    let buddyId = stdin.readLine().strip()
+    stdout.write("Pairing code: ")
+    let pairingCode = stdin.readLine().strip()
+    
+    if buddyId.len > 0 and pairingCode.len > 0:
+      echo ""
+      echo "Attempting to recover from buddy..."
+      let buddyConfigOpt = waitFor attemptRecoveryFromBuddy(mnemonic, buddyId, pairingCode, relayUrl, "eu")
+      
+      if buddyConfigOpt.isSome:
+        let cfg = buddyConfigOpt.get()
+        saveConfig(cfg)
+        echo ""
+        echo "Recovery successful!"
+        echo ""
+        echo "Identity: ", cfg.buddy.name
+        echo "Buddies: ", cfg.buddies.len
+        echo "Folders: ", cfg.folders.len
+      else:
+        echo ""
+        echo "Recovery failed. Please check your recovery phrase and buddy info."
+    else:
+      echo ""
+      echo "Recovery cancelled."
+
+proc handleSyncConfig*() =
+  if not config.configExists():
+    echo "No config found. Run 'buddydrive init' first."
+    return
+  
+  let cfg = loadConfig()
+  
+  if not cfg.recovery.enabled:
+    echo "Recovery not enabled. Run 'buddydrive setup-recovery' first."
+    return
+  
+  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: "https://01.proxy.koyeb.app"
+  echo "Syncing config to relay: ", relayUrl
+  
+  let success = waitFor syncConfigToRelay(cfg, relayUrl)
+  
+  if success:
+    echo "Config synced successfully!"
+  else:
+    echo "Failed to sync config to relay."
+  
+  echo "Syncing config to buddies..."
+  let buddyCount = waitFor syncConfigToAllBuddies(cfg, relayUrl, cfg.relayRegion)
+  echo "Config synced to ", buddyCount, " buddy/buddies."
+
+proc handleExportRecovery*() =
+  if not config.configExists():
+    echo "No config found. Run 'buddydrive init' first."
+    return
+  
+  let cfg = loadConfig()
+  
+  if not cfg.recovery.enabled:
+    echo "Recovery not enabled."
+    return
+  
+  echo "Exporting recovery info..."
+  echo ""
+  echo "Public key: ", cfg.recovery.publicKeyB58
+  echo "Master key: ", cfg.recovery.masterKey
+  echo ""
+  echo "Note: To see your full recovery phrase, you need to have written it down"
+  echo "during setup. The phrase is not stored for security reasons."
+  echo ""
+  echo "If you've lost your recovery phrase, you can generate a new one with:"
+  echo "  buddydrive setup-recovery"
+  echo ""
+  echo "Warning: This will create a new recovery setup. You'll need to"
+  echo "re-share any recovery info with your buddies."
 
 proc generateBuddyName*(): string =
   let adjPath = currentSourcePath().parentDir().parentDir().parentDir() / "wordlists" / "adjectives.txt"

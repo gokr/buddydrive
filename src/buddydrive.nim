@@ -34,6 +34,14 @@ when isMainModule:
     handleStatus()
   of cmdLogs:
     handleLogs()
+  of cmdSetupRecovery:
+    handleSetupRecovery()
+  of cmdRecover:
+    handleRecover()
+  of cmdSyncConfig:
+    handleSyncConfig()
+  of cmdExportRecovery:
+    handleExportRecovery()
   of cmdHelp, cmdNone:
     printHelp()
   

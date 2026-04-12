@@ -3,6 +3,11 @@ import std/times
 const DefaultP2PPort* = 41721
 
 type
+  RecoveryConfig* = object
+    enabled*: bool
+    publicKeyB58*: string
+    masterKey*: string
+
   BuddyId* = object
     uuid*: string
     name*: string
@@ -22,6 +27,7 @@ type
   
   AppConfig* = object
     buddy*: BuddyId
+    recovery*: RecoveryConfig
     listenPort*: int
     announceAddr*: string
     relayBaseUrl*: string
@@ -95,6 +101,9 @@ proc newFolderConfig*(name, path: string, encrypted = true): FolderConfig =
 
 proc newAppConfig*(buddy: BuddyId): AppConfig =
   result.buddy = buddy
+  result.recovery.enabled = false
+  result.recovery.publicKeyB58 = ""
+  result.recovery.masterKey = ""
   result.listenPort = DefaultP2PPort
   result.announceAddr = ""
   result.relayBaseUrl = ""
