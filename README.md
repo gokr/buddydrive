@@ -34,7 +34,7 @@ source ~/.nimble/bin/nim
 
 # Install system dependencies (CLI)
 sudo apt update
-sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev
+sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev liblz4-dev
 
 # Install GTK4 dependencies (for GUI)
 sudo apt install -y pkg-config libgtk-4-dev
@@ -326,7 +326,7 @@ MIT
 
 ```bash
 # Install build dependencies
-sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev debhelper dpkg-dev help2man
+sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev liblz4-dev debhelper dpkg-dev help2man
 
 # Build the package
 make deb
