@@ -40,6 +40,7 @@ type
     running*: bool
     startTime*: Time
     masterKey*: Option[array[32, byte]]
+    upnpPort*: int  ## Non-zero if we created a UPnP mapping that needs cleanup
 
 const BuddyDiscoveryInterval* = chronos.seconds(15)
 
@@ -235,6 +236,7 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
         let maRes = MultiAddress.init(upnpAddr.get)
         if maRes.isOk:
           announceAddrs.add(maRes.get())
+          daemon.upnpPort = daemon.config.listenPort
           echo "UPnP created port mapping, using: ", upnpAddr.get
       else:
         echo "UPnP not available (no router support or already forwarded)"
@@ -273,8 +275,8 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     echo "DHT discovery started"
 
     if daemon.config.buddies.len > 0:
-      echo "Announcing buddy ID on DHT: ", daemon.config.buddy.uuid
-      await daemon.discovery.publishBuddy(daemon.config.buddy.uuid)
+      asyncSpawn daemon.discovery.publishBuddyLoop(daemon.config.buddy.uuid)
+      echo "Started buddy announcement on DHT: ", daemon.config.buddy.uuid
     else:
       echo "No buddies configured. Add buddies with 'buddydrive add-buddy' to start syncing."
     
@@ -340,7 +342,11 @@ proc stop*(daemon: Daemon): Future[void] {.async: (raises: []).} =
     
     if daemon.node != nil:
       await daemon.node.stop()
-    
+
+    if daemon.upnpPort != 0:
+      removeUpnpPortMapping(daemon.upnpPort)
+      daemon.upnpPort = 0
+
     daemon.running = false
     echo "Daemon stopped"
   except Exception as e:

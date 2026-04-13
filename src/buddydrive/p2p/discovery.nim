@@ -23,8 +23,9 @@ type
 
 const
   BuddyDriveNamespace* = "/buddydrive"
-  DhtAnnounceTimeout* = chronos.seconds(60)
+  DhtAnnounceTimeout* = chronos.seconds(120)
   DhtLookupTimeout* = chronos.seconds(120)
+  AnnounceRetryInterval* = chronos.seconds(300)
 
 proc buddyIdToKey(buddyId: string): Key =
   var data = newSeq[byte](buddyId.len)
@@ -94,3 +95,11 @@ proc findBuddy*(discovery: DiscoveryService, buddyId: string): Future[seq[(PeerI
 
 proc publishBuddy*(discovery: DiscoveryService, buddyId: string) {.async.} =
   await discovery.announce(buddyId)
+
+proc publishBuddyLoop*(discovery: DiscoveryService, buddyId: string) {.async.} =
+  ## Announce on the DHT and re-announce periodically.
+  ## Provider records expire (default 30 min), so continuous
+  ## re-announcement is required to stay discoverable.
+  while discovery.started:
+    await discovery.announce(buddyId)
+    await sleepAsync(AnnounceRetryInterval)
