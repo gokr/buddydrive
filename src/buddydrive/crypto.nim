@@ -36,8 +36,10 @@ proc encrypt*(data: string, key: string): EncryptedData =
   if key.len != crypto_secretbox_keybytes():
     raise newException(CryptoError, "Invalid key size: " & $key.len & " != " & $crypto_secretbox_keybytes())
   
-  result.nonce = generateNonce()
-  result.ciphertext = crypto_secretbox_easy(key, data)
+  let full = crypto_secretbox_easy(key, data)
+  let nonceLen = crypto_secretbox_noncebytes()
+  result.nonce = full[0 ..< nonceLen]
+  result.ciphertext = full[nonceLen ..^ 1]
 
 proc decrypt*(encData: EncryptedData, key: string): string =
   if key.len != crypto_secretbox_keybytes():
