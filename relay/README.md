@@ -1,28 +1,44 @@
 # BuddyDrive Relay
 
-A simple TCP relay server for BuddyDrive when direct connections are not possible.
+A TCP relay server and KV store for BuddyDrive. The relay enables NAT traversal when direct connections are not possible. The KV store (optional, requires TiDB Cloud) stores encrypted config blobs for recovery.
 
 ## How It Works
 
-1. Client connects and sends a token followed by `\n`
-2. Server validates the token against the whitelist
-3. If valid and no peer is waiting, the client waits
-4. When a matching peer connects, both receive `OK`
-5. All further bytes are relayed bidirectionally until one side disconnects
+### TCP Relay
 
-On the BuddyDrive side, the buddy `pairing_code` is reused as this relay token.
+1. Client connects and sends a token (the pairing code) followed by `\n`
+2. If no peer with the same token is waiting, the client waits
+3. When a matching peer connects, both receive `OK`
+4. All further bytes are relayed bidirectionally until one side disconnects
+
+On the BuddyDrive side, the buddy `pairing_code` is reused as this relay token. Any token is accepted — there is no whitelist.
+
+### KV Store (optional)
+
+When built with `-d:withKvStore`, the relay also runs an HTTP API for storing encrypted config blobs. BuddyDrive uses this for recovery: the encrypted config is uploaded with the public key (Base58) as the lookup key.
+
+**KV API Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/kv/<pubkey>` | Fetch encrypted config |
+| PUT | `/kv/<pubkey>` | Store encrypted config |
+| DELETE | `/kv/<pubkey>` | Delete config |
+| GET | `/health` | Health check |
+| GET | `/stats` | Config count |
 
 ## Usage
 
 ```bash
-# Set allowed tokens (comma-separated)
-export BUDDYDRIVE_TOKENS="swift-eagle,brave-moose,calm-river"
-
-# Run on default port 41722
+# Run TCP relay only (default port 41722)
 ./buddydrive-relay
 
-# Or specify port
+# Specify port
 ./buddydrive-relay 41722
+
+# With KV store (requires TIDB_CONNECTION_STRING)
+export TIDB_CONNECTION_STRING="mysql://user:pass@host:4000/buddydrive"
+./buddydrive-relay 41722 8080
 ```
 
 ## Docker
@@ -31,14 +47,15 @@ export BUDDYDRIVE_TOKENS="swift-eagle,brave-moose,calm-river"
 # Build
 docker build -t buddydrive-relay .
 
-# Run
+# Run (TCP relay only)
+docker run -d -p 41722:41722 buddydrive-relay
+
+# Run with KV store
 docker run -d \
   -p 41722:41722 \
-  -e BUDDYDRIVE_TOKENS="swift-eagle,brave-moose" \
+  -p 8080:8080 \
+  -e TIDB_CONNECTION_STRING="mysql://user:pass@host:4000/buddydrive" \
   buddydrive-relay
-
-# Or with docker-compose
-docker-compose up -d
 ```
 
 ## Protocol
@@ -47,7 +64,6 @@ docker-compose up -d
 Client -> Server: <token>\n
 Server -> Client: WAIT\n
 Server -> Client: OK\n
-Server -> Client: (disconnect)   # invalid token
 ```
 
 After `OK`, all data is relayed bidirectionally.
@@ -86,19 +102,19 @@ BuddyDrive fetches `<relay-base-url>/<relay-region>` and expects JSON like:
 
 1. Get a VPS with a public IP
 2. Install Docker
-3. Deploy the relay with your allowed tokens
-4. Optionally expose a small HTTP relay-list endpoint for your clients
+3. Deploy the relay
+4. Optionally enable the KV store with a TiDB Cloud connection string
 
 ## Koyeb Deployment
 
-The relay can be deployed on Koyeb's free tier:
+The relay can be deployed on Koyeb's free tier with both TCP relay and KV store:
 
 ```bash
 # Create app
 koyeb apps create buddydrive
 
-# Create secret for tokens
-koyeb secrets create buddydrive-tokens --value 'token1,token2'
+# Create secret for TiDB connection
+koyeb secrets create tidb-connection-string --value 'mysql://user:pass@host:4000/buddydrive'
 
 # Deploy from GitHub
 koyeb services create relay \
@@ -109,8 +125,8 @@ koyeb services create relay \
   --git-workdir relay \
   --ports 41722:tcp \
   --proxy-ports 41722:tcp \
-  --env 'BUDDYDRIVE_TOKENS={{secret.buddydrive-tokens}}' \
+  --env 'TIDB_CONNECTION_STRING={{secret.tidb-connection-string}}' \
   --regions fra
 ```
 
-The relay will be available at the proxy host on the public port shown by Koyeb.
+The TCP relay is available at the proxy host/port. The KV API is available via the service's HTTP route.

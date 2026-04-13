@@ -22,7 +22,7 @@ Build **BuddyDrive** - a P2P encrypted folder sync tool in Nim that allows synci
 
 - **DHT discovery doesn't work end-to-end**: Provider/value records on public IPFS DHT don't reliably return results for app-specific buddy IDs
 - **CGNAT is common**: ISP-level NAT prevents UPnP from getting public IPs (100.64.0.0/10 range)
-- **Relay design**: Simple token-based pairing, bidirectional byte pipe after handshake
+- **Relay design**: Simple token-based pairing, bidirectional byte pipe after handshake. No whitelist — any token is accepted.
 - **Koyeb TCP Proxy**: Not suitable for multi-instance relay due to lack of session affinity - use single-instance per relay or deterministic sharding
 - **Region-based relay selection**: User chooses region (EU, US, Asia), both buddies hash token to pick same relay from canonical list
 - **File write bug**: `fmReadWrite` truncates existing files; use `fmReadWriteExisting` for subsequent chunks
@@ -30,10 +30,10 @@ Build **BuddyDrive** - a P2P encrypted folder sync tool in Nim that allows synci
 ## Accomplished
 
 ### BuddyDrive Relay (complete)
-- Simple TCP relay server at `/home/gokr/tankfeud/buddydrive-relay`
-- Token-based authentication via `BUDDYDRIVE_TOKENS` env var
+- Simple TCP relay server — any token accepted, no whitelist
 - Idle timeout (5 min), bidirectional byte forwarding
-- Docker image: **8.25 MB** (Alpine-based)
+- KV store for encrypted config blobs (optional, `-d:withKvStore`, TiDB Cloud backend)
+- Docker image: Ubuntu 24.04 builder + runtime (libmysqlclient21 for TiDB SSL)
 - Verified working: two `nc` clients paired successfully through container
 
 ### BuddyDrive (mostly complete)
@@ -80,8 +80,10 @@ buddydrive/
     └── test_relay_file_sync.nim # Full file sync over relay test
 
 buddydrive-relay/
-├── src/relay.nim              # TCP relay server
-├── Dockerfile                 # Multi-stage Alpine build
+├── src/relay.nim              # TCP relay server + KV store thread
+├── src/kvstore.nim            # TiDB MySQL KV store (debby ORM)
+├── src/kvstore_api.nim        # Mummy HTTP server for KV API
+├── Dockerfile                 # Ubuntu 24.04 builder + runtime
 ├── docker-compose.yml
 └── README.md
 ```

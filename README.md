@@ -11,7 +11,8 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 - **Restore Missing Files** - normal sync recreates files that exist on your buddy but are missing locally
 - **Folder Policies** - append-only mode prevents remote overwrites of existing local files
 - **Simple CLI** - easy to use command-line interface
-- **GTK4 GUI** - native desktop application for monitoring and configuration
+- **Web GUI** - browser-based UI served from the daemon, works on any device
+- **GTK4 GUI** - native desktop application for monitoring and configuration (Linux)
 - **Cross-Platform** - works on Linux, macOS, and Windows
 
 ## Installation
@@ -21,7 +22,7 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 - **Nim** 2.2.8 or later
 - **libsodium** 1.0.18 or later
 - **SQLite3** development headers
-- **GTK4** development libraries (for GUI)
+- **GTK4** development libraries (for native GUI, Linux only)
 - **pkg-config** (for GUI build)
 - **g++** (C++ compiler, required by libp2p's lsquic dependency)
 
@@ -36,14 +37,14 @@ source ~/.nimble/bin/nim
 sudo apt update
 sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev liblz4-dev
 
-# Install GTK4 dependencies (for GUI)
+# Install GTK4 dependencies (for native GUI)
 sudo apt install -y pkg-config libgtk-4-dev
 
 # Clone and build
 git clone https://github.com/gokr/buddydrive.git
 cd buddydrive
 nimble build        # Build CLI
-nimble gui_release  # Build GUI
+nimble gui_release  # Build GTK4 GUI
 ```
 
 ### macOS
@@ -65,10 +66,10 @@ brew install libsodium sqlite3 gtk4 pkg-config
 git clone https://github.com/gokr/buddydrive.git
 cd buddydrive
 nimble build        # Build CLI
-nimble gui_release  # Build GUI
+nimble gui_release  # Build GTK4 GUI
 ```
 
-### Installing the GUI
+### Installing the GTK4 GUI
 
 After building, install with desktop integration:
 
@@ -83,6 +84,15 @@ This installs:
 - Icons to `~/.local/share/icons/`
 
 After installation, BuddyDrive will appear in your applications menu.
+
+### Using the Web GUI
+
+The web GUI is built into the CLI — no separate build needed. When the daemon starts, it serves the web UI on the control port (default `17521`):
+
+- **Localhost**: `http://127.0.0.1:17521/`
+- **LAN**: `http://<your-ip>:17521/w/<secret>/` (the secret is derived from your buddy UUID and printed at startup)
+
+The web GUI works on any device with a browser — phone, tablet, or headless server.
 
 ## Quick Start
 
@@ -159,7 +169,7 @@ buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
 ```
 
-A public config-recovery relay is available at `https://01.proxy.koyeb.app`. See [relay/README.md](relay/README.md) for relay details and self-hosting notes.
+The public relay for TCP fallback is at `01.proxy.koyeb.app:19447`. The KV store for config recovery is at `https://buddydrive-tankfeud-ddaec82a.koyeb.app`. See [relay/README.md](relay/README.md) for relay details and self-hosting notes.
 
 ## Usage
 
@@ -168,6 +178,7 @@ A public config-recovery relay is available at `https://01.proxy.koyeb.app`. See
 | Command | Description |
 |---------|-------------|
 | `buddydrive init` | Generate identity and create config |
+| `buddydrive init --with-recovery` | Generate identity and set up recovery in one step |
 | `buddydrive config` | Show current config |
 | `buddydrive config set <key> ...` | Update runtime configuration |
 | `buddydrive add-folder <path>` | Add folder to sync |
@@ -215,6 +226,8 @@ Starting BuddyDrive daemon...
 Starting daemon...
 ...
 BuddyDrive is running!
+Web GUI (localhost): http://127.0.0.1:17521/
+Web GUI (LAN): http://<your-ip>:17521/w/<secret>/
 
 $ buddydrive status
 Buddy: purple-banana (a1b2c3d4...)
@@ -252,7 +265,7 @@ Folders:
 
 - Direct libp2p connections use Noise transport encryption
 - Recovery setup derives a 32-byte master key from the 12-word phrase
-- Config sync encrypts the serialized config blob with the master key before uploading it to the relay
+- Config sync encrypts the serialized config blob with the master key before uploading it to the relay KV store
 - Normal sync restores missing files by comparing remote file lists with the local folder state
 
 ### Sync Protocol
@@ -262,6 +275,15 @@ Folders:
 3. Requests missing files
 4. Transfers chunks (64KB)
 5. Both sides update SQLite index
+
+### Web GUI
+
+The daemon serves a browser-based UI on the control port. It uses the same REST API as the CLI:
+
+- **Localhost access**: `http://127.0.0.1:<port>/` — no authentication needed
+- **LAN access**: `http://<ip>:<port>/w/<secret>/` — secret path derived from buddy UUID
+- Assets are embedded in the binary at compile time via `staticRead` — no external files needed
+- The web GUI provides folder management, buddy pairing, settings, and log viewing
 
 ## Configuration
 
@@ -304,6 +326,7 @@ added_at = "2026-04-10T12:00:00Z"
 
 - [ ] Delta sync (rolling hash)
 - [x] GTK4 desktop app
+- [x] Web GUI (browser-based, served from daemon)
 - [x] Bandwidth limiting
 - [ ] System tray integration
 - [ ] Auto-start on boot

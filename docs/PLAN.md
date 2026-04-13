@@ -491,7 +491,6 @@ sudo systemctl start buddydrive
 7. Selective sync (ignore patterns)
 8. Bandwidth limiting
 9. Version history
-10. **Key recovery** — Save private key in human-readable text format (like cryptocurrency seed phrases). Also provide an alternative recovery path without the key (e.g. security questions combined with another factor). Add recovery instructions to the homepage.
 11. **Unencrypted folder option** — Allow setting a folder to not be encrypted (encryption remains the default)
 12. Can we simplify the info to be sent to buddy with only one item, like buddy nickname/token
 13. Improve crash-resilience, see file `Crash-Safety-During-File-Sync.md`
@@ -520,6 +519,7 @@ Add a recovery system to BuddyDrive that allows users to recover their configura
 - **No selective restore** — sync automatically recreates missing local files
 - **Recovery is opt-in** by default
 - **GTK GUI** should have a nice recovery dialog with word grid and verification
+- **Web GUI** serves recovery controls from the daemon's control server (browser-based, any device)
 - **Config sync** happens during sync window (nightly) if config changed, and also via manual `buddydrive sync-config`
 - **First config sync** should happen immediately after setup
 - **No signing** needed for relay config uploads
@@ -531,7 +531,8 @@ Add a recovery system to BuddyDrive that allows users to recover their configura
 Set via `TIDB_CONNECTION_STRING` environment variable (stored in Koyeb secrets)
 ```
 
-Default relay URL: `https://01.proxy.koyeb.app`
+Default KV API URL: `https://buddydrive-tankfeud-ddaec82a.koyeb.app`
+Default TCP relay: `01.proxy.koyeb.app:19447`
 
 ### Recovery CLI Commands
 
@@ -624,14 +625,14 @@ buddydrive export-recovery   # Export recovery info (mnemonic, public key)
 - Phase 6: CLI commands (`setup-recovery`, `recover`, `sync-config`, `export-recovery`) — COMPLETE
 - Phase 7: `daemon.nim` loads master key on startup — COMPLETE
 - Phase 8: REST API recovery endpoints — COMPLETE
-- Phase 9: Tests — IN PROGRESS
+- Phase 9: Tests — COMPLETE
+- Phase 10: Web GUI merged from `simple-web-gui` branch — COMPLETE
 
 ### Remaining Work
 
-- Update Koyeb relay deployment with TiDB env var + second proxy port for KV HTTP API
 - GTK GUI: BIP39 recovery dialog with word grid and verification of random words
 - End-to-end test of full recovery flow against Koyeb relay
-- Update docs (README, TUTORIAL, website) with recovery documentation
+- Add recovery controls to web GUI
 
 ### Test Coverage
 
@@ -652,8 +653,6 @@ buddydrive export-recovery   # Export recovery info (mnemonic, public key)
 - Test that `buddydrive init --with-recovery` generates mnemonic and verifies
 - Clean up unused imports in `recovery.nim`
 - Update `daemon.nim` to derive folder keys from master key on startup
-- Update Koyeb relay deployment with TiDB connection string env var
-- Update docs (README, TUTORIAL, website) with recovery documentation
 - Test full recovery flow end-to-end
 - Test end-to-end sync between two machines with real connectivity
 - Improve DHT discovery reliability with bootstrap nodes
@@ -667,7 +666,13 @@ buddydrive export-recovery   # Export recovery info (mnemonic, public key)
 
 ### Control Server / State Management
 
-The BuddyDrive daemon includes a control server running on localhost (default port 17521) that provides a REST API for monitoring and configuration. The GUI communicates with the daemon via this API.
+The BuddyDrive daemon includes a control server running on `0.0.0.0:17521` by default that provides a REST API for monitoring and configuration. Both the web GUI and GTK4 GUI communicate with the daemon via this API.
+
+**Web GUI:**
+- Served from the control server at `http://127.0.0.1:<port>/` (localhost) and `http://<ip>:<port>/w/<secret>/` (LAN)
+- LAN access requires a secret path derived from the buddy UUID
+- Assets are embedded in the binary at compile time via `staticRead`
+- Provides folder management, buddy pairing, settings, and log viewing
 
 **State Storage:**
 - `~/.buddydrive/config.toml` - Static configuration (identity, folders, buddies)
@@ -719,8 +724,8 @@ Integration tests for DHT discovery and relay fallback are environment-dependent
 
 A public relay is deployed on Koyeb for testing and production use:
 
-- **Endpoint**: `01.proxy.koyeb.app:19447`
-- **Tokens**: `swift-eagle`, `brave-moose`
+- **TCP relay**: `01.proxy.koyeb.app:19447` (for NAT traversal)
+- **KV API**: `https://buddydrive-tankfeud-ddaec82a.koyeb.app` (for encrypted config storage)
 - **Region**: Frankfurt (fra)
 - **Source**: `relay/` directory in repository
 

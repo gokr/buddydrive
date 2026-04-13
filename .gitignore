@@ -28,3 +28,4 @@ tests/harness/test_*
 .idea/
 *.swp
 *.swo
+nimble.paths

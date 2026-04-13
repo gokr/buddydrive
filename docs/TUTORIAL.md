@@ -113,8 +113,12 @@ Node started with Peer ID: 16Uiu2HAm...
 Listening on: /ip4/0.0.0.0/tcp/41721
 DHT discovery started
 Control server started on port 17521
+Web GUI (localhost): http://127.0.0.1:17521/
+Web GUI (LAN): http://<your-ip>:17521/w/<secret>/
 BuddyDrive is running!
 ```
+
+You can open the web GUI in a browser to manage folders, pair buddies, view logs, and change settings.
 
 On a single machine you will usually also see a connectivity warning such as:
 
