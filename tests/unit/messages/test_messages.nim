@@ -1,0 +1,177 @@
+import std/unittest
+import std/times
+import ../../../src/buddydrive/p2p/messages
+
+suite "Integer encoding":
+  test "encodeInt int64 big-endian":
+    let data = encodeInt(0x0102030405060708'i64)
+    check data.len == 8
+    check data[0] == byte(0x01)
+    check data[7] == byte(0x08)
+
+  test "encodeInt uint32 big-endian":
+    let data = encodeInt(0x01020304'u32)
+    check data.len == 4
+    check data[0] == byte(0x01)
+    check data[3] == byte(0x04)
+
+  test "readInt64 reads big-endian":
+    let data = @[byte(0), 0, 0, 0, 0, 0, 0, 5]
+    check readInt64(data, 0) == 5
+
+  test "readUint32 reads big-endian":
+    let data = @[byte(0), 0, 0, 42]
+    check readUint32(data, 0) == 42
+
+  test "encodeInt/decodeInt64 round-trip":
+    let val = 0x1122334455667788'i64
+    let data = encodeInt(val)
+    check readInt64(data, 0) == val
+
+suite "FileList message":
+  test "encode/decode round-trip":
+    let msg = newFileList("myfolder", @[
+      FileEntry(path: "a.txt", size: 100, mtime: 1000, hash: "abc123"),
+      FileEntry(path: "b.txt", size: 200, mtime: 2000, hash: "def456")
+    ])
+    let encoded = encode(msg)
+    check encoded.len > 0
+    let decoded = decode(encoded)
+    check decoded.isOk
+    let d = decoded.get()
+    check d.kind == msgFileList
+    check d.folderName == "myfolder"
+    check d.files.len == 2
+    check d.files[0].path == "a.txt"
+    check d.files[0].size == 100
+    check d.files[1].hash == "def456"
+
+  test "empty file list":
+    let msg = newFileList("empty", @[])
+    let encoded = encode(msg)
+    let decoded = decode(encoded)
+    check decoded.isOk
+    check decoded.get().files.len == 0
+
+suite "FileRequest message":
+  test "encode/decode round-trip":
+    let msg = newFileRequest("dir/file.txt", offset = 1024, length = 4096)
+    let encoded = encode(msg)
+    let decoded = decode(encoded)
+    check decoded.isOk
+    let d = decoded.get()
+    check d.kind == msgFileRequest
+    check d.requestPath == "dir/file.txt"
+    check d.requestOffset == 1024
+    check d.requestLength == 4096
+
+  test "default offset and length":
+    let msg = newFileRequest("file.txt")
+    check msg.requestOffset == 0
+    check msg.requestLength == -1
+
+suite "FileData message":
+  test "encode/decode round-trip":
+    let data = @[byte(1), 2, 3, 4, 5]
+    let msg = newFileData(data, offset = 0, totalSize = 100, done = false, compression = ckNone, originalLen = 5)
+    let encoded = encode(msg)
+    let decoded = decode(encoded)
+    check decoded.isOk
+    let d = decoded.get()
+    check d.kind == msgFileData
+    check d.data == data
+    check d.dataOffset == 0
+    check d.totalSize == 100
+    check d.done == false
+    check d.dataCompression == ckNone
+    check d.dataOriginalLen == 5
+
+  test "FileData with LZ4 compression":
+    let data = @[byte(10), 20, 30]
+    let msg = newFileData(data, offset = 3, totalSize = 50, done = true, compression = ckLz4, originalLen = 100)
+    let encoded = encode(msg)
+    let decoded = decode(encoded)
+    check decoded.isOk
+    let d = decoded.get()
+    check d.dataCompression == ckLz4
+    check d.dataOriginalLen == 100
+    check d.done == true
+
+  test "FileData done flag":
+    let data = @[byte(42)]
+    let msg = newFileData(data, offset = 0, totalSize = 1, done = true)
+    let encoded = encode(msg)
+    let decoded = decode(encoded)
+    check decoded.get().done == true
+
+suite "FileAck message":
+  test "success ack round-trip":
+    let msg = newFileAck(true, bytesReceived = 4096)
+    let encoded = encode(msg)
+    let decoded = decode(encoded)
+    check decoded.isOk
+    let d = decoded.get()
+    check d.kind == msgFileAck
+    check d.success == true
+    check d.bytesReceived == 4096
+
+  test "failure ack":
+    let msg = newFileAck(false)
+    let decoded = decode(encode(msg))
+    check decoded.get().success == false
+
+suite "FileDelete message":
+  test "encode/decode round-trip":
+    let msg = newFileDelete("old_file.txt")
+    let decoded = decode(encode(msg))
+    check decoded.isOk
+    check decoded.get().kind == msgFileDelete
+    check decoded.get().deletedPath == "old_file.txt"
+
+suite "Ping/Pong messages":
+  test "ping round-trip":
+    let msg = newPing()
+    check msg.kind == msgPing
+    check msg.timestamp > 0
+    let decoded = decode(encode(msg))
+    check decoded.isOk
+    check decoded.get().kind == msgPing
+
+  test "pong round-trip":
+    let ts = getTime().toUnix()
+    let msg = newPong(ts)
+    let decoded = decode(encode(msg))
+    check decoded.isOk
+    check decoded.get().kind == msgPong
+    check decoded.get().pingTimestamp == ts
+
+suite "SyncDone message":
+  test "encode/decode round-trip":
+    let msg = newSyncDone()
+    let encoded = encode(msg)
+    let decoded = decode(encoded)
+    check decoded.isOk
+    check decoded.get().kind == msgSyncDone
+
+suite "Decode edge cases":
+  test "too-short data returns error":
+    let decoded = decode(@[byte(0)])
+    check decoded.isErr
+
+  test "invalid message kind returns error":
+    let decoded = decode(@[byte(99), byte(ProtocolVersion)])
+    check decoded.isErr
+
+  test "wrong protocol version returns error":
+    let msg = newSyncDone()
+    var encoded = encode(msg)
+    encoded[1] = byte(99)
+    let decoded = decode(encoded)
+    check decoded.isErr
+
+  test "truncated FileList returns error":
+    let msg = newFileList("folder", @[FileEntry(path: "a.txt", size: 1, mtime: 1, hash: "x")])
+    var encoded = encode(msg)
+    let truncated = encoded[0 ..< encoded.len - 5]
+    let decoded = decode(truncated)
+    check decoded.isErr

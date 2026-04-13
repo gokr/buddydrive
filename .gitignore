@@ -22,6 +22,12 @@ debian/tmp/
 # Test binaries
 tests/harness/test_*
 !tests/harness/*.nim
+tests/unit/*/*
+!tests/unit/*/*.nim
+tests/integration/*
+!tests/integration/*.nim
+nimcache/
+testresults/
 
 # IDE
 .vscode/

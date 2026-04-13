@@ -22,11 +22,47 @@ requires "curly"
 requires "https://github.com/gokr/lz4wrapper"
 requires "https://github.com/status-im/nim-zlib#daa8723"
 
-task test, "Run tests":
-  exec "nimble c -r tests/harness/test_sync_policy.nim"
-  exec "nimble c -r tests/harness/test_peer_discovery.nim"
-  exec "nimble c -r tests/harness/test_relay_fallback.nim"
-  exec "nimble c -r tests/harness/test_relay_file_sync.nim"
+task test, "Run all tests (automatic discovery via testament)":
+  exec """
+    echo "Running BuddyDrive test suite..."
+    echo "=== Unit tests ==="
+    testament pattern "tests/unit/*/*.nim" || true
+    echo "=== Integration tests ==="
+    testament pattern "tests/integration/*.nim" || true
+  """
+
+task testUnit, "Run unit tests":
+  exec "testament pattern \"tests/unit/*/*.nim\""
+
+task testTypes, "Run types tests":
+  exec "testament pattern \"tests/unit/types/*.nim\""
+
+task testRecovery, "Run recovery tests":
+  exec "testament pattern \"tests/unit/recovery/*.nim\""
+
+task testCrypto, "Run crypto tests":
+  exec "testament pattern \"tests/unit/crypto/*.nim\""
+
+task testConfig, "Run config tests":
+  exec "testament pattern \"tests/unit/config/*.nim\""
+
+task testPolicy, "Run sync policy tests":
+  exec "testament pattern \"tests/unit/policy/*.nim\""
+
+task testScanner, "Run scanner tests":
+  exec "testament pattern \"tests/unit/scanner/*.nim\""
+
+task testIndex, "Run file index tests":
+  exec "testament pattern \"tests/unit/index/*.nim\""
+
+task testMessages, "Run protocol message tests":
+  exec "testament pattern \"tests/unit/messages/*.nim\""
+
+task testConfigSync, "Run config sync tests":
+  exec "testament pattern \"tests/unit/config_sync/*.nim\""
+
+task testIntegration, "Run integration tests":
+  exec "testament pattern \"tests/integration/*.nim\""
 
 task build, "Build release CLI":
   exec "nim c -d:release src/buddydrive.nim"

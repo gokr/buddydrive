@@ -1,0 +1,184 @@
+import std/unittest
+import std/strutils
+import ../../../src/buddydrive/crypto
+import ../../../src/buddydrive/recovery
+
+proc masterKeyToString(mk: array[32, byte]): string =
+  result = newString(32)
+  for i in 0..<32:
+    result[i] = char(mk[i])
+
+suite "Crypto initialization":
+  test "initCrypto succeeds":
+    check initCrypto()
+
+suite "Key generation":
+  test "generateKey returns 32 bytes":
+    let key = generateKey()
+    check key.len == KeySize
+
+  test "generateKey produces different keys":
+    let k1 = generateKey()
+    let k2 = generateKey()
+    check k1 != k2
+
+  test "generateNonce returns 24 bytes":
+    let nonce = generateNonce()
+    check nonce.len == NonceSize
+
+  test "generateNonce produces different nonces":
+    let n1 = generateNonce()
+    let n2 = generateNonce()
+    check n1 != n2
+
+suite "Key pair generation":
+  test "generateKeyPair returns non-empty keys":
+    let kp = generateKeyPair()
+    check kp.publicKey.len > 0
+    check kp.secretKey.len > 0
+
+  test "generateKeyPair produces different keys each time":
+    let kp1 = generateKeyPair()
+    let kp2 = generateKeyPair()
+    check kp1.publicKey != kp2.publicKey
+
+suite "Config blob encryption (via recovery module)":
+  test "encryptConfigBlob/decryptConfigBlob round-trip":
+    let mk = deriveMasterKey(mnemonicToSeed(generateMnemonic()))
+    let data = "hello world"
+    let encrypted = encryptConfigBlob(data, mk)
+    check encrypted != data
+    let decrypted = decryptConfigBlob(encrypted, mk)
+    check decrypted == data
+
+  test "decryptConfigBlob with wrong key fails":
+    let mk1 = deriveMasterKey(mnemonicToSeed(generateMnemonic()))
+    let mk2 = deriveMasterKey(mnemonicToSeed(generateMnemonic()))
+    let data = "secret message"
+    let encrypted = encryptConfigBlob(data, mk1)
+    try:
+      discard decryptConfigBlob(encrypted, mk2)
+      check false
+    except CatchableError:
+      check true
+    except:
+      check true
+
+  test "encrypt empty string round-trip":
+    let mk = deriveMasterKey(mnemonicToSeed(generateMnemonic()))
+    let encrypted = encryptConfigBlob("", mk)
+    let decrypted = decryptConfigBlob(encrypted, mk)
+    check decrypted == ""
+
+  test "encrypt large data round-trip":
+    let mk = deriveMasterKey(mnemonicToSeed(generateMnemonic()))
+    let data = "x".repeat(10000)
+    let encrypted = encryptConfigBlob(data, mk)
+    let decrypted = decryptConfigBlob(encrypted, mk)
+    check decrypted == data
+
+suite "Key derivation":
+  test "deriveKey is deterministic":
+    let salt = generateSalt()
+    let k1 = deriveKey("password", salt)
+    let k2 = deriveKey("password", salt)
+    check k1 == k2
+
+  test "deriveKey with different passwords produces different keys":
+    let salt = generateSalt()
+    let k1 = deriveKey("password1", salt)
+    let k2 = deriveKey("password2", salt)
+    check k1 != k2
+
+  test "deriveKey with different salts produces different keys":
+    let k1 = deriveKey("password", generateSalt())
+    let k2 = deriveKey("password", generateSalt())
+    check k1 != k2
+
+  test "deriveKey returns 32 bytes":
+    let key = deriveKey("password", generateSalt())
+    check key.len == KeySize
+
+suite "Password hashing":
+  test "hashPassword/verifyPassword round-trip":
+    let hash = hashPassword("mypassword")
+    check verifyPassword(hash, "mypassword")
+
+  test "verifyPassword rejects wrong password":
+    let hash = hashPassword("mypassword")
+    check not verifyPassword(hash, "wrongpassword")
+
+  test "hashPassword produces different hashes":
+    let h1 = hashPassword("same")
+    let h2 = hashPassword("same")
+    check h1 != h2
+
+  test "verifyPassword still works with different hashes of same password":
+    let h1 = hashPassword("same")
+    let h2 = hashPassword("same")
+    check verifyPassword(h1, "same")
+    check verifyPassword(h2, "same")
+
+suite "Salt generation":
+  test "generateSalt returns non-empty string":
+    let salt = generateSalt()
+    check salt.len > 0
+
+  test "generateSalt produces different salts":
+    let s1 = generateSalt()
+    let s2 = generateSalt()
+    check s1 != s2
+
+suite "Encrypt/Decrypt API edge cases":
+  test "encrypt/decrypt round-trip":
+    let key = generateKey()
+    let data = "hello world"
+    let enc = encrypt(data, key)
+    let dec = decrypt(enc, key)
+    check dec == data
+
+  test "encrypt/decrypt empty string":
+    let key = generateKey()
+    let enc = encrypt("", key)
+    let dec = decrypt(enc, key)
+    check dec == ""
+
+  test "encrypt/decrypt large data":
+    let key = generateKey()
+    let data = "x".repeat(10000)
+    let enc = encrypt(data, key)
+    let dec = decrypt(enc, key)
+    check dec == data
+
+  test "encrypt produces nonce of correct size":
+    let key = generateKey()
+    let enc = encrypt("data", key)
+    check enc.nonce.len == NonceSize
+
+  test "encrypt/decrypt with wrong key fails":
+    let key1 = generateKey()
+    let key2 = generateKey()
+    let enc = encrypt("secret", key1)
+    try:
+      discard decrypt(enc, key2)
+      check false
+    except CatchableError:
+      check true
+    except:
+      check true
+
+  test "encryptFilename/decryptFilename round-trip":
+    let key = generateKey()
+    let filename = "test_document.txt"
+    let enc = encryptFilename(filename, key)
+    let dec = decryptFilename(enc, key)
+    check dec == filename
+
+  test "encrypt with invalid key size raises":
+    expect CryptoError:
+      discard encrypt("data", "shortkey")
+
+  test "decrypt with invalid key size raises":
+    let enc = EncryptedData(nonce: "x", ciphertext: "y")
+    expect CryptoError:
+      discard decrypt(enc, "shortkey")
