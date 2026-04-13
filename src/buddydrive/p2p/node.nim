@@ -87,20 +87,20 @@ proc newBuddyNode*(listenPort: int, announceAddrs: seq[MultiAddress] = @[]): Bud
 
 proc bootstrapDht*(node: BuddyNode): Future[void] {.async.}
 
-proc start*(node: BuddyNode): Future[void] {.async.} =
+proc start*(node: BuddyNode, dhtClient: bool = true,
+            bootstrapPeers: seq[(PeerID, seq[MultiAddress])] = @[]): Future[void] {.async.} =
   if node.started:
     return
-  
+
   var listenAddrs: seq[MultiAddress] = @[]
   try:
     listenAddrs.add(MultiAddress.init("/ip4/0.0.0.0/tcp/" & $node.listenPort).tryGet())
   except:
     discard
-  
-  let bootstrapNodes = getBootstrapNodes()
 
-  # Start the libp2p switch first, then create a client-side Kademlia instance.
-  # Mounting Kademlia into the switch causes startup to block while it bootstraps.
+  let bootstrapNodes = if bootstrapPeers.len > 0: bootstrapPeers
+                        else: getBootstrapNodes()
+
   let switch = SwitchBuilder.new()
     .withRng(newRng())
     .withPrivateKey(node.privKey)
@@ -109,26 +109,29 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
     .withYamux()
     .withTcpTransport()
     .build()
-  
+
   # Mount the sync protocol handler
   let syncHandler = newSyncHandler()
   switch.mount(syncHandler)
-  
-  # Start switch
+
+  # Create and optionally mount the DHT before starting the switch
+  node.dht = KadDHT.new(switch, bootstrapNodes = bootstrapNodes, client = dhtClient)
+  if not dhtClient:
+    switch.mount(node.dht)
+
+  # Start switch (also starts mounted protocols)
   await switch.start()
-  
+
   node.switch = switch
   node.peerInfo = switch.peerInfo
   node.peerId = switch.peerInfo.peerId
-  
-  # Use Kademlia as an outbound DHT client so we can query public peers without
-  # blocking switch startup or requiring an inbound Kademlia handler.
-  node.dht = KadDHT.new(switch, bootstrapNodes = bootstrapNodes, client = true)
+
   node.dht.updatePeers(bootstrapNodes)
 
   node.started = true
   node.startTime = getTime()
-  asyncSpawn node.bootstrapDht()
+  if dhtClient:
+    asyncSpawn node.bootstrapDht()
 
 proc bootstrapDht*(node: BuddyNode): Future[void] {.async.} =
   if node.dht == nil:
