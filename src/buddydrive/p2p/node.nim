@@ -11,6 +11,7 @@ import libp2p/crypto/crypto
 import libp2p/protocols/kademlia
 import libp2p/protocols/kademlia/types
 import libp2p/protocols/kademlia/find
+import libp2p/nameresolving/dnsresolver
 import synchsandler
 import ../types
 
@@ -35,13 +36,16 @@ const BuddyDriveProtocol* = "/buddydrive/1.0.0"
 
 proc getBootstrapNodes(): seq[(PeerID, seq[MultiAddress])] =
   result = @[]
-  
-  # These are IPFS public bootstrap nodes (TCP only)
+
   let bootstrapAddrs = [
-    ("/ip4/104.131.131.82/tcp/4001", "QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"),
-    ("/ip4/104.236.179.241/tcp/4001", "QmSoLPppuBtQSGwKDZT2M73ULpjvq3sZkgcjNjh3SGwVRy"),
-    ("/ip4/128.199.219.111/tcp/4001", "QmSoLnSGccFuZ4JkRN1HD9HXhfBOc8u4BXzAdXbjnpWJ7n"),
-    ("/ip4/104.236.76.40/tcp/4001", "QmSoLV4Bbm51jM9C4gDkQW2WWwPz9RwQhcLx9Wz5yLoJhF"),
+    ("/dns4/sg1.bootstrap.libp2p.io/tcp/4001", "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt"),
+    ("/dns4/am6.bootstrap.libp2p.io/tcp/4001", "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb"),
+    ("/dns4/sv15.bootstrap.libp2p.io/tcp/4001", "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"),
+    ("/dns4/ny5.bootstrap.libp2p.io/tcp/4001", "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa"),
+    ("/ip4/15.235.144.210/tcp/4001", "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt"),
+    ("/ip4/54.38.47.166/tcp/4001", "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb"),
+    ("/ip4/147.135.44.132/tcp/4001", "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"),
+    ("/ip4/51.81.93.51/tcp/4001", "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa"),
   ]
   
   for (addrStr, peerIdStr) in bootstrapAddrs:
@@ -85,8 +89,6 @@ proc newBuddyNode*(listenPort: int, announceAddrs: seq[MultiAddress] = @[]): Bud
   let (_, privKey) = generateKeyPair()
   result = newBuddyNode(privKey, listenPort, announceAddrs)
 
-proc bootstrapDht*(node: BuddyNode): Future[void] {.async.}
-
 proc start*(node: BuddyNode): Future[void] {.async.} =
   if node.started:
     return
@@ -99,8 +101,6 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
   
   let bootstrapNodes = getBootstrapNodes()
 
-  # Start the libp2p switch first, then create a client-side Kademlia instance.
-  # Mounting Kademlia into the switch causes startup to block while it bootstraps.
   let switch = SwitchBuilder.new()
     .withRng(newRng())
     .withPrivateKey(node.privKey)
@@ -108,45 +108,34 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
     .withNoise()
     .withYamux()
     .withTcpTransport()
+    .withNameResolver(DnsResolver.new(@[initTAddress("8.8.8.8", 53.Port), initTAddress("1.1.1.1", 53.Port)]))
     .build()
-  
-  # Mount the sync protocol handler
+
+  node.dht = KadDHT.new(switch, bootstrapNodes = bootstrapNodes, client = false)
+  node.dht.updatePeers(bootstrapNodes)
+
   let syncHandler = newSyncHandler()
   switch.mount(syncHandler)
-  
-  # Start switch
+  switch.mount(node.dht)
+
   await switch.start()
-  
+
   node.switch = switch
   node.peerInfo = switch.peerInfo
   node.peerId = switch.peerInfo.peerId
-  
-  # Use Kademlia as an outbound DHT client so we can query public peers without
-  # blocking switch startup or requiring an inbound Kademlia handler.
-  node.dht = KadDHT.new(switch, bootstrapNodes = bootstrapNodes, client = true)
-  node.dht.updatePeers(bootstrapNodes)
 
   node.started = true
   node.startTime = getTime()
-  asyncSpawn node.bootstrapDht()
 
-proc bootstrapDht*(node: BuddyNode): Future[void] {.async.} =
-  if node.dht == nil:
-    return
-
-  try:
-    let fut = node.dht.bootstrap()
-    if not await fut.withTimeout(chronos.seconds(45)):
-      echo "DHT bootstrap timed out"
-      return
-    echo "DHT bootstrap completed"
-  except Exception as e:
-    echo "DHT bootstrap failed: ", e.msg
+  asyncSpawn node.dht.start()
 
 proc stop*(node: BuddyNode): Future[void] {.async.} =
   if not node.started:
     return
   
+  if node.dht != nil:
+    await node.dht.stop()
+
   await node.switch.stop()
   node.started = false
 
