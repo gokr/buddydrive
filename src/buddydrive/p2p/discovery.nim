@@ -21,10 +21,10 @@ type
     node*: BuddyNode
     started*: bool
 
-const 
+const
   BuddyDriveNamespace* = "/buddydrive"
-  DhtAnnounceTimeout* = chronos.seconds(45)
-  DhtLookupTimeout* = chronos.seconds(45)
+  DhtAnnounceTimeout* = chronos.seconds(60)
+  DhtLookupTimeout* = chronos.seconds(120)
 
 proc buddyIdToKey(buddyId: string): Key =
   var data = newSeq[byte](buddyId.len)

@@ -266,12 +266,15 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     
     daemon.discovery = newDiscovery(daemon.node)
     await daemon.discovery.start()
-    
+
+    echo "Waiting for DHT bootstrap..."
+    await daemon.node.bootstrapDht()
+
     echo "DHT discovery started"
-    
+
     if daemon.config.buddies.len > 0:
-      asyncSpawn daemon.discovery.publishBuddy(daemon.config.buddy.uuid)
-      echo "Started buddy announcement on DHT: ", daemon.config.buddy.uuid
+      echo "Announcing buddy ID on DHT: ", daemon.config.buddy.uuid
+      await daemon.discovery.publishBuddy(daemon.config.buddy.uuid)
     else:
       echo "No buddies configured. Add buddies with 'buddydrive add-buddy' to start syncing."
     
