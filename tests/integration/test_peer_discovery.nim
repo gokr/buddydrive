@@ -31,12 +31,12 @@ suite "Public DHT buddy discovery":
     ])
 
     var found = false
-    for attempt in 1..6:
+    for attempt in 1..3:
       let peers = waitFor discovery1.findBuddy(uuid2)
       if peers.len > 0:
         found = true
         break
-      waitFor sleepAsync(chronos.seconds(10))
+      waitFor sleepAsync(chronos.seconds(5))
 
     waitFor discovery1.stop()
     waitFor discovery2.stop()

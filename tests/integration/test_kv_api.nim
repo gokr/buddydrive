@@ -29,14 +29,6 @@ proc safeGenerateMnemonic(): string {.gcsafe.} =
     except Exception:
       doAssert false, "generateMnemonic failed"
 
-template runWithStrictFallback(body: untyped) =
-  try:
-    body
-  except CatchableError as e:
-    if strictIntegration():
-      raise
-    echo "  skipping (KV API unavailable): ", e.msg
-
 suite "KV API":
   test "put then get then delete":
     runWithStrictFallback:

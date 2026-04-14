@@ -35,6 +35,18 @@ proc makeFileInfo*(path: string, size: int64 = 0, mtime: int64 = 0): tuple[path:
   result.mtime = mtime
   result.hash = default(array[32, byte])
 
+template runWithStrictFallback*(body: untyped) =
+  try:
+    body
+  except CatchableError as e:
+    if strictIntegration():
+      raise
+    echo "  skipping: ", e.msg
+  except:
+    if strictIntegration():
+      raise
+    echo "  skipping: uncaught defect"
+
 proc strictIntegration*(): bool =
   getEnv("BUDDYDRIVE_STRICT_INTEGRATION", "") == "1"
 
