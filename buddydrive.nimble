@@ -8,19 +8,19 @@ srcDir = "src"
 binDir = "bin"
 bin = @["buddydrive"]
 
-requires "nim >= 2.2.8"
-requires "libp2p >= 1.15"
-requires "libsodium >= 0.7"
-requires "parsetoml"
-requires "results >= 0.5.1"
-requires "stew"
-requires "uuids"
-requires "db_connector"
-requires "mummy"
-requires "nat_traversal"
-requires "curly"
-requires "https://github.com/gokr/lz4wrapper"
-requires "https://github.com/status-im/nim-zlib#daa8723"
+requires "nim >= 2.2.8"              # Language version
+requires "libp2p >= 1.15"            # P2P networking, DHT, NAT traversal
+requires "libsodium >= 0.7"          # Encryption (XChaCha20-Poly1305), key derivation
+requires "parsetoml"                  # TOML config parsing (~/.buddydrive/config.toml)
+requires "results >= 0.5.1"          # Result type for error handling
+requires "stew"                       # Utility types used by libp2p
+requires "uuids"                      # UUID generation for buddy/folder IDs
+requires "db_connector"              # SQLite (bundled with Nim 2.2.8+) for state/index DBs
+requires "mummy"                      # HTTP server (used by relay)
+requires "nat_traversal"             # NAT hole punching
+requires "curly"                      # HTTP client (relay KV API, config sync)
+requires "https://github.com/gokr/lz4wrapper" # LZ4 compression (used by libp2p)
+requires "https://github.com/status-im/nim-zlib#daa8723" # zlib for libp2p; pinned because libp2p declares underspecified version
 
 task test, "Run all tests (automatic discovery via testament)":
   exec """
@@ -60,6 +60,21 @@ task testMessages, "Run protocol message tests":
 
 task testConfigSync, "Run config sync tests":
   exec "testament pattern \"tests/unit/config_sync/*.nim\""
+
+task testControl, "Run control API tests":
+  exec "testament pattern \"tests/unit/control/*.nim\""
+
+task testControlWeb, "Run control web helper tests":
+  exec "testament pattern \"tests/unit/control_web/*.nim\""
+
+task testRawRelay, "Run raw relay helper tests":
+  exec "testament pattern \"tests/unit/rawrelay/*.nim\""
+
+task testTransfer, "Run transfer crash-safety tests":
+  exec "testament pattern \"tests/unit/transfer/*.nim\""
+
+task testCli, "Run CLI integration tests":
+  exec "testament pattern \"tests/integration/test_cli_flows.nim\""
 
 task testIntegration, "Run integration tests":
   exec "testament pattern \"tests/integration/*.nim\""
