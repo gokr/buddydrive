@@ -69,3 +69,21 @@ proc attemptUpnpPortMapping*(port: int): Option[string] =
   
   echo "UPnP port mapping successful: external IP ", externalIp, " port ", port
   result = some("/ip4/" & externalIp & "/tcp/" & $port)
+
+proc removeUpnpPortMapping*(port: int) =
+  let client = newMiniupnp()
+  client.discoverDelay = 3000
+
+  let discRes = client.discover()
+  if discRes.isErr() or discRes.get() == 0:
+    return
+
+  let igdRes = client.selectIGD()
+  if igdRes == IGDNotFound or igdRes == NotAnIGD:
+    return
+
+  let delRes = client.deletePortMapping($port, TCP)
+  if delRes.isOk():
+    echo "UPnP port mapping removed for port ", port
+  else:
+    echo "UPnP failed to remove port mapping for port ", port, ": ", delRes.error()

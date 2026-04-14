@@ -89,17 +89,21 @@ proc newBuddyNode*(listenPort: int, announceAddrs: seq[MultiAddress] = @[]): Bud
   let (_, privKey) = generateKeyPair()
   result = newBuddyNode(privKey, listenPort, announceAddrs)
 
-proc start*(node: BuddyNode): Future[void] {.async.} =
+proc bootstrapDht*(node: BuddyNode): Future[void] {.async.}
+
+proc start*(node: BuddyNode, dhtClient: bool = true,
+            bootstrapPeers: seq[(PeerID, seq[MultiAddress])] = @[]): Future[void] {.async.} =
   if node.started:
     return
-  
+
   var listenAddrs: seq[MultiAddress] = @[]
   try:
     listenAddrs.add(MultiAddress.init("/ip4/0.0.0.0/tcp/" & $node.listenPort).tryGet())
   except:
     discard
-  
-  let bootstrapNodes = getBootstrapNodes()
+
+  let bootstrapNodes = if bootstrapPeers.len > 0: bootstrapPeers
+                        else: getBootstrapNodes()
 
   let switch = SwitchBuilder.new()
     .withRng(newRng())
@@ -111,12 +115,13 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
     .withNameResolver(DnsResolver.new(@[initTAddress("8.8.8.8", 53.Port), initTAddress("1.1.1.1", 53.Port)]))
     .build()
 
-  node.dht = KadDHT.new(switch, bootstrapNodes = bootstrapNodes, client = false)
-  node.dht.updatePeers(bootstrapNodes)
-
   let syncHandler = newSyncHandler()
   switch.mount(syncHandler)
-  switch.mount(node.dht)
+
+  node.dht = KadDHT.new(switch, bootstrapNodes = bootstrapNodes, client = dhtClient)
+  if not dhtClient:
+    switch.mount(node.dht)
+
 
   await switch.start()
 
@@ -124,8 +129,13 @@ proc start*(node: BuddyNode): Future[void] {.async.} =
   node.peerInfo = switch.peerInfo
   node.peerId = switch.peerInfo.peerId
 
+  node.dht.updatePeers(bootstrapNodes)
+
   node.started = true
   node.startTime = getTime()
+  if dhtClient:
+    asyncSpawn node.bootstrapDht()
+
 
   asyncSpawn node.dht.start()
 
