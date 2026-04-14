@@ -498,6 +498,9 @@ sudo systemctl start buddydrive
     - [DONE] Startup cleanup of leftover `.buddytmp` files
     - [DONE] Ignore `.buddytmp` files during scans
     - [SKIPPED] Transfer resumption from saved offset for large files
+14. GUI/control port follow-up
+    - [TODO] Make the GTK GUI read the actual control API port from `~/.buddydrive/port`
+    - [TODO] Remove the hardcoded `127.0.0.1:17521` assumption from the GUI
 ---
 
 ## Recovery System
