@@ -89,9 +89,7 @@ proc newBuddyNode*(listenPort: int, announceAddrs: seq[MultiAddress] = @[]): Bud
   let (_, privKey) = generateKeyPair()
   result = newBuddyNode(privKey, listenPort, announceAddrs)
 
-proc bootstrapDht*(node: BuddyNode): Future[void] {.async.}
-
-proc start*(node: BuddyNode, dhtClient: bool = true,
+proc start*(node: BuddyNode, dhtClient: bool = false,
             bootstrapPeers: seq[(PeerID, seq[MultiAddress])] = @[]): Future[void] {.async.} =
   if node.started:
     return
@@ -115,13 +113,12 @@ proc start*(node: BuddyNode, dhtClient: bool = true,
     .withNameResolver(DnsResolver.new(@[initTAddress("8.8.8.8", 53.Port), initTAddress("1.1.1.1", 53.Port)]))
     .build()
 
-  let syncHandler = newSyncHandler()
-  switch.mount(syncHandler)
-
   node.dht = KadDHT.new(switch, bootstrapNodes = bootstrapNodes, client = dhtClient)
   if not dhtClient:
     switch.mount(node.dht)
 
+  let syncHandler = newSyncHandler()
+  switch.mount(syncHandler)
 
   await switch.start()
 
@@ -133,10 +130,6 @@ proc start*(node: BuddyNode, dhtClient: bool = true,
 
   node.started = true
   node.startTime = getTime()
-  if dhtClient:
-    asyncSpawn node.bootstrapDht()
-
-
   asyncSpawn node.dht.start()
 
 proc stop*(node: BuddyNode): Future[void] {.async.} =

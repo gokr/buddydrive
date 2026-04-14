@@ -14,6 +14,7 @@ const
 var controlStarted = false
 var controlThread: Thread[int]
 var configDirty* = false
+var pendingRecoveryWords: seq[string] = @[]
 
 proc getStateDb(): DbConn =
   let path = config.getDataDir() / "state.db"
@@ -99,7 +100,7 @@ proc jsonResponse(status: int, node: JsonNode): string =
   result.add("Connection: close\r\n\r\n")
   result.add(body)
 
-proc parseRequest(raw: string): tuple[httpMethod: string, path: string, body: string] =
+proc parseRequest*(raw: string): tuple[httpMethod: string, path: string, body: string] =
   let parts = raw.split("\r\n\r\n", 1)
   let head = parts[0].splitLines()
   if head.len == 0:
@@ -375,6 +376,7 @@ proc pairBuddyFromBody(body: string): tuple[status: int, response: JsonNode] =
   var cfg = config.loadConfig()
   var buddy: BuddyInfo
   buddy.id = newBuddyId(buddyId, buddyName)
+  buddy.pairingCode = code
   buddy.addedAt = getTime()
   cfg.addBuddy(buddy)
   (200, %*{"ok": true, "message": "Buddy paired successfully"})
@@ -392,6 +394,7 @@ proc setupRecoveryHandler(): tuple[status: int, response: JsonNode] =
   config.saveConfig(cfg)
   
   let words = mnemonic.splitWhitespace()
+  pendingRecoveryWords = words
   (200, %*{
     "ok": true,
     "mnemonic": mnemonic,
@@ -416,8 +419,10 @@ proc verifyRecoveryWordHandler(body: string): tuple[status: int, response: JsonN
     return (400, %*{"error": "index must be 0-11", "code": "INVALID_INDEX"})
   if word.len == 0:
     return (400, %*{"error": "word is required", "code": "MISSING_WORD"})
+  if pendingRecoveryWords.len != 12:
+    return (400, %*{"error": "No pending recovery setup", "code": "NO_PENDING_SETUP"})
   
-  let expected = getWordForIndex(findWordIndex(word.toLowerAscii()))
+  let expected = pendingRecoveryWords[index].toLowerAscii()
   let correct = word.toLowerAscii() == expected.toLowerAscii()
   
   (200, %*{"ok": true, "correct": correct})
@@ -478,7 +483,7 @@ proc syncConfigHandler(): tuple[status: int, response: JsonNode] =
   else:
     (500, %*{"error": "Failed to sync config to relay", "code": "SYNC_FAILED"})
 
-proc handleRequest(raw: string): string =
+proc handleRequest*(raw: string): string =
   let webResponse = serveWebRequest(raw)
   if webResponse.len > 0:
     return webResponse

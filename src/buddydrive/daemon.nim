@@ -269,9 +269,6 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     daemon.discovery = newDiscovery(daemon.node)
     await daemon.discovery.start()
 
-    echo "Waiting for DHT bootstrap..."
-    await daemon.node.bootstrapDht()
-
     echo "DHT discovery started"
 
     if daemon.config.buddies.len > 0:

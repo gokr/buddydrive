@@ -16,6 +16,12 @@ type
     folder*: FolderConfig
     rootPath*: string
 
+when defined(testing):
+  var flushAndCloseShouldFail* {.threadvar.}: bool
+
+  proc setFlushAndCloseShouldFail*(shouldFail: bool) =
+    flushAndCloseShouldFail = shouldFail
+
 proc hashFile(path: string): array[32, byte] =
   result = default(array[32, byte])
   try:
@@ -124,6 +130,9 @@ proc writeFileChunk*(path: string, offset: int64, data: seq[byte]): bool =
 
 proc flushAndClose*(path: string) =
   ## Durability barrier before atomic rename. Raises on failure.
+  when defined(testing):
+    if flushAndCloseShouldFail:
+      raise newException(IOError, "simulated flush failure")
   let f = open(path, fmReadWriteExisting)
   defer: f.close()
   when defined(posix):

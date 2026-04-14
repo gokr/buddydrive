@@ -71,7 +71,7 @@ task testRawRelay, "Run raw relay helper tests":
   exec "testament pattern \"tests/unit/rawrelay/*.nim\""
 
 task testTransfer, "Run transfer crash-safety tests":
-  exec "testament pattern \"tests/unit/transfer/*.nim\""
+  exec "testament pattern \"tests/unit/scanner/test_transfer_crash_safety.nim\""
 
 task testCli, "Run CLI integration tests":
   exec "testament pattern \"tests/integration/test_cli_flows.nim\""
