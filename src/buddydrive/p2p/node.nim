@@ -89,7 +89,20 @@ proc newBuddyNode*(listenPort: int, announceAddrs: seq[MultiAddress] = @[]): Bud
   let (_, privKey) = generateKeyPair()
   result = newBuddyNode(privKey, listenPort, announceAddrs)
 
-proc start*(node: BuddyNode, dhtClient: bool = false,
+proc bootstrapDht*(node: BuddyNode): Future[void] {.async.} =
+  if node.dht == nil:
+    return
+
+  try:
+    let fut = node.dht.bootstrap()
+    if not await fut.withTimeout(chronos.seconds(45)):
+      echo "DHT bootstrap timed out"
+      return
+    echo "DHT bootstrap completed"
+  except Exception as e:
+    echo "DHT bootstrap failed: ", e.msg
+
+proc start*(node: BuddyNode, dhtClient: bool = true,
             bootstrapPeers: seq[(PeerID, seq[MultiAddress])] = @[]): Future[void] {.async.} =
   if node.started:
     return
@@ -130,7 +143,8 @@ proc start*(node: BuddyNode, dhtClient: bool = false,
 
   node.started = true
   node.startTime = getTime()
-  asyncSpawn node.dht.start()
+  if dhtClient:
+    asyncSpawn bootstrapDht(node)
 
 proc stop*(node: BuddyNode): Future[void] {.async.} =
   if not node.started:

@@ -1,5 +1,5 @@
 import std/unittest
-import std/[os, options, base64, strutils]
+import std/[os, options, base64, strutils, json, httpclient]
 import chronos
 import curly
 import webby/httpheaders
@@ -101,3 +101,49 @@ suite "KV API":
       let resp = client.get(url, emptyHttpHeaders(), 10)
       check resp.code == 200
       check "ok" in resp.body
+
+  test "PUT empty body returns 400":
+    runWithStrictFallback:
+      let kvUrl = getKvApiUrl().strip(chars = {'/'})
+      let (_, recovery) = safeSetupRecovery()
+      let url = kvUrl & "/kv/" & recovery.publicKeyB58
+      let client = newHttpClient()
+      let resp = client.request(url, httpMethod = HttpPut, body = "")
+      check resp.code == Http400
+      check "Missing config data" in resp.body
+
+  test "POST empty body returns 400":
+    runWithStrictFallback:
+      let kvUrl = getKvApiUrl().strip(chars = {'/'})
+      let (_, recovery) = safeSetupRecovery()
+      let url = kvUrl & "/kv/" & recovery.publicKeyB58
+      let client = newHttpClient()
+      let resp = client.request(url, httpMethod = HttpPost, body = "")
+      check resp.code == Http400
+      check "Missing config data" in resp.body
+
+  test "/stats endpoint returns config_count":
+    runWithStrictFallback:
+      let kvUrl = getKvApiUrl().strip(chars = {'/'})
+      let client = newHttpClient()
+      let resp = client.get(kvUrl & "/stats")
+      check resp.code == Http200
+      let body = parseJson(resp.body)
+      check body.hasKey("config_count")
+      check body["config_count"].getInt() >= 0
+
+  test "/kv/ without key returns 400":
+    runWithStrictFallback:
+      let kvUrl = getKvApiUrl().strip(chars = {'/'})
+      let client = newHttpClient()
+      let resp = client.get(kvUrl & "/kv/")
+      check resp.code == Http400
+      check "Missing public key" in resp.body
+
+  test "unknown path returns 404":
+    runWithStrictFallback:
+      let kvUrl = getKvApiUrl().strip(chars = {'/'})
+      let client = newHttpClient()
+      let resp = client.get(kvUrl & "/definitely-missing-path")
+      check resp.code == Http404
+      check "Not found" in resp.body
