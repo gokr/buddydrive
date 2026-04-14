@@ -70,6 +70,9 @@ task testControlWeb, "Run control web helper tests":
 task testRawRelay, "Run raw relay helper tests":
   exec "testament pattern \"tests/unit/rawrelay/*.nim\""
 
+task testPairing, "Run pairing unit tests":
+  exec "testament pattern \"tests/unit/pairing/*.nim\""
+
 task testTransfer, "Run transfer crash-safety tests":
   exec "testament pattern \"tests/unit/scanner/test_transfer_crash_safety.nim\""
 
