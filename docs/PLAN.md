@@ -303,13 +303,11 @@ Folders:
 ```
 1. App generates: UUID + Ed25519 keypair
 2. Name derived: adjective-noun (e.g., "purple-banana")
-3. Connect to libp2p DHT (public bootstrap nodes)
-4. Announce presence: DHT[buddydrive/{uuid}] = {peer_addrs}
-5. Search for buddy: DHT[buddydrive/{buddy-uuid}]
-6. Connect via:
-   a. Direct (if public IP)
-   b. Hole punch (DCUTR)
-   c. Relay (fallback)
+3. On startup: publish address to KV-store under key derived from pairing code
+4. Search for buddy: lookup buddy's address record in KV-store
+5. Connect via:
+   a. Direct (if public IP or UPnP succeeded)
+   b. Relay fallback (if relay_region configured)
 ```
 
 ### Pairing Protocol
@@ -678,28 +676,37 @@ buddydrive export-recovery   # Export recovery info (mnemonic, public key)
 
 ### Test Coverage
 
-**Existing tests:**
-- `test_sync_policy.nim` — sync window, append-only policy (PASSING)
-- `test_recovery.nim` — BIP39 mnemonic gen, validation, key derivation determinism, hex round-trip, setup/verify, recover-from-mnemonic, encrypt/decrypt round-trip, wrong key rejection, full recovery flow, word helpers (PASSING)
-- `test_kv_api.nim` — KV API PUT/GET/DELETE, overwrite, missing key 404, /health (compiles, needs Koyeb KV API)
-- `test_config_sync_e2e.nim` — sync to relay + recover, attemptRecovery flow, wrong mnemonic, idempotent sync (compiles, needs Koyeb KV API)
-- `test_relay_file_sync.nim` — forward sync A→B, reverse sync B→A (restores missing files), append-only folder (compiles, needs relay)
-- `test_relay_fallback.nim` — relay pairing (compiles, needs relay)
-- `test_peer_discovery.nim` — DHT discovery (needs port availability)
+**Unit tests** (14 files, run via `nimble test`):
+- `test_config.nim` — config paths, save/load, folder/buddy management, TOML escaping
+- `test_config_sync.nim` — hashConfig, shouldSyncConfig, serialize/deserialize, syncConfigToRelay
+- `test_control.nim` — parseRequest, handleRequest routing, control API handlers
+- `test_control_web.nim` — isLocalhost, webSecret, rewriteLanRequest, serveWebRequest
+- `test_crypto.nim` — key generation, key pair, config blob encryption, key derivation, password hashing, encrypt/decrypt API
+- `test_index.nim` — SQLite file index add/get/remove, sync status tracking
+- `test_messages.nim` — protocol message encode/decode, edge cases
+- `test_pairing.nim` — BuddyConnection state machine, verifyBuddy
+- `test_policy.nim` — parseClockMinutes, sync window, shouldSyncRemoteFile
+- `test_rawrelay.nim` — relayAddrsForRegion, orderedRelayAddrs
+- `test_recovery.nim` — BIP39 mnemonic gen/validation, key derivation, Base58, config encrypt/decrypt, recovery setup, word helpers
+- `test_scanner.nim` — directory scanning, change detection, atomic write, chunk I/O
+- `test_transfer_crash_safety.nim` — interrupted receive, flush failure, mismatched size
+- `test_types.nim` — BuddyId, FolderConfig, AppConfig, ConnectionState, FileChangeKind
+
+**Integration tests** (8 files, run via `nimble test`):
+- `test_cli_flows.nim` — CLI binary: init, add-buddy, add-folder, sync-config, recover, export-recovery
+- `test_config_sync_e2e.nim` — sync config to relay + recover, wrong mnemonic, idempotent sync
+- `test_kv_api.nim` — KV API PUT/GET/DELETE, overwrite, 404, /health, edge cases
+- `test_pairing.nim` — full pairing protocol over libp2p
+- `test_peer_discovery.nim` — local DHT server discovery
+- `test_peer_discovery_public.nim` — public DHT discovery (skips gracefully if unavailable)
+- `test_relay_fallback.nim` — relay pairing via regional relay
+- `test_relay_file_sync.nim` — forward/reverse sync, append-only folder
+- `test_relay_server.nim` — relay server token-based pairing
 
 **Tests still to add:**
-- REST API recovery endpoint tests (POST /recovery/setup, /recovery/verify-word, /recovery/recover, GET /recovery, POST /recovery/sync-config)
-- CLI integration test: run `buddydrive setup-recovery` and `buddydrive recover` as subprocesses
 - Buddy-to-buddy config sync test (once `syncConfigToBuddy` is implemented)
-- Relay with `-d:withKvStore` local integration test (start relay + KV API, test against it)
-- Test that `buddydrive init --with-recovery` generates mnemonic and verifies
-- Clean up unused imports in `recovery.nim`
-- Update `daemon.nim` to derive folder keys from master key on startup
 - Test full recovery flow end-to-end
 - Test end-to-end sync between two machines with real connectivity
-- Improve DHT discovery reliability with bootstrap nodes
-- Add UPnP auto-configuration for easier setup
-- Implement proper background daemon mode (currently stays in foreground)
 - Add live connection status to `buddydrive status` command
 
 ---
@@ -758,9 +765,14 @@ The GTK4 GUI provides comprehensive configuration:
 
 ### Testing
 
-Integration tests for DHT discovery and relay fallback are environment-dependent:
-- Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to make tests fail hard when services unavailable
-- Without this flag, tests skip gracefully when environment doesn't support them
+Tests use `std/unittest` and run via testament with `nimble test`:
+
+- **Unit tests**: `tests/unit/*/*.nim` — 14 test files
+- **Integration tests**: `tests/integration/*.nim` — 8 test files
+
+Integration tests are environment-dependent:
+- Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to fail hard when services unavailable
+- Without this flag, tests skip gracefully
 
 ### Public Relay
 

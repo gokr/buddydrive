@@ -51,13 +51,13 @@ BuddyDrive syncs files between peers over libp2p using a chunked transfer protoc
 | Power loss (not process crash) | Risky | No fsync, data may be lost silently |
 | SQLite index corruption | Very unlikely | SQLite journal mode protects DB integrity |
 
-## Recommended Fixes (if desired)
+## Recommended Fixes
 
-1. **Write to temp file, then atomic rename** -- change `receiveFileData` to write chunks to `<path>.buddytmp`, then `moveFile()` to final path on success. Delete `.buddytmp` on startup cleanup.
-2. **Use hash in sync comparison** -- after receiving a file, verify its hash matches the remote's hash. Also use hash (not just mtime+size) in `shouldSyncRemoteFile` to catch corrupt files.
-3. **Add fsync** -- call `flushFile(f)` before close in `writeFileChunk`, or at least once after all chunks are written.
-4. **Fix append-only gap** -- in append-only mode, if a local file exists but its hash doesn't match remote, allow re-sync (it was never fully synced).
-5. **Startup cleanup** -- on daemon start, scan for and delete any `.buddytmp` files (leftovers from interrupted transfers).
+1. **Write to temp file, then atomic rename** ✅ DONE — `receiveFileData` writes chunks to `<path>.buddytmp`, then `flushAndClose` + `moveFile` to final path on success. Startup cleanup deletes leftover `.buddytmp` files.
+2. **Use hash in sync comparison** — after receiving a file, verify its hash matches the remote's hash. Also use hash (not just mtime+size) in `shouldSyncRemoteFile` to catch corrupt files.
+3. **Add fsync** ✅ DONE — `flushAndClose` calls `flushFile` + `closeFile` before renaming. A test-only failure mode (`flushAndCloseShouldFail`) verifies the error path.
+4. **Fix append-only gap** — in append-only mode, if a local file exists but its hash doesn't match remote, allow re-sync (it was never fully synced).
+5. **Startup cleanup** ✅ DONE — `cleanupTempFiles` scans for and deletes `.buddytmp` files on daemon start. Scanner also ignores `.buddytmp` files during scans.
 
 ## Key Files
 - `src/buddydrive/sync/transfer.nim` -- transfer protocol, chunk send/receive

@@ -259,8 +259,6 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
 
     echo "Node started with Peer ID: ", daemon.node.peerIdStr()
     
-    for address in daemon.node.getAddrs():
-      echo "Listening on: ", $address
     for address in daemon.node.getAdvertisedAddrs():
       echo "Advertising: ", $address
 
@@ -269,11 +267,8 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     daemon.discovery = newDiscovery(daemon.node)
     await daemon.discovery.start()
 
-    echo "DHT discovery started"
-
     if daemon.config.buddies.len > 0:
       asyncSpawn daemon.discovery.publishBuddyLoop(daemon.config.buddy.uuid)
-      echo "Started buddy announcement on DHT: ", daemon.config.buddy.uuid
     else:
       echo "No buddies configured. Add buddies with 'buddydrive add-buddy' to start syncing."
     
@@ -296,7 +291,6 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     asyncSpawn daemon.statusUpdateFut
     
     startControlServer(controlPort)
-    echo "Control server started on port ", controlPort
     
     echo "Daemon started successfully"
   except CatchableError as e:
@@ -526,15 +520,18 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
     if daemon.buddyConnections.hasKey(buddy.id.uuid):
       continue
     
-    echo "Buddy: ", buddy.id.name
-    echo "  Searching DHT for: ", buddy.id.uuid
-    
     try:
       let peers = await daemon.discovery.findBuddy(buddy.id.uuid)
       if peers.len > 0:
         let (peerId, addrs) = peers[0]
         discard await daemon.connectToBuddy(buddy.id.uuid, peerId, addrs)
       else:
-        echo "  Not found on DHT yet"
+        daemon.logDiagnostic(
+          buddyDiagnosticKey(buddy.id.uuid),
+          "Buddy " & buddy.id.name & " (" & buddy.id.uuid.shortId() & ") not found on DHT yet"
+        )
     except Exception as e:
-      echo "  DHT lookup failed: ", e.msg
+      daemon.logDiagnostic(
+        buddyDiagnosticKey(buddy.id.uuid),
+        "DHT lookup failed for buddy " & buddy.id.name & ": " & e.msg
+      )

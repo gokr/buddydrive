@@ -56,14 +56,12 @@ proc announce*(discovery: DiscoveryService, buddyId: string) {.async.} =
     return
 
   let key = buddyIdToKey(buddyId)
-  echo "Announcing buddy ID on DHT: ", buddyId
 
   try:
     let fut = discovery.node.dht.addProvider(key)
     if not await fut.withTimeout(DhtAnnounceTimeout):
-      echo "DHT announcement timed out"
+      echo "DHT announcement timed out for ", buddyId
       return
-    echo "Successfully announced on DHT"
   except Exception as e:
     echo "Error announcing on DHT: ", e.msg
 
@@ -78,18 +76,15 @@ proc findBuddy*(discovery: DiscoveryService, buddyId: string): Future[seq[(PeerI
     return result
 
   let key = buddyIdToKey(buddyId)
-  echo "Searching DHT for buddy: ", buddyId
 
   try:
     let providers = await discovery.node.dht.getProviders(key).wait(DhtLookupTimeout)
     if providers.len == 0:
-      echo "DHT lookup returned no providers"
       return result
     for provider in providers:
       let pidRes = PeerID.init(provider.id)
       if pidRes.isOk:
         result.add((pidRes.get(), provider.addrs))
-    echo "Found ", result.len, " peer record(s)"
   except Exception as e:
     echo "Error finding buddy on DHT: ", e.msg
 
