@@ -47,14 +47,65 @@ proc ensureDataDir*() =
   if not dir.dirExists():
     createDir(dir)
 
-proc loadConfig*(): AppConfig =
-  let path = getConfigPath()
-  if not fileExists(path):
-    logError("Config file not found: " & path)
-    raise newException(IOError, "Config file not found. Run 'buddydrive init' first.")
-  
-  let toml = parseFile(path)
-  
+proc escapeToml*(s: string): string =
+  result = s.replace("\\", "\\\\")
+  result = result.replace("\"", "\\\"")
+  result = result.replace("\n", "\\n")
+  result = result.replace("\r", "\\r")
+  result = result.replace("\t", "\\t")
+
+proc configToToml*(config: AppConfig, includeHeader = false): string =
+  if includeHeader:
+    result.add("# BuddyDrive Configuration\n")
+    result.add("# Generated: " & now().format("yyyy-MM-dd HH:mm:ss") & "\n\n")
+
+  result.add("[buddy]\n")
+  result.add("name = \"" & escapeToml(config.buddy.name) & "\"\n")
+  result.add("id = \"" & escapeToml(config.buddy.uuid) & "\"\n\n")
+
+  if config.recovery.enabled:
+    result.add("[recovery]\n")
+    result.add("enabled = true\n")
+    result.add("public_key = \"" & escapeToml(config.recovery.publicKeyB58) & "\"\n")
+    result.add("master_key = \"" & escapeToml(config.recovery.masterKey) & "\"\n\n")
+
+  result.add("[network]\n")
+  result.add("listen_port = " & $config.listenPort & "\n")
+  result.add("announce_addr = \"" & escapeToml(config.announceAddr) & "\"\n")
+  result.add("relay_base_url = \"" & escapeToml(config.relayBaseUrl) & "\"\n")
+  result.add("relay_region = \"" & escapeToml(config.relayRegion) & "\"\n")
+  result.add("sync_window_start = \"" & escapeToml(config.syncWindowStart) & "\"\n")
+  result.add("sync_window_end = \"" & escapeToml(config.syncWindowEnd) & "\"\n")
+  result.add("bandwidth_limit_kbps = " & $config.bandwidthLimitKBps & "\n\n")
+
+  if config.folders.len > 0:
+    result.add("[[folders]]\n")
+    for i, folder in config.folders:
+      if i > 0:
+        result.add("\n[[folders]]\n")
+      result.add("name = \"" & escapeToml(folder.name) & "\"\n")
+      result.add("path = \"" & escapeToml(folder.path) & "\"\n")
+      result.add("encrypted = " & $folder.encrypted & "\n")
+      result.add("append_only = " & $folder.appendOnly & "\n")
+      if folder.buddies.len > 0:
+        result.add("buddies = [")
+        for j, buddy in folder.buddies:
+          if j > 0:
+            result.add(", ")
+          result.add("\"" & escapeToml(buddy) & "\"")
+        result.add("]\n")
+
+  if config.buddies.len > 0:
+    result.add("\n[[buddies]]\n")
+    for i, buddy in config.buddies:
+      if i > 0:
+        result.add("\n[[buddies]]\n")
+      result.add("id = \"" & escapeToml(buddy.id.uuid) & "\"\n")
+      result.add("name = \"" & escapeToml(buddy.id.name) & "\"\n")
+      result.add("pairing_code = \"" & escapeToml(buddy.pairingCode) & "\"\n")
+      result.add("added_at = \"" & buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'") & "\"\n")
+
+proc parseConfigToml*(toml: TomlValueRef): AppConfig =
   result.buddy.uuid = toml["buddy"]["id"].getStr()
   result.buddy.name = toml["buddy"]["name"].getStr("")
   result.recovery.enabled = false
@@ -81,7 +132,7 @@ proc loadConfig*(): AppConfig =
     result.syncWindowStart = toml["network"]{"sync_window_start"}.getStr("")
     result.syncWindowEnd = toml["network"]{"sync_window_end"}.getStr("")
     result.bandwidthLimitKBps = toml["network"]{"bandwidth_limit_kbps"}.getInt(0)
-  
+
   result.folders = @[]
   if "folders" in toml:
     for folderTbl in toml["folders"].getElems():
@@ -95,7 +146,7 @@ proc loadConfig*(): AppConfig =
         for buddy in folderTbl["buddies"].getElems():
           folder.buddies.add(buddy.getStr())
       result.folders.add(folder)
-  
+
   result.buddies = @[]
   if "buddies" in toml:
     for buddyTbl in toml["buddies"].getElems():
@@ -106,69 +157,22 @@ proc loadConfig*(): AppConfig =
       buddy.addedAt = parseTime(buddyTbl{"added_at"}.getStr("1970-01-01T00:00:00Z"), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
       result.buddies.add(buddy)
 
+proc parseConfigString*(content: string): AppConfig =
+  parseConfigToml(parseString(content))
+
+proc loadConfig*(): AppConfig =
+  let path = getConfigPath()
+  if not fileExists(path):
+    logError("Config file not found: " & path)
+    raise newException(IOError, "Config file not found. Run 'buddydrive init' first.")
+
+  result = parseConfigToml(parseFile(path))
+
 proc saveConfig*(config: AppConfig) =
   ensureConfigDir()
   let path = getConfigPath()
   let tempPath = path & ".tmp"
-  
-  proc escapeToml(s: string): string =
-    result = s.replace("\\", "\\\\")
-    result = result.replace("\"", "\\\"")
-    result = result.replace("\n", "\\n")
-    result = result.replace("\r", "\\r")
-    result = result.replace("\t", "\\t")
-  
-  var content = ""
-  
-  content.add("# BuddyDrive Configuration\n")
-  content.add("# Generated: " & now().format("yyyy-MM-dd HH:mm:ss") & "\n\n")
-  
-  content.add("[buddy]\n")
-  content.add("name = \"" & escapeToml(config.buddy.name) & "\"\n")
-  content.add("id = \"" & escapeToml(config.buddy.uuid) & "\"\n\n")
-
-  if config.recovery.enabled:
-    content.add("[recovery]\n")
-    content.add("enabled = true\n")
-    content.add("public_key = \"" & escapeToml(config.recovery.publicKeyB58) & "\"\n")
-    content.add("master_key = \"" & escapeToml(config.recovery.masterKey) & "\"\n\n")
-
-  content.add("[network]\n")
-  content.add("listen_port = " & $config.listenPort & "\n")
-  content.add("announce_addr = \"" & escapeToml(config.announceAddr) & "\"\n")
-  content.add("relay_base_url = \"" & escapeToml(config.relayBaseUrl) & "\"\n")
-  content.add("relay_region = \"" & escapeToml(config.relayRegion) & "\"\n")
-  content.add("sync_window_start = \"" & escapeToml(config.syncWindowStart) & "\"\n")
-  content.add("sync_window_end = \"" & escapeToml(config.syncWindowEnd) & "\"\n")
-  content.add("bandwidth_limit_kbps = " & $config.bandwidthLimitKBps & "\n\n")
-  
-  if config.folders.len > 0:
-    content.add("[[folders]]\n")
-    for i, folder in config.folders:
-      if i > 0:
-        content.add("\n[[folders]]\n")
-      content.add("name = \"" & escapeToml(folder.name) & "\"\n")
-      content.add("path = \"" & escapeToml(folder.path) & "\"\n")
-      content.add("encrypted = " & $folder.encrypted & "\n")
-      content.add("append_only = " & $folder.appendOnly & "\n")
-      if folder.buddies.len > 0:
-        content.add("buddies = [")
-        for j, buddy in folder.buddies:
-          if j > 0:
-            content.add(", ")
-          content.add("\"" & escapeToml(buddy) & "\"")
-        content.add("]\n")
-  
-  if config.buddies.len > 0:
-    content.add("\n[[buddies]]\n")
-    for i, buddy in config.buddies:
-      if i > 0:
-        content.add("\n[[buddies]]\n")
-      content.add("id = \"" & escapeToml(buddy.id.uuid) & "\"\n")
-      content.add("name = \"" & escapeToml(buddy.id.name) & "\"\n")
-      content.add("pairing_code = \"" & escapeToml(buddy.pairingCode) & "\"\n")
-      content.add("added_at = \"" & buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'") & "\"\n")
-  
+  let content = configToToml(config, includeHeader = true)
   writeFile(tempPath, content)
   moveFile(tempPath, path)
   logInfo("Config saved to: " & path)

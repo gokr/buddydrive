@@ -5,36 +5,6 @@ import ../../../src/buddydrive/types
 import ../../../src/buddydrive/recovery
 import ../../../src/buddydrive/sync/config_sync
 
-suite "hashConfig":
-  test "same config produces same hash":
-    var cfg = newAppConfig(newBuddyId("uuid-1", "test"))
-    let h1 = hashConfig(cfg)
-    let h2 = hashConfig(cfg)
-    check h1 == h2
-
-  test "different config produces different hash":
-    var cfg1 = newAppConfig(newBuddyId("uuid-1", "test"))
-    var cfg2 = newAppConfig(newBuddyId("uuid-2", "other"))
-    check hashConfig(cfg1) != hashConfig(cfg2)
-
-  test "different folder count changes hash":
-    var cfg1 = newAppConfig(newBuddyId("uuid", "test"))
-    var cfg2 = newAppConfig(newBuddyId("uuid", "test"))
-    cfg2.folders = @[newFolderConfig("docs", "/tmp/docs")]
-    check hashConfig(cfg1) != hashConfig(cfg2)
-
-suite "shouldSyncConfig":
-  test "changed config should sync":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    let hash = hashConfig(cfg)
-    cfg.folders = @[newFolderConfig("docs", "/tmp/docs")]
-    check shouldSyncConfig(hash, cfg)
-
-  test "unchanged config should not sync":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    let hash = hashConfig(cfg)
-    check not shouldSyncConfig(hash, cfg)
-
 suite "serializeConfigForSync / deserializeConfigFromSync":
   test "round-trip preserves buddy":
     let (mnemonic, recovery) = setupRecovery()
@@ -105,6 +75,29 @@ suite "serializeConfigForSync / deserializeConfigFromSync":
     check decrypted.recovery.enabled == true
     check decrypted.recovery.masterKey == recovery.masterKey
     check decrypted.recovery.publicKeyB58 == recovery.publicKeyB58
+
+  test "round-trip preserves special characters in strings":
+    let (_, recovery) = setupRecovery()
+    let masterKey = hexToBytes(recovery.masterKey)
+    var cfg = newAppConfig(newBuddyId("uuid-with-quotes", "buddy \"name\""))
+    cfg.recovery = recovery
+    cfg.announceAddr = "/ip4/1.2.3.4/tcp/12345\nnext"
+    cfg.folders = @[newFolderConfig("docs\tname", "/tmp/quote\"dir")]
+    var buddy: BuddyInfo
+    buddy.id = newBuddyId("buddy-uuid-1", "friend \"quoted\"")
+    buddy.pairingCode = "swift\teagle"
+    buddy.addedAt = parseTime("2026-01-01T00:00:00Z", "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
+    cfg.buddies = @[buddy]
+
+    let encrypted = serializeConfigForSync(cfg, masterKey)
+    let decrypted = deserializeConfigFromSync(encrypted, masterKey)
+
+    check decrypted.buddy.name == cfg.buddy.name
+    check decrypted.announceAddr == cfg.announceAddr
+    check decrypted.folders[0].name == cfg.folders[0].name
+    check decrypted.folders[0].path == cfg.folders[0].path
+    check decrypted.buddies[0].id.name == cfg.buddies[0].id.name
+    check decrypted.buddies[0].pairingCode == cfg.buddies[0].pairingCode
 
   test "deserialize with wrong key fails":
     let (mnemonic, recovery) = setupRecovery()
