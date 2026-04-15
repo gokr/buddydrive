@@ -39,7 +39,7 @@ proc connectAndSync(config: AppConfig): Future[void] {.async.} =
   let bc = newBuddyConnection()
   bc.conn = relayConn.conn
   doAssert await bc.performHandshake(config)
-  let protocol = SyncProtocol(node: nil)
+  let protocol = newSyncProtocol()
   doAssert await syncBuddyFolders(config, bc.buddyId, bc.conn, protocol)
   await bc.close()
 

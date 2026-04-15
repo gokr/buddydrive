@@ -19,7 +19,7 @@ proc feedMessages(
 
 proc newTestTransfer(rootPath: string): FileTransfer =
   let folder = newFolderConfig("docs", rootPath)
-  result = newFileTransfer(folder, newSyncProtocol(nil))
+  result = newFileTransfer(folder, newSyncProtocol())
 
 suite "transfer crash safety":
   test "interrupted receive removes temp file and does not create final file":

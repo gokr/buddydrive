@@ -4,8 +4,8 @@ import chronos
 import libp2p
 import libp2p/protocols/protocol
 import libp2p/stream/connection
-import node
 import messages
+import protocol
 import ../types
 
 export results
@@ -49,44 +49,22 @@ proc sendBuddyId*(bc: BuddyConnection, buddyId: string, buddyName: string): Futu
       hash: buddyName
     )]
   )
-  let encoded = encode(msg)
-  var lenBytes: array[4, byte]
-  lenBytes[0] = byte(encoded.len shr 24)
-  lenBytes[1] = byte(encoded.len shr 16)
-  lenBytes[2] = byte(encoded.len shr 8)
-  lenBytes[3] = byte(encoded.len)
-  
-  await bc.conn.write(@lenBytes)
-  await bc.conn.write(encoded)
+  await sendFramedMessage(bc.conn, msg)
   bc.lastActivity = getTime()
 
 proc receiveBuddyId*(bc: BuddyConnection): Future[Option[(string, string)]] {.async.} =
   try:
-    var lenBytes: array[4, byte]
-    await bc.conn.readExactly(addr lenBytes[0], 4)
-    
-    let msgLen = int(lenBytes[0]) shl 24 or
-                 int(lenBytes[1]) shl 16 or
-                 int(lenBytes[2]) shl 8 or
-                 int(lenBytes[3])
-    
-    if msgLen > MaxMessageSize or msgLen <= 0:
+    let msgOpt = await receiveFramedMessage(bc.conn)
+    if msgOpt.isNone:
       return none((string, string))
-    
-    var data = newSeq[byte](msgLen)
-    await bc.conn.readExactly(addr data[0], msgLen)
-    
-    let decoded = decode(data)
-    if decoded.isErr:
-      return none((string, string))
-    
-    let msg = decoded.get()
+
+    let msg = msgOpt.get()
     if msg.kind != msgFileList or msg.folderName != "BUDDYDRIVE_PAIRING":
       return none((string, string))
-    
+
     if msg.files.len != 1:
       return none((string, string))
-    
+
     let buddyId = msg.files[0].path
     let buddyName = msg.files[0].hash
     bc.buddyId = buddyId
