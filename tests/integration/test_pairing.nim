@@ -83,4 +83,5 @@ proc runPairingTest(): Future[bool] {.async.} =
 
 suite "Full pairing protocol over libp2p":
   test "two nodes pair via direct libp2p connection":
-    check waitFor runPairingTest()
+    runWithStrictFallback:
+      check waitFor runPairingTest()

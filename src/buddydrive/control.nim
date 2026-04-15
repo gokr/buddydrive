@@ -13,7 +13,6 @@ const
 
 var controlStarted = false
 var controlThread: Thread[int]
-var configDirty* = false
 var pendingRecoveryWords: seq[string] = @[]
 
 proc getStateDb(): DbConn =
@@ -48,7 +47,7 @@ proc getStateDb(): DbConn =
     )
   """)
 
-proc writeRuntimeStatus*(cfg: AppConfig, peerId: string, addresses: seq[string], startTime: Time, running = true) =
+proc writeRuntimeStatus*(peerId: string, addresses: seq[string], startTime: Time, running = true) =
   config.ensureDataDir()
   let db = getStateDb()
   try:
@@ -83,8 +82,7 @@ proc writeLiveStatus*(buddyStatuses: seq[BuddyStatus], folderStatuses: seq[SyncS
 proc markControlStopped*() =
   if not config.configExists():
     return
-  let cfg = config.loadConfig()
-  writeRuntimeStatus(cfg, "", @[], getTime(), running = false)
+  writeRuntimeStatus("", @[], getTime(), running = false)
 
 proc jsonResponse(status: int, node: JsonNode): string =
   let body = $node
@@ -438,7 +436,6 @@ proc recoverHandler(body: string): tuple[status: int, response: JsonNode] =
     return (400, %*{"error": "Invalid mnemonic words", "code": "INVALID_MNEMONIC"})
   
   let recovery = recoverFromMnemonic(mnemonic)
-  let masterKey = hexToBytes(recovery.masterKey)
   
   if not config.configExists():
     return (400, %*{"error": "No config file to verify against", "code": "NO_CONFIG"})
@@ -476,7 +473,8 @@ proc syncConfigHandler(): tuple[status: int, response: JsonNode] =
   if not cfg.recovery.enabled:
     return (400, %*{"error": "Recovery not set up", "code": "NOT_SETUP"})
   
-  let synced = waitFor syncConfigToRelay(cfg, DefaultKvApiUrl)
+  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: DefaultKvApiUrl
+  let synced = waitFor syncConfigToRelay(cfg, relayUrl)
   
   if synced:
     (200, %*{"ok": true, "message": "Config synced to relay"})

@@ -283,7 +283,6 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     block:
       {.cast(gcsafe).}:
         writeRuntimeStatus(
-          daemon.config,
           daemon.node.peerIdStr(),
           daemon.node.getAddrs().mapIt($it),
           daemon.startTime,

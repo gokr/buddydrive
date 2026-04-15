@@ -1,9 +1,6 @@
 import std/[os, json, httpclient, strutils]
 
-when defined(gtk3):
-  {.passl: gorge("pkg-config --libs gtk+-3.0").}
-else:
-  {.passl: gorge("pkg-config --libs gtk4").}
+{.passl: gorge("pkg-config --libs gtk4").}
 
 type
   GtkWidget* = pointer
@@ -58,6 +55,8 @@ proc gtkWidgetSetVexpand*(widget: GtkWidget, expand: cint) {.cdecl, importc: "gt
 proc gtkListBoxNew*(): GtkListBox {.cdecl, importc: "gtk_list_box_new".}
 proc gtkListBoxAppend*(list: GtkListBox, row: GtkWidget) {.cdecl, importc: "gtk_list_box_append".}
 proc gtkListBoxRemove*(list: GtkListBox, row: GtkWidget) {.cdecl, importc: "gtk_list_box_remove".}
+proc gtkWidgetGetFirstChild*(widget: GtkWidget): GtkWidget {.cdecl, importc: "gtk_widget_get_first_child".}
+proc gtkWidgetGetNextSibling*(widget: GtkWidget): GtkWidget {.cdecl, importc: "gtk_widget_get_next_sibling".}
 proc gtkProgressBarNew*(): GtkProgressBar {.cdecl, importc: "gtk_progress_bar_new".}
 proc gtkProgressBarSetFraction*(bar: GtkProgressBar, fraction: cdouble) {.cdecl, importc: "gtk_progress_bar_set_fraction".}
 proc gtkProgressBarSetText*(bar: GtkProgressBar, text: cstring) {.cdecl, importc: "gtk_progress_bar_set_text".}
@@ -73,9 +72,6 @@ proc gtkWidgetSetHalign*(widget: GtkWidget, align: cint) {.cdecl, importc: "gtk_
 proc gtkLabelSetWrap*(label: GtkLabel, wrap: cint) {.cdecl, importc: "gtk_label_set_wrap".}
 proc gtkLabelSetWrapMode*(label: GtkLabel, mode: cint) {.cdecl, importc: "gtk_label_set_wrap_mode".}
 proc gTimeoutAdd*(interval: cuint, function: GSourceFunc, data: pointer): cuint {.cdecl, importc: "g_timeout_add".}
-
-const
-  GTK_POLICY_AUTOMATIC = 1.cint
 
 proc gSignalConnect*(instance: GObject, signal: cstring, cHandler: GCallback, data: pointer): culong =
   gSignalConnectData(instance, signal, cHandler, data, nil, 0.GConnectFlags)
@@ -135,15 +131,6 @@ proc apiPost(endpoint: string, body: JsonNode = %*{}): JsonNode =
   except:
     result = %*{"error": getCurrentExceptionMsg()}
 
-proc apiDelete(endpoint: string): JsonNode =
-  try:
-    let resp = state.client.request(ApiBase & endpoint, httpMethod = HttpDelete)
-    result = parseJson(resp.body)
-  except:
-    result = %*{"error": getCurrentExceptionMsg()}
-
-# Forward declarations for dialog callbacks
-proc allocStr(s: string): pointer
 proc refreshUI(userData: pointer): cint {.cdecl.}
 
 proc formatBytes(bytes: int64): string =
@@ -235,7 +222,11 @@ proc createBuddyRow(buddy: JsonNode): GtkBox =
   gtkBoxAppend(leftBox, nameLabel)
   
   let buddyId = buddy{"id"}.getStr("")
-  let idLabel = gtkLabelNew(cstring(buddyId[0..min(15, buddyId.len-1)] & "..."))
+  let shortBuddyId =
+    if buddyId.len == 0: ""
+    elif buddyId.len <= 16: buddyId
+    else: buddyId[0 .. 15] & "..."
+  let idLabel = gtkLabelNew(cstring(shortBuddyId))
   gtkWidgetAddCssClass(idLabel, "dim-label")
   gtkWidgetAddCssClass(idLabel, "caption")
   gtkBoxAppend(leftBox, idLabel)
@@ -251,8 +242,11 @@ proc createBuddyRow(buddy: JsonNode): GtkBox =
   result = row
 
 proc clearListBox(list: GtkListBox) =
-  var child = cast[GtkBox](list)
-  discard child
+  var child = gtkWidgetGetFirstChild(list)
+  while child != nil:
+    let next = gtkWidgetGetNextSibling(child)
+    gtkListBoxRemove(list, child)
+    child = next
 
 proc refreshUI(userData: pointer): cint {.cdecl.} =
   let statusJson = apiGet("/status")
@@ -280,17 +274,22 @@ proc refreshUI(userData: pointer): cint {.cdecl.} =
   if state.running:
     let foldersJson = apiGet("/folders")
     let folders = foldersJson{"folders"}.getElems()
-    
+
+    clearListBox(state.foldersList)
     for folder in folders:
       let row = createFolderRow(folder)
       gtkListBoxAppend(state.foldersList, row)
-    
+
     let buddiesJson = apiGet("/buddies")
     let buddies = buddiesJson{"buddies"}.getElems()
-    
+
+    clearListBox(state.buddiesList)
     for buddy in buddies:
       let row = createBuddyRow(buddy)
       gtkListBoxAppend(state.buddiesList, row)
+  else:
+    clearListBox(state.foldersList)
+    clearListBox(state.buddiesList)
   
   result = 1
 
@@ -320,21 +319,12 @@ type
 
   SetupRecoveryData = object
     dialog: GtkWindow
-    phase: cint
-    mnemonicWords: ptr UncheckedArray[ptr UncheckedArray[char]]
-    wordGrid: GtkGrid
     wordEntries: ptr UncheckedArray[pointer]
-    verifyIndices: ptr UncheckedArray[cint]
     verifyLabel: GtkLabel
-    mnemonicStr: ptr UncheckedArray[char]
 
   RecoverData = object
     dialog: GtkWindow
     wordEntries: ptr UncheckedArray[pointer]
-
-proc allocStr(s: string): pointer =
-  result = allocShared0(s.len + 1)
-  copyMem(result, s.cstring, s.len)
 
 proc onAddFolderResponse(w: GtkWindow, responseId: cint, userData: pointer) {.cdecl.} =
   let data = cast[ptr AddFolderData](userData)
@@ -657,7 +647,6 @@ proc showSetupRecoveryDialog() =
   gtkWidgetSetMarginBottom(content, 16)
   
   let result = apiPost("/recovery/setup")
-  let mnemonic = result{"mnemonic"}.getStr("")
   let words = result{"words"}.getElems()
   
   let warningLabel = gtkLabelNew("Write down these 12 words and keep them safe.\nAnyone with these words can recover your data.")
@@ -692,16 +681,10 @@ proc showSetupRecoveryDialog() =
   gtkWidgetSetMarginTop(verifyLabel, 12)
   gtkBoxAppend(content, verifyLabel)
   
-  let mnemonicCopy = cast[ptr UncheckedArray[char]](allocShared0(mnemonic.len + 1))
-  copyMem(mnemonicCopy, mnemonic.cstring, mnemonic.len)
-  
   let data = cast[ptr SetupRecoveryData](allocShared0(sizeof(SetupRecoveryData)))
   data.dialog = dialog
-  data.phase = 0
-  data.wordGrid = grid
   data.wordEntries = wordEntries
   data.verifyLabel = verifyLabel
-  data.mnemonicStr = mnemonicCopy
   
   proc onSetupRecoveryResponse(w: GtkWindow, responseId: cint, userData: pointer) {.cdecl.} =
     let d = cast[ptr SetupRecoveryData](userData)
@@ -897,9 +880,6 @@ proc createMainWindow(app: GtkApplication): GtkWindow =
   let recoverBtn = gtkButtonNewWithLabel("Recover from Mnemonic...")
   gtkBoxAppend(recoveryBtnBox, recoverBtn)
   
-  let exportRecoveryBtn = gtkButtonNewWithLabel("Export Recovery Info")
-  gtkBoxAppend(recoveryBtnBox, exportRecoveryBtn)
-  
   gtkBoxAppend(recoveryCard.content, recoveryBtnBox)
   
   gtkBoxAppend(mainBox, recoveryCard.box)
@@ -942,11 +922,6 @@ proc createMainWindow(app: GtkApplication): GtkWindow =
     showRecoverDialog()
   
   discard gSignalConnect(cast[GObject](recoverBtn), "clicked", cast[GCallback](onRecoverClick), nil)
-  
-  proc onExportRecoveryClick(btn: GtkButton, userData: pointer) {.cdecl.} =
-    discard apiGet("/recovery")
-  
-  discard gSignalConnect(cast[GObject](exportRecoveryBtn), "clicked", cast[GCallback](onExportRecoveryClick), nil)
   
   gtkWindowSetChild(window, mainBox)
   result = window

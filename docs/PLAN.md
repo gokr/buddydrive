@@ -23,31 +23,70 @@ buddydrive/
 ├── buddydrive.nimble
 ├── config.nims
 ├── src/
-│   ├── buddydrive.nim           # Main entry point
+│   ├── buddydrive.nim              # Main entry point
+│   ├── buddydrive_gui.nim          # GTK4 GUI entry point
 │   └── buddydrive/
-│       ├── cli.nim              # CLI parsing
-│       ├── config.nim           # Config read/write
-│       ├── crypto.nim           # Encryption (libsodium)
-│       ├── types.nim            # Shared types
-│       ├── logutils.nim         # Logging setup
+│       ├── cli.nim                  # CLI parsing
+│       ├── config.nim              # Config read/write
+│       ├── crypto.nim              # Encryption (libsodium)
+│       ├── types.nim               # Shared types
+│       ├── logutils.nim            # Logging setup
+│       ├── recovery.nim            # BIP39 mnemonic, key derivation, config encrypt/decrypt
+│       ├── control.nim             # REST API control server
+│       ├── control_web.nim         # Web GUI serving
+│       ├── daemon.nim              # Background sync daemon
+│       ├── nat.nim                 # NAT traversal (UPnP)
 │       ├── sync/
-│       │   ├── scanner.nim      # Polling file scanner
-│       │   ├── index.nim        # SQLite file index
-│       │   └── transfer.nim     # File transfer
+│       │   ├── scanner.nim         # Polling file scanner
+│       │   ├── index.nim           # SQLite file index
+│       │   ├── transfer.nim        # File transfer
+│       │   ├── session.nim         # Sync sessions
+│       │   ├── policy.nim          # Sync policy
+│       │   └── config_sync.nim     # Config sync to relay/buddies, recovery logic
 │       ├── p2p/
-│       │   ├── node.nim         # libp2p node
-│       │   ├── discovery.nim    # DHT/rendezvous
-│       │   ├── protocol.nim     # BuddyDrive protocol
-│       │   └── messages.nim     # Protocol messages
-│       └── daemon.nim           # Background service
+│       │   ├── node.nim            # libp2p node
+│       │   ├── discovery.nim       # DHT provider records discovery
+│       │   ├── protocol.nim       # BuddyDrive protocol
+│       │   ├── pairing.nim        # Buddy pairing handshake
+│       │   ├── messages.nim        # Protocol messages
+│       │   ├── rawrelay.nim        # Relay client for NAT fallback
+│       │   ├── synchandler.nim    # Sync handler
+│       └── syncmanager.nim        # Sync manager
 ├── tests/
-│   ├── test_crypto.nim
-│   ├── test_config.nim
-│   └── harness/
-│       └── test_local_sync.nim
+│   ├── testutils.nim              # Shared test utilities
+│   ├── unit/                      # Unit tests (testament)
+│   │   ├── config/               # Config tests
+│   │   ├── config_sync/          # Config sync tests
+│   │   ├── control/              # Control API tests
+│   │   ├── control_web/          # Web control tests
+│   │   ├── crypto/               # Crypto tests
+│   │   ├── index/                # File index tests
+│   │   ├── messages/             # Protocol message tests
+│   │   ├── pairing/              # Pairing state tests
+│   │   ├── policy/               # Sync policy tests
+│   │   ├── rawrelay/             # Relay helper tests
+│   │   ├── recovery/             # Recovery tests
+│   │   ├── scanner/              # Scanner + crash safety tests
+│   │   └── types/                # Core type tests
+│   └── integration/              # Integration tests (testament)
+│       ├── test_cli_flows.nim
+│       ├── test_config_sync_e2e.nim
+│       ├── test_kv_api.nim
+│       ├── test_pairing.nim
+│       ├── test_peer_discovery.nim        # Local DHT server
+│       ├── test_peer_discovery_public.nim # Public DHT
+│       ├── test_relay_fallback.nim
+│       ├── test_relay_file_sync.nim
+│       └── test_relay_server.nim
 ├── wordlists/
 │   ├── adjectives.txt
-│   └── nouns.txt
+│   ├── nouns.txt
+│   └── bip39_english.txt
+├── relay/
+│   └── src/
+│       ├── relay.nim              # TCP relay server
+│       ├── kvstore.nim           # TiDB MySQL KV store
+│       └── kvstore_api.nim       # KV HTTP API
 └── README.md
 ```
 
@@ -159,8 +198,8 @@ Folders:
    - Relay client (fallback)
 
 3. **Discovery (`src/buddydrive/p2p/discovery.nim`)**
-   - DHT publish/lookup
-   - Rendezvous protocol
+   - DHT provider records (addProvider/getProviders)
+   - Periodic re-announcement (provider records expire after ~30 min)
 
 **Deliverable**: Two instances can discover each other via DHT
 
@@ -606,7 +645,7 @@ buddydrive export-recovery   # Export recovery info (mnemonic, public key)
   - File scanner with change detection ✓
   - SQLite file index ✓
   - Chunk-based file transfer ✓
-  - SyncManager coordination ✓
+  - Session-based sync coordination ✓
 
 - Phase 5: Encryption - COMPLETE ✓
   - libsodium secretbox for content ✓

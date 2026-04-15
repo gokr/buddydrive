@@ -60,7 +60,6 @@ src/
     ├── control.nim             # REST API on localhost:17521
     ├── logutils.nim            # Logging setup
     ├── nat.nim                 # NAT traversal
-    ├── syncmanager.nim         # Sync coordination
     ├── p2p/
     │   ├── node.nim            # libp2p node setup
     │   ├── discovery.nim       # DHT/rendezvous discovery
@@ -68,7 +67,7 @@ src/
     │   ├── pairing.nim         # Buddy pairing handshake
     │   ├── messages.nim        # Protocol message types
     │   ├── rawrelay.nim        # Relay client for NAT fallback
-    │   └── synchsandler.nim    # Sync handler
+    │   └── synchandler.nim      # Sync handler
     └── sync/
         ├── scanner.nim         # Polling file scanner
         ├── index.nim           # SQLite file index
@@ -155,6 +154,11 @@ See `docs/PLAN.md` for full details. Key points:
 
 ## Testing
 
-Integration tests in `tests/harness/` are environment-dependent:
+Tests use `std/unittest` and run via testament with `nimble test`:
+
+- **Unit tests**: `tests/unit/*/*.nim` — 14 test files covering config, crypto, recovery, messages, policy, scanner, transfer crash safety, control, control_web, rawrelay, index, pairing, types, config_sync
+- **Integration tests**: `tests/integration/*.nim` — 8 test files covering CLI flows, KV API, peer discovery (local + public DHT), relay fallback, relay file sync, relay server, pairing protocol
+
+Integration tests are environment-dependent:
 - Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to fail hard when services unavailable
 - Without it, tests skip gracefully
