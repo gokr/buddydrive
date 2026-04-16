@@ -574,7 +574,7 @@ proc handleConnect*(cmd: CommandLine) =
     return
   
   echo "Note: Direct connection not yet implemented."
-  echo "Use 'buddydrive start' to connect via DHT discovery."
+  echo "Use 'buddydrive start' to connect via relay discovery."
 
 proc handleStart*(cmd: CommandLine) =
   if not config.configExists():

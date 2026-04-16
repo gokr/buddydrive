@@ -1,4 +1,4 @@
-import std/[json, net, os, random, strutils, tables, times]
+import std/[json, net, os, random, strutils, tables, times, options]
 import chronos
 import db_connector/db_sqlite
 import types
@@ -46,6 +46,15 @@ proc getStateDb(): DbConn =
       status TEXT
     )
   """)
+  result.exec(sql"""
+    CREATE TABLE IF NOT EXISTS cached_buddy_addrs (
+      buddy_uuid TEXT PRIMARY KEY,
+      peer_id TEXT,
+      addresses TEXT,
+      relay_region TEXT,
+      last_seen INTEGER
+    )
+  """)
 
 proc writeRuntimeStatus*(peerId: string, addresses: seq[string], startTime: Time, running = true) =
   config.ensureDataDir()
@@ -76,6 +85,42 @@ proc writeLiveStatus*(buddyStatuses: seq[BuddyStatus], folderStatuses: seq[SyncS
         INSERT INTO folder_state (name, total_bytes, synced_bytes, file_count, synced_files, status)
         VALUES (?, ?, ?, ?, ?, ?)
       """, f.folder, f.totalBytes, f.syncedBytes, f.fileCount, f.syncedFiles, f.status)
+  finally:
+    db.close()
+
+type CachedBuddyAddr* = object
+  peerId*: string
+  addresses*: seq[string]
+  relayRegion*: string
+  lastSeen*: int64
+
+proc writeCachedBuddyAddr*(buddyUuid: string, peerId: string, addresses: seq[string], relayRegion: string) =
+  config.ensureDataDir()
+  let db = getStateDb()
+  try:
+    db.exec(sql"""
+      INSERT OR REPLACE INTO cached_buddy_addrs (buddy_uuid, peer_id, addresses, relay_region, last_seen)
+      VALUES (?, ?, ?, ?, ?)
+    """, buddyUuid, peerId, addresses.join(","), relayRegion, getTime().toUnix())
+  finally:
+    db.close()
+
+proc readCachedBuddyAddr*(buddyUuid: string): Option[CachedBuddyAddr] =
+  config.ensureDataDir()
+  let db = getStateDb()
+  try:
+    let rows = db.getAllRows(sql"SELECT peer_id, addresses, relay_region, last_seen FROM cached_buddy_addrs WHERE buddy_uuid = ?", buddyUuid)
+    for row in rows:
+      var cachedAddr = CachedBuddyAddr()
+      cachedAddr.peerId = row[0]
+      cachedAddr.addresses = if row[1].len > 0: row[1].split(",") else: @[]
+      cachedAddr.relayRegion = row[2]
+      try:
+        cachedAddr.lastSeen = parseInt(row[3])
+      except ValueError:
+        cachedAddr.lastSeen = 0
+      return some(cachedAddr)
+    return none(CachedBuddyAddr)
   finally:
     db.close()
 

@@ -57,6 +57,15 @@ proc initKvStore*(connStr: string): KvStore =
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     """)
+
+    result.db.query("""
+      CREATE TABLE IF NOT EXISTS discovery_store (
+        discovery_key VARCHAR(128) PRIMARY KEY,
+        record_json TEXT NOT NULL,
+        auth_hash VARCHAR(128) NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    """)
     
     echo "KV store initialized successfully"
   except Exception as e:
@@ -128,4 +137,71 @@ proc getConfigCount*(kv: KvStore): int =
     return 0
   except Exception as e:
     echo "Error getting config count: ", e.msg
+    return 0
+
+const DiscoveryTtlHours* = 6
+
+proc storeDiscovery*(kv: KvStore, key: string, recordJson: string, authHash: string): bool =
+  if not kv.connected:
+    return false
+
+  try:
+    let existing = kv.db.query("SELECT auth_hash FROM discovery_store WHERE discovery_key = ?", key)
+    var storedAuth = ""
+    for row in existing:
+      storedAuth = row[0]
+    if storedAuth.len > 0 and storedAuth != authHash:
+      return false
+    kv.db.query("DELETE FROM discovery_store WHERE discovery_key = ?", key)
+    kv.db.query("INSERT INTO discovery_store (discovery_key, record_json, auth_hash) VALUES (?, ?, ?)",
+               key, recordJson, authHash)
+    return true
+  except Exception as e:
+    echo "Error storing discovery: ", e.msg
+    return false
+
+proc fetchDiscovery*(kv: KvStore, key: string): Option[string] =
+  if not kv.connected:
+    return none(string)
+
+  try:
+    let cutoff = now() - initDuration(hours = DiscoveryTtlHours)
+    let rows = kv.db.query("SELECT record_json, updated_at FROM discovery_store WHERE discovery_key = ?", key)
+    for row in rows:
+      return some(row[0])
+    return none(string)
+  except Exception as e:
+    echo "Error fetching discovery: ", e.msg
+    return none(string)
+
+proc deleteDiscovery*(kv: KvStore, key: string, authHash: string): bool =
+  if not kv.connected:
+    return false
+
+  try:
+    let rows = kv.db.query("SELECT auth_hash FROM discovery_store WHERE discovery_key = ?", key)
+    var storedAuth = ""
+    for row in rows:
+      storedAuth = row[0]
+    if storedAuth.len == 0:
+      return false
+    if storedAuth != authHash:
+      return false
+    kv.db.query("DELETE FROM discovery_store WHERE discovery_key = ?", key)
+    return true
+  except Exception as e:
+    echo "Error deleting discovery: ", e.msg
+    return false
+
+proc getDiscoveryCount*(kv: KvStore): int =
+  if not kv.connected:
+    return 0
+
+  try:
+    let rows = kv.db.query("SELECT COUNT(*) FROM discovery_store")
+    for row in rows:
+      return parseInt(row[0])
+    return 0
+  except Exception as e:
+    echo "Error getting discovery count: ", e.msg
     return 0

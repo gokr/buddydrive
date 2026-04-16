@@ -1,105 +1,158 @@
-import std/sets
+import std/[strutils, json, times, options]
 import results
 import chronos
-import libp2p
-import libp2p/switch
-import libp2p/peerid
-import libp2p/peerinfo
-import libp2p/multiaddress
-import libp2p/multihash
-import libp2p/protocols/kademlia
-import libp2p/protocols/kademlia/types
-import libp2p/protocols/kademlia/provider
+import curly
+import webby/httpheaders
+import libsodium/sodium
+import libsodium/sodium_sizes
+import ../recovery
 import node
 
 export results
 
+proc toHex(data: string): string =
+  const hexChars = "0123456789abcdef"
+  result = newString(data.len * 2)
+  for i, ch in data:
+    let b = byte(ch)
+    result[i * 2] = hexChars[int(b shr 4)]
+    result[i * 2 + 1] = hexChars[int(b and 0x0f)]
+
 type
   DiscoveryError* = object of CatchableError
-  
+
   DiscoveryService* = ref object
     node*: BuddyNode
+    relayBaseUrl*: string
     started*: bool
 
+  BuddyRecord* = object
+    peerId*: string
+    addresses*: seq[string]
+    relayRegion*: string
+    timestamp*: string
+
 const
-  BuddyDriveNamespace* = "/buddydrive"
-  DhtAnnounceTimeout* = chronos.seconds(120)
-  DhtLookupTimeout* = chronos.seconds(120)
-  AnnounceRetryInterval* = chronos.seconds(300)
+  DiscoveryKeyContext = "/discovery"
+  AuthKeyContext = "/auth"
+  PublishInterval* = chronos.seconds(4 * 60 * 60)
 
-proc buddyIdToKey(buddyId: string): Key =
-  var data = newSeq[byte](buddyId.len)
-  for i, ch in buddyId:
-    data[i] = byte(ord(ch))
-  result = MultiHash.digest("sha2-256", data).get().toKey()
+proc deriveDiscoveryKey*(pairingCode: string): string =
+  let hash = crypto_generichash(pairingCode & DiscoveryKeyContext, 32)
+  var hashBytes = newSeq[byte](hash.len)
+  for i in 0 ..< hash.len:
+    hashBytes[i] = byte(hash[i])
+  base58Encode(hashBytes)
 
-proc newDiscovery*(node: BuddyNode): DiscoveryService =
+proc deriveAuthKey*(pairingCode: string): string =
+  let hash = crypto_generichash(pairingCode & AuthKeyContext, 32)
+  var authKey = newString(hash.len)
+  for i in 0 ..< hash.len:
+    authKey[i] = hash[i]
+  authKey
+
+proc computeHmac*(authKey: string, data: string): string =
+  let mac = crypto_auth(data, authKey)
+  toHex(mac)
+
+proc newDiscovery*(node: BuddyNode, relayBaseUrl: string): DiscoveryService =
   result = DiscoveryService()
   result.node = node
+  result.relayBaseUrl = relayBaseUrl
   result.started = false
 
 proc start*(discovery: DiscoveryService) {.async.} =
   if discovery.started:
     return
-  
   discovery.started = true
 
 proc stop*(discovery: DiscoveryService) {.async.} =
   discovery.started = false
 
-proc announce*(discovery: DiscoveryService, buddyId: string) {.async.} =
+proc publishBuddy*(discovery: DiscoveryService, pairingCode: string, relayRegion: string = ""): bool =
   if not discovery.started:
-    raise newException(DiscoveryError, "Discovery not started")
+    return false
 
-  if discovery.node.dht == nil:
-    echo "DHT not available for announcement"
-    return
+  let discoveryKey = try: deriveDiscoveryKey(pairingCode) except: return false
+  let authKey = try: deriveAuthKey(pairingCode) except: return false
 
-  let key = buddyIdToKey(buddyId)
-  echo "Announcing buddy ID on DHT: ", buddyId
+  let addrs = discovery.node.getAdvertisedAddrs()
+  var addrStrs: seq[string] = @[]
+  for ma in addrs:
+    addrStrs.add($ma)
+
+  var j = %*{
+    "peerId": discovery.node.peerIdStr(),
+    "addresses": addrStrs
+  }
+  if relayRegion.len > 0:
+    j["relayRegion"] = %relayRegion
+
+  let recordJson = $j
+  let hmacHex = try: computeHmac(authKey, recordJson) except: return false
+
+  let url = discovery.relayBaseUrl & "/discovery/" & discoveryKey
 
   try:
-    let fut = discovery.node.dht.addProvider(key)
-    if not await fut.withTimeout(DhtAnnounceTimeout):
-      echo "DHT announcement timed out"
-      return
-    echo "Successfully announced on DHT"
+    let curl = newCurly()
+    let resp = block:
+      var h = emptyHttpHeaders()
+      h["Content-Type"] = "application/json"
+      h["X-HMAC"] = hmacHex
+      curl.put(url, h, body = recordJson.toOpenArray(0, recordJson.len - 1), timeout = 30)
+    if resp.code == 201:
+      return true
+    return false
   except Exception as e:
-    echo "Error announcing on DHT: ", e.msg
+    echo "Error publishing discovery: ", e.msg
+    return false
 
-proc findBuddy*(discovery: DiscoveryService, buddyId: string): Future[seq[(PeerID, seq[MultiAddress])]] {.async.} =
-  result = @[]
+proc unpublishBuddy*(discovery: DiscoveryService, pairingCode: string): bool =
+  let discoveryKey = try: deriveDiscoveryKey(pairingCode) except: return false
+  let authKey = try: deriveAuthKey(pairingCode) except: return false
+  let hmacHex = try: computeHmac(authKey, "") except: return false
 
-  if not discovery.started:
-    return result
-
-  if discovery.node.dht == nil:
-    echo "DHT not available for discovery"
-    return result
-
-  let key = buddyIdToKey(buddyId)
-  echo "Searching DHT for buddy: ", buddyId
+  let url = discovery.relayBaseUrl & "/discovery/" & discoveryKey
 
   try:
-    let providers = await discovery.node.dht.getProviders(key).wait(DhtLookupTimeout)
-    if providers.len == 0:
-      echo "DHT lookup returned no providers"
-      return result
-    for provider in providers:
-      let pidRes = PeerID.init(provider.id)
-      if pidRes.isOk:
-        result.add((pidRes.get(), provider.addrs))
-    echo "Found ", result.len, " peer record(s)"
+    let curl = newCurly()
+    let resp = block:
+      var h = emptyHttpHeaders()
+      h["X-HMAC"] = hmacHex
+      curl.delete(url, h, timeout = 30)
+    return resp.code == 204
   except Exception as e:
-    echo "Error finding buddy on DHT: ", e.msg
+    echo "Error unpublishing discovery: ", e.msg
+    return false
 
-proc publishBuddy*(discovery: DiscoveryService, buddyId: string) {.async.} =
-  await discovery.announce(buddyId)
+proc findBuddy*(discovery: DiscoveryService, pairingCode: string): Option[BuddyRecord] =
+  if not discovery.started:
+    return none(BuddyRecord)
 
-proc publishBuddyLoop*(discovery: DiscoveryService, buddyId: string) {.async.} =
-  ## Announce on the DHT and re-announce periodically.
-  ## Provider records expire (default 30 min), so continuous
-  ## re-announcement is required to stay discoverable.
+  let discoveryKey = try: deriveDiscoveryKey(pairingCode) except: return none(BuddyRecord)
+  let url = discovery.relayBaseUrl & "/discovery/" & discoveryKey
+
+  try:
+    let curl = newCurly()
+    let resp = curl.get(url, emptyHttpHeaders(), timeout = 30)
+    if resp.code == 200:
+      let j = parseJson(resp.body)
+      var record = BuddyRecord()
+      record.peerId = j["peerId"].getStr()
+      record.addresses = @[]
+      for addr in j["addresses"]:
+        record.addresses.add(addr.getStr())
+      if j.hasKey("relayRegion"):
+        record.relayRegion = j["relayRegion"].getStr()
+      if j.hasKey("timestamp"):
+        record.timestamp = j["timestamp"].getStr()
+      return some(record)
+    return none(BuddyRecord)
+  except Exception as e:
+    echo "Error finding buddy: ", e.msg
+    return none(BuddyRecord)
+
+proc publishBuddyLoop*(discovery: DiscoveryService, pairingCode: string, relayRegion: string = "") {.async.} =
   while discovery.started:
-    await discovery.announce(buddyId)
-    await sleepAsync(AnnounceRetryInterval)
+    discard discovery.publishBuddy(pairingCode, relayRegion)
+    await sleepAsync(PublishInterval)
