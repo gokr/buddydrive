@@ -7,9 +7,11 @@ A TCP relay server and KV store for BuddyDrive. The relay enables NAT traversal 
 ### TCP Relay
 
 1. Client connects and sends a token (the pairing code) followed by `\n`
-2. If no peer with the same token is waiting, the client waits
-3. When a matching peer connects, both receive `OK`
-4. All further bytes are relayed bidirectionally until one side disconnects
+2. Server replies with `POW <nonce> <difficulty>`
+3. Client sends `POW <counter>` for a valid proof-of-work solution
+4. If no peer with the same token is waiting, the client waits
+5. When a matching peer connects, both receive `OK`
+6. All further bytes are relayed bidirectionally until one side disconnects
 
 On the BuddyDrive side, the buddy `pairing_code` is reused as this relay token. Any token is accepted — there is no whitelist.
 
@@ -22,10 +24,9 @@ When built with `-d:withKvStore`, the relay also runs an HTTP API for storing en
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/kv/<pubkey>` | Fetch encrypted config |
-| PUT | `/kv/<pubkey>` | Store encrypted config |
-| DELETE | `/kv/<pubkey>` | Delete config |
+| PUT | `/kv/<pubkey>` | Store encrypted config (signed) |
+| DELETE | `/kv/<pubkey>` | Delete config (signed tombstone) |
 | GET | `/health` | Health check |
-| GET | `/stats` | Config count |
 
 ## Usage
 
@@ -39,6 +40,14 @@ When built with `-d:withKvStore`, the relay also runs an HTTP API for storing en
 # With KV store (requires TIDB_CONNECTION_STRING)
 export TIDB_CONNECTION_STRING="mysql://user:pass@host:4000/buddydrive"
 ./buddydrive-relay 41722 8080
+
+# Optional: restrict KV API to EU IP ranges packaged in the container
+export BUDDYDRIVE_KV_EU_ONLY=1
+export BUDDYDRIVE_KV_EU_RANGES_FILE=/app/geo/eu_cidrs.txt
+
+# Optional: restrict TCP relay clients to EU IP ranges too
+export BUDDYDRIVE_RELAY_EU_ONLY=1
+export BUDDYDRIVE_RELAY_EU_RANGES_FILE=/app/geo/eu_cidrs.txt
 ```
 
 ## Docker
@@ -62,6 +71,8 @@ docker run -d \
 
 ```text
 Client -> Server: <token>\n
+Server -> Client: POW <nonce> <difficulty>\n
+Client -> Server: POW <counter>\n
 Server -> Client: WAIT\n
 Server -> Client: OK\n
 ```
@@ -130,3 +141,17 @@ koyeb services create relay \
 ```
 
 The TCP relay is available at the proxy host/port. The KV API is available via the service's HTTP route.
+
+## EU-only KV Access
+
+If you want KV API access or TCP relay access limited to EU IP ranges, place a generated `geo/eu_cidrs.txt` in the relay directory before building the Docker image.
+
+For local generation outside Docker, run:
+
+```bash
+./tools/fetch_eu_cidrs.sh geo
+```
+
+This is intentionally manual so Docker builds do not depend on network access and do not refresh the geo snapshot on every build.
+
+Free sources do exist. The current packaged path uses IPdeny's redistributable country zone files. The CSV converter in `tools/build_eu_cidrs.nim` is still available if you prefer a CSV source such as MaxMind GeoLite2 Country CSV.
