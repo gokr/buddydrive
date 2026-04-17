@@ -6,10 +6,10 @@ A CLI-based P2P encrypted folder sync tool in Nim that allows syncing folders wi
 
 ## Key Features
 
-- **P2P Networking**: libp2p with DHT discovery, NAT traversal (hole punching), relay fallback
+- **P2P Networking**: libp2p with KV-store relay discovery, NAT traversal (hole punching), relay fallback
 - **Encryption**: libsodium (XChaCha20-Poly1305) for file contents AND filenames
 - **Sync**: Full file sync with polling-based scanning (MVP), delta sync later
-- **Discovery**: Public libp2p DHT bootstrap nodes
+- **Discovery**: Relay KV-store with HMAC-authenticated records, keys derived from pairing codes
 - **Config**: `~/.buddydrive/` directory
 - **Index**: SQLite for file metadata tracking
 - **CLI**: Subcommand-based interface
@@ -45,7 +45,7 @@ buddydrive/
 │       │   └── config_sync.nim     # Config sync to relay/buddies, recovery logic
 │       ├── p2p/
 │       │   ├── node.nim            # libp2p node
-│       │   ├── discovery.nim       # DHT provider records discovery
+│       │   ├── discovery.nim       # KV-store relay discovery
 │       │   ├── protocol.nim       # BuddyDrive protocol
 │       │   ├── pairing.nim        # Buddy pairing handshake
 │       │   ├── messages.nim        # Protocol messages
@@ -73,8 +73,6 @@ buddydrive/
 │       ├── test_config_sync_e2e.nim
 │       ├── test_kv_api.nim
 │       ├── test_pairing.nim
-│       ├── test_peer_discovery.nim        # Local DHT server
-│       ├── test_peer_discovery_public.nim # Public DHT
 │       ├── test_relay_fallback.nim
 │       ├── test_relay_file_sync.nim
 │       └── test_relay_server.nim
@@ -137,7 +135,7 @@ Buddy paired: cranky-wrench
 # Start syncing
 $ buddydrive start
 Starting BuddyDrive daemon...
-Connected to DHT
+Published discovery record to relay
 Connected to buddy: cranky-wrench
 Watching 1 folder...
 
@@ -187,10 +185,9 @@ Folders:
 ### Phase 2: libp2p Networking (Days 3-5)
 
 1. **Node Setup (`src/buddydrive/p2p/node.nim`)**
-   - TCP + WebSocket transports
+   - TCP transport
    - Noise secure channel
    - Yamux multiplexer
-   - DHT with bootstrap nodes
 
 2. **NAT Traversal**
    - AutoNAT (detect NAT type)
@@ -198,19 +195,21 @@ Folders:
    - Relay client (fallback)
 
 3. **Discovery (`src/buddydrive/p2p/discovery.nim`)**
-   - DHT provider records (addProvider/getProviders)
-   - Periodic re-announcement (provider records expire after ~30 min)
+   - Relay KV-store publish/lookup via `/discovery/<derived-key>`
+   - Key derived from pairing code using `crypto_generichash`
+   - HMAC authentication on PUT/DELETE
+   - Periodic re-publish every 4h (TTL = 6h)
 
-**Deliverable**: Two instances can discover each other via DHT
+**Deliverable**: Two instances can discover each other via relay KV-store
 
 ---
 
 ### Phase 3: Buddy Pairing (Days 6-7)
 
 1. **Pairing Protocol**
-   - Generate pairing code (short-lived token)
-   - Publish to DHT under rendezvous point
-   - Exchange public keys
+   - Generate pairing code (shared out-of-band)
+   - Pairing code used to derive relay discovery key and HMAC auth key
+   - Exchange public keys during handshake
 
 2. **Key Derivation**
    - Argon2id for password → encryption key
@@ -314,14 +313,18 @@ Folders:
 
 ```
 Alice generates: pairing_code = random_6_chars()
-Alice publishes: DHT[buddydrive/{id}/pairing/{code}] = {public_key}
+Alice shares pairing_code out-of-band with Bob
 
 Bob: add-buddy --id <alice-id> --code <code>
-Bob looks up: DHT[buddydrive/{id}/pairing/{code}]
-Bob gets: Alice's public key
-Bob connects to Alice
-Alice validates code
-Both exchange encryption keys (derived from shared password)
+Bob stores the pairing code for that buddy relationship
+
+On daemon start:
+Alice publishes: PUT /discovery/<derived_key> with HMAC
+  where derived_key = base58(blake2b(pairing_code + "/discovery"))
+Bob looks up: GET /discovery/<derived_key> (same derivation from his pairing code with Alice)
+Bob gets: Alice's peer ID, addresses, relay region
+Bob connects to Alice (direct or via relay)
+Alice validates handshake
 Both store buddy info
 ```
 
@@ -629,8 +632,9 @@ buddydrive export-recovery   # Export recovery info (mnemonic, public key)
   - libp2p node creation working ✓
   - Node starts and binds to addresses ✓
   - MultiAddress display working ✓
-  - Kademlia DHT integration ✓
-  - DHT announce/findProvider API ✓
+  - Kademlia DHT integration ✓ (removed — replaced with KV-store relay discovery)
+  - DHT announce/findProvider API ✓ (removed — replaced with relay publish/lookup)
+  - KV-store relay discovery with HMAC authentication ✓
   - Test harness for two local instances ✓
   - Direct peer connection tested ✓
 
@@ -691,14 +695,14 @@ buddydrive export-recovery   # Export recovery info (mnemonic, public key)
 - `test_scanner.nim` — directory scanning, change detection, atomic write, chunk I/O
 - `test_transfer_crash_safety.nim` — interrupted receive, flush failure, mismatched size
 - `test_types.nim` — BuddyId, FolderConfig, AppConfig, ConnectionState, FileChangeKind
+- `test_discovery.nim` — discovery key derivation, HMAC computation
+- `test_geoip_ranges.nim` — EU IP range loading and matching
 
-**Integration tests** (8 files, run via `nimble test`):
+**Integration tests** (7 files, run via `nimble test`):
 - `test_cli_flows.nim` — CLI binary: init, add-buddy, add-folder, sync-config, recover, export-recovery
 - `test_config_sync_e2e.nim` — sync config to relay + recover, wrong mnemonic, idempotent sync
 - `test_kv_api.nim` — KV API PUT/GET/DELETE, overwrite, 404, /health, edge cases
 - `test_pairing.nim` — full pairing protocol over libp2p
-- `test_peer_discovery.nim` — local DHT server discovery
-- `test_peer_discovery_public.nim` — public DHT discovery (skips gracefully if unavailable)
 - `test_relay_fallback.nim` — relay pairing via regional relay
 - `test_relay_file_sync.nim` — forward/reverse sync, append-only folder
 - `test_relay_server.nim` — relay server token-based pairing

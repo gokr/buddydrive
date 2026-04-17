@@ -62,7 +62,7 @@ src/
     ├── nat.nim                 # NAT traversal
     ├── p2p/
     │   ├── node.nim            # libp2p node setup
-    │   ├── discovery.nim       # DHT/rendezvous discovery
+    │   ├── discovery.nim       # KV-store relay discovery (publish/lookup via relay, HMAC auth)
     │   ├── protocol.nim        # BuddyDrive sync protocol
     │   ├── pairing.nim         # Buddy pairing handshake
     │   ├── messages.nim        # Protocol message types
@@ -83,7 +83,7 @@ src/
 relay/src/
 ├── relay.nim                  # Main relay server (mummy HTTP)
 ├── kvstore.nim                # TiDB Cloud MySQL KV store
-└── kvstore_api.nim            # HTTP API: GET/PUT/DELETE /kv/<pubkey>
+├── kvstore_api.nim            # HTTP API: /kv/<pubkey>, /discovery/<key>
 ```
 
 ### Config & Data
@@ -132,7 +132,7 @@ relay/src/
 
 ## Key Dependencies
 
-- **libp2p** — P2P networking, DHT, NAT traversal
+- **libp2p** — P2P networking, direct transport
 - **libsodium** — Encryption, key derivation
 - **parsetoml** — TOML parsing (not GC-safe, needs `{.cast(gcsafe).}` in async)
 - **chronos** — Async framework
@@ -156,8 +156,8 @@ See `docs/PLAN.md` for full details. Key points:
 
 Tests use `std/unittest` and run via testament with `nimble test`:
 
-- **Unit tests**: `tests/unit/*/*.nim` — 14 test files covering config, crypto, recovery, messages, policy, scanner, transfer crash safety, control, control_web, rawrelay, index, pairing, types, config_sync
-- **Integration tests**: `tests/integration/*.nim` — 8 test files covering CLI flows, KV API, peer discovery (local + public DHT), relay fallback, relay file sync, relay server, pairing protocol
+- **Unit tests**: `tests/unit/*/*.nim` — 16 test files covering config, crypto, recovery, messages, policy, scanner, transfer crash safety, control, control_web, rawrelay, index, pairing, types, config_sync, discovery, geoip_ranges
+- **Integration tests**: `tests/integration/*.nim` — 7 test files covering CLI flows, KV API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
 
 Integration tests are environment-dependent:
 - Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to fail hard when services unavailable

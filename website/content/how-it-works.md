@@ -27,7 +27,8 @@ BuddyDrive uses peer-to-peer networking, relay fallback, and relay-backed config
 
 The daemon runs in the foreground today and contains:
 
-- **libp2p node** - peer discovery and direct transport
+- **libp2p node** - direct transport
+- **Discovery service** - relay KV-store buddy lookup
 - **Sync manager** - folder scan and sync orchestration
 - **Control API** - localhost HTTP API for the GUI
 - **SQLite state** - runtime status and file index tracking
@@ -62,16 +63,17 @@ BuddyDrive uses libp2p for direct peer communication:
 | Transport | TCP | Direct connection |
 | Security | Noise | Direct transport encryption |
 | Muxer | Yamux | Multiplexing |
-| Discovery | Kademlia DHT | Find peers |
+| Discovery | Relay KV-store | Find buddy addresses via pairing-code-derived keys |
 
 ### Peer Discovery
 
 How two buddies find each other:
 
-1. Each daemon publishes your buddy ID to the DHT with its current peer record
-2. The daemon looks up configured buddies by buddy ID
-3. It reads the advertised multiaddrs
+1. Each daemon publishes its address record to the relay at `/discovery/<derived-key>`, where the key is derived from the pairing code
+2. The daemon looks up configured buddies using the same derived key via the relay KV-store (every 10 minutes)
+3. It reads the peer ID and advertised multiaddrs from the record
 4. It dials a public TCP address directly, or falls back to a relay when configured
+5. Cached addresses in `state.db` allow reconnection when the relay is temporarily unavailable
 
 ### NAT Traversal
 

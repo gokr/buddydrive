@@ -113,6 +113,8 @@ Optional:
 
 ### Connectivity Notes
 
+BuddyDrive discovers buddies by publishing and looking up address records on the relay. Discovery keys are derived from the pairing code, so both sides automatically find each other. Lookup runs every 10 minutes; cached addresses allow reconnection even if the relay is temporarily unavailable.
+
 BuddyDrive connects peers in one of two ways:
 
 1. Direct connection with a public TCP address

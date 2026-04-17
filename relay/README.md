@@ -17,7 +17,7 @@ On the BuddyDrive side, the buddy `pairing_code` is reused as this relay token. 
 
 ### KV Store (optional)
 
-When built with `-d:withKvStore`, the relay also runs an HTTP API for storing encrypted config blobs. BuddyDrive uses this for recovery: the encrypted config is uploaded with the public key (Base58) as the lookup key.
+When built with `-d:withKvStore`, the relay also runs an HTTP API for storing encrypted config blobs and buddy discovery records. BuddyDrive uses the KV store for recovery (encrypted config uploaded with public key as lookup key) and the discovery endpoint for peer discovery (address records published with keys derived from pairing codes).
 
 **KV API Endpoints:**
 
@@ -27,6 +27,16 @@ When built with `-d:withKvStore`, the relay also runs an HTTP API for storing en
 | PUT | `/kv/<pubkey>` | Store encrypted config (signed) |
 | DELETE | `/kv/<pubkey>` | Delete config (signed tombstone) |
 | GET | `/health` | Health check |
+
+**Discovery API Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/discovery/<key>` | Fetch buddy address record |
+| PUT | `/discovery/<key>` | Store/update address record (requires X-HMAC header) |
+| DELETE | `/discovery/<key>` | Delete address record (requires X-HMAC header) |
+
+Discovery records have a 6h TTL and are HMAC-authenticated. The key is a Base58-encoded hash derived from the pairing code.
 
 ## Usage
 

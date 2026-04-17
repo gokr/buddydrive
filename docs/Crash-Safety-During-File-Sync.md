@@ -10,7 +10,7 @@ BuddyDrive syncs files between peers over libp2p using a chunked transfer protoc
 
 **What works well:**
 - The `synced` flag in SQLite (`index.db`) is only set to `1` *after* the entire file is successfully received and written (`transfer.nim:226-227`). A crash mid-transfer leaves the file at `synced=0`, so the next sync session will re-transfer it.
-- On reconnection (discovery loop retries every 15s, `daemon.nim:160-171`), the full sync handshake runs again: file lists are exchanged, `compareWithRemote()` detects what's missing/outdated by mtime+size, and needed files are re-requested.
+- On reconnection (discovery loop retries every 10 minutes, see `BuddyDiscoveryInterval` in `daemon.nim`), the full sync handshake runs again: file lists are exchanged, `compareWithRemote()` detects what's missing/outdated by mtime+size, and needed files are re-requested.
 - Config writes use atomic temp-file + rename (`config.nim`), so config won't corrupt on crash.
 
 **Identified risks and gaps:**

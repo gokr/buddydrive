@@ -1,15 +1,22 @@
 # Discovery via KV-store
 
-Replace DHT-based buddy discovery with a simpler KV-store-based approach. The DHT is slow, unreliable, and complex. BuddyDrive already operates a relay with a KV-store for recovery — extending it for discovery eliminates the DHT dependency and gives faster, more reliable lookups.
+Replace DHT-based buddy discovery with a simpler KV-store-based approach. **This migration is COMPLETE.**
 
 ---
 
-## Current State
+## Previous State (Before Migration)
 
-- `discovery.nim` uses `addProvider`/`getProviders` on the libp2p Kademlia DHT
-- DHT lookups can take minutes, require bootstrap nodes, and fail on restrictive networks
-- Provider records expire after ~30 min, requiring frequent re-announcement
-- The relay KV-store already exists at `/kv/<pubkey>` for encrypted config recovery
+- `discovery.nim` used `addProvider`/`getProviders` on the libp2p Kademlia DHT
+- DHT lookups could take minutes, required bootstrap nodes, and failed on restrictive networks
+- Provider records expired after ~30 min, requiring frequent re-announcement
+
+## Current State (After Migration)
+
+- `discovery.nim` uses relay KV-store publish/lookup via `/discovery/<derived-key>`
+- Discovery keys are derived from pairing codes using `crypto_generichash`
+- Records are HMAC-authenticated; re-published every 4h within a 6h TTL
+- The relay KV-store at `/kv/<pubkey>` still exists for encrypted config recovery
+- Lookup interval is 10 minutes; cached addresses in `state.db` for graceful degradation
 - UPnP remains useful for obtaining a public address, independent of discovery
 
 ## New Design
@@ -144,9 +151,11 @@ Recovery keys are Base58-encoded public keys. Discovery keys are Base58-encoded 
 
 ---
 
-## Implementation Plan
+## Implementation Plan — COMPLETE
 
-### Phase 1: Relay server changes
+All phases have been implemented.
+
+### Phase 1: Relay server changes — COMPLETE ✓
 
 Files: `relay/src/relay.nim`, `relay/src/kvstore.nim`, `relay/src/kvstore_api.nim`
 
@@ -159,7 +168,7 @@ Files: `relay/src/relay.nim`, `relay/src/kvstore.nim`, `relay/src/kvstore_api.ni
 5. TTL enforcement: records older than 6h return 404 on GET; periodic cleanup
 6. Add `/discovery/` without key → 400, unknown path → 404
 
-### Phase 2: Client-side discovery
+### Phase 2: Client-side discovery — COMPLETE ✓
 
 Files: `src/buddydrive/p2p/discovery.nim`, `src/buddydrive/p2p/node.nim`, `src/buddydrive/daemon.nim`
 
@@ -180,7 +189,7 @@ Files: `src/buddydrive/p2p/discovery.nim`, `src/buddydrive/p2p/node.nim`, `src/b
    - On shutdown: best-effort unpublish
    - Use `state.db` cache for last-known addresses
 
-### Phase 3: Daemon integration
+### Phase 3: Daemon integration — COMPLETE ✓
 
 Files: `src/buddydrive/daemon.nim`, `src/buddydrive/control.nim`
 
@@ -189,7 +198,7 @@ Files: `src/buddydrive/daemon.nim`, `src/buddydrive/control.nim`
 3. On startup: try cached addresses immediately for faster reconnection
 4. Control API: add discovery status to `GET /status` response
 
-### Phase 4: Remove DHT
+### Phase 4: Remove DHT — COMPLETE ✓
 
 Files: `src/buddydrive/p2p/discovery.nim`, `src/buddydrive/p2p/node.nim`, `buddydrive.nimble`
 
@@ -199,7 +208,7 @@ Files: `src/buddydrive/p2p/discovery.nim`, `src/buddydrive/p2p/node.nim`, `buddy
 4. Update `buddydrive.nimble` if any DHT-only dependencies can be dropped
 5. Update AGENTS.md, docs/PLAN.md, README.md
 
-### Phase 5: Tests
+### Phase 5: Tests — COMPLETE ✓
 
 Files: `tests/unit/`, `tests/integration/`
 
@@ -219,4 +228,4 @@ Files: `tests/unit/`, `tests/integration/`
 - Existing `config.toml` files still work — `pairingCode` is already stored per buddy
 - No config format changes needed
 - The `relayBaseUrl` config field already points at the relay; discovery just uses a different path on the same host
-- BuddyDrive instances on old versions will continue using DHT until upgraded; they won't interfere with KV-store discovery
+- DHT code has been fully removed; all BuddyDrive instances use KV-store relay discovery

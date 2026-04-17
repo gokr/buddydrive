@@ -14,7 +14,7 @@ BuddyDrive currently has two security layers that are important to understand:
 |-----------|-----------|---------|
 | Direct peer transport | libp2p Noise | Encrypt direct libp2p connections |
 | Recovery config backup | libsodium `crypto_secretbox` | Encrypt config synced to relay |
-| Pairing code | Shared secret | Match buddies and relay fallback sessions |
+| Pairing code | Shared secret | Match buddies, derive discovery keys, HMAC-authenticate relay records, and relay fallback sessions |
 | Recovery phrase | 12-word mnemonic | Re-derive recovery metadata on a new machine |
 
 ## Recovery Phrase And Master Key

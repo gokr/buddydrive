@@ -9,7 +9,7 @@ binDir = "bin"
 bin = @["buddydrive"]
 
 requires "nim >= 2.2.8"              # Language version
-requires "libp2p >= 1.15"            # P2P networking, DHT, NAT traversal
+requires "libp2p >= 1.15"            # P2P networking, direct transport
 requires "libsodium >= 0.7"          # Encryption (XChaCha20-Poly1305), key derivation
 requires "parsetoml"                  # TOML config parsing (~/.buddydrive/config.toml)
 requires "results >= 0.5.1"          # Result type for error handling

@@ -7,11 +7,11 @@ Build **BuddyDrive** - a P2P encrypted folder sync tool in Nim that allows synci
 ## Instructions
 
 - Build CLI-first, then add UI later (Owlkettle for GTK4)
-- Use libp2p for P2P networking (DHT discovery, NAT traversal)
+- Use libp2p for P2P networking (direct transport, NAT traversal)
 - Use libsodium for encryption (XChaCha20-Poly1305)
 - Config at `~/.buddydrive/`, SQLite for file index
 - Standard Nim logging
-- User wants **direct-only connectivity** - no relay fallback for core DHT. If direct connection fails, show a clear diagnostic message.
+- User wants **direct-only connectivity** when possible — relay fallback is a secondary option. If direct connection fails, show a clear diagnostic message.
 - User wants **automatic UPnP port forwarding** so users don't have to manually configure routers
 - User wants **relay fallback** when direct connection fails
 - User wants **sync windows** (time-based scheduling)
@@ -20,7 +20,7 @@ Build **BuddyDrive** - a P2P encrypted folder sync tool in Nim that allows synci
 
 ## Discoveries
 
-- **DHT discovery doesn't work end-to-end**: Provider/value records on public IPFS DHT don't reliably return results for app-specific buddy IDs
+- **DHT discovery was unreliable (resolved)**: Provider/value records on public IPFS DHT didn't reliably return results — replaced with KV-store relay discovery
 - **CGNAT is common**: ISP-level NAT prevents UPnP from getting public IPs (100.64.0.0/10 range)
 - **Relay design**: Simple token-based pairing, bidirectional byte pipe after handshake. No whitelist — any token is accepted.
 - **Koyeb TCP Proxy**: Not suitable for multi-instance relay due to lack of session affinity - use single-instance per relay or deterministic sharding
@@ -38,7 +38,7 @@ Build **BuddyDrive** - a P2P encrypted folder sync tool in Nim that allows synci
 
 ### BuddyDrive (mostly complete)
 - CLI framework with all commands
-- libp2p networking with DHT, TCP transport, Noise encryption
+- libp2p networking with TCP transport, Noise encryption, and relay KV-store discovery
 - UPnP port mapping (graceful fallback on failure/CGNAT)
 - Relay fallback with region-based relay selection
 - Sync window (time-based scheduling)

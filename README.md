@@ -6,7 +6,7 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 
 ## Features
 
-- **P2P Networking** - libp2p with DHT discovery, direct public TCP dialing, UPnP attempts, and relay fallback
+- **P2P Networking** - libp2p with relay-backed KV-store discovery, direct public TCP dialing, UPnP attempts, and relay fallback
 - **Recovery And Restore** - 12-word recovery phrase, stored master key, encrypted config sync to relay, and config restore on a new machine
 - **Restore Missing Files** - normal sync recreates files that exist on your buddy but are missing locally
 - **Folder Policies** - append-only mode prevents remote overwrites of existing local files
@@ -257,9 +257,10 @@ Folders:
 
 1. `buddydrive init` creates a local buddy identity and config file
 2. `buddydrive start` creates the libp2p node for the running session
-3. The daemon announces your buddy ID on the DHT
-4. The daemon looks up configured buddies via DHT
+3. The daemon publishes your address to the relay at `/discovery/<derived-key>`, where the key is derived from the pairing code
+4. The daemon looks up configured buddies using the same derived key via the relay KV-store (every 10 minutes)
 5. It connects directly when a public TCP address is available, or via relay fallback when configured
+6. Cached addresses in `state.db` are used for graceful degradation when the relay is unavailable
 
 ### Recovery And Transport Security
 

@@ -110,8 +110,7 @@ Expected startup output includes lines like:
 Starting BuddyDrive daemon...
 Starting daemon...
 Node started with Peer ID: 16Uiu2HAm...
-Listening on: /ip4/0.0.0.0/tcp/41721
-DHT discovery started
+Published discovery record to relay
 Control server started on port 17521
 Web GUI (localhost): http://127.0.0.1:17521/
 Web GUI (LAN): http://<your-ip>:17521/w/<secret>/
@@ -135,7 +134,7 @@ This confirms that:
 - separate BuddyDrive homes work
 - config is written correctly
 - folders and buddies are saved correctly
-- the daemon starts and publishes to the DHT
+- the daemon starts and publishes discovery records to the relay KV-store
 - both instances can run concurrently with different P2P and control ports
 
 It does not prove that file transfer works between the two instances on the same host.

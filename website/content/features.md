@@ -22,9 +22,9 @@ No central sync account. No cloud drive. No vendor lock-in.
 Your Machine <--direct or relay--> Buddy's Machine
 ```
 
-BuddyDrive uses libp2p for peer discovery and direct transport. Current connectivity options include direct public TCP connections and relay fallback. Features:
+BuddyDrive uses a relay KV-store for peer discovery and libp2p for direct transport. Current connectivity options include direct public TCP connections and relay fallback. Features:
 
-- **DHT-based peer discovery** - find your buddy on the network
+- **Relay KV-store discovery** - find your buddy via pairing-code-derived keys on the relay
 - **Relay fallback** - available when both peers store the same pairing code for the relationship
 - **Multi-address support** - connects via standard libp2p multiaddrs
 - **Yamux multiplexing** - multiple streams over one connection
