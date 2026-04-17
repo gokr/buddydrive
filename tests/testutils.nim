@@ -52,3 +52,6 @@ proc strictIntegration*(): bool =
 
 proc getKvApiUrl*(): string =
   getEnv("BUDDYDRIVE_KV_API_URL", "https://01.proxy.koyeb.app")
+
+proc getLocalKvConnectionString*(): string =
+  getEnv("BUDDYDRIVE_LOCAL_KV_DSN", "")

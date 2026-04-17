@@ -16,9 +16,10 @@ requires "results >= 0.5.1"          # Result type for error handling
 requires "stew"                       # Utility types used by libp2p
 requires "uuids"                      # UUID generation for buddy/folder IDs
 requires "db_connector"              # SQLite (bundled with Nim 2.2.8+) for state/index DBs
-requires "mummy"                      # HTTP server (used by relay)
+requires "https://github.com/gokr/mummyx" # HTTP server fork (used by relay)
 requires "nat_traversal"             # NAT hole punching
 requires "curly"                      # HTTP client (relay KV API, config sync)
+requires "https://github.com/gokr/debby" # MySQL KV store for relay
 requires "https://github.com/gokr/lz4wrapper" # LZ4 compression (used by libp2p)
 requires "https://github.com/status-im/nim-zlib#daa8723" # zlib for libp2p; pinned because libp2p declares underspecified version
 

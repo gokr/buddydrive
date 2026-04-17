@@ -1,6 +1,7 @@
 import std/[json, strutils, tables, times]
 import chronos
 import curly
+import libsodium/sodium
 import libp2p/multiaddress
 import libp2p/wire
 import libp2p/stream/connection
@@ -30,6 +31,58 @@ proc bytesToString(data: openArray[byte]): string =
   result = newString(data.len)
   for i, b in data:
     result[i] = char(b)
+
+proc cryptoGenerichashRaw(hashOut: cptr, hashOutLen: csize_t, msg: cptr, msgLen: culonglong, key: cptr, keyLen: csize_t): cint {.importc: "crypto_generichash", dynlib: libsodium_fn.}
+
+proc bytesToHex(data: string): string =
+  result = newString(data.len * 2)
+  const hexChars = "0123456789abcdef"
+  for i, ch in data:
+    let b = byte(ch)
+    result[i * 2] = hexChars[int(b shr 4)]
+    result[i * 2 + 1] = hexChars[int(b and 0x0f)]
+
+proc powHashHex(payload: string): string =
+  result = newString(32)
+  let msgPtr = if payload.len == 0: nil else: cast[cptr](payload[0].unsafeAddr)
+  let rc = cryptoGenerichashRaw(
+    cast[cptr](result[0].addr),
+    result.len.csize_t,
+    msgPtr,
+    payload.len.culonglong,
+    nil,
+    0
+  )
+  if rc != 0:
+    return ""
+  result = bytesToHex(result)
+
+proc hasLeadingZeroBits(hashHex: string, requiredBits: int): bool =
+  var bitsLeft = requiredBits
+  for ch in hashHex:
+    if bitsLeft <= 0:
+      return true
+    let nibble =
+      if ch >= '0' and ch <= '9': int(ch) - int('0')
+      else: int(toLowerAscii(ch)) - int('a') + 10
+    if bitsLeft >= 4:
+      if nibble != 0:
+        return false
+      bitsLeft -= 4
+    else:
+      return nibble < (1 shl (4 - bitsLeft))
+  bitsLeft <= 0
+
+proc solveRelayPow(relayToken, nonce: string, difficultyBits: int): string {.raises: [].} =
+  var counter = 0'u64
+  while true:
+    let attempt = $counter
+    let hash = powHashHex(relayToken & "\n" & nonce & "\n" & attempt)
+    if hash.len == 0:
+      return ""
+    if hasLeadingZeroBits(hash, difficultyBits):
+      return attempt
+    inc counter
 
 proc normalizeRelayRegion(region: string): string {.raises: [].} =
   region.strip().toLowerAscii()
@@ -183,10 +236,9 @@ proc connectViaRelay*(relayAddr: string, relayToken: string): Future[Connection]
 
     while true:
       let line = await readRelayLine(transp)
-      case line
-      of "WAIT":
+      if line == "WAIT":
         continue
-      of "OK":
+      elif line == "OK":
         return Connection(
           ChronosStream.init(
             transp,
@@ -195,6 +247,20 @@ proc connectViaRelay*(relayAddr: string, relayToken: string): Future[Connection]
             localAddr = Opt.none(MultiAddress)
           )
         )
+      elif line.startsWith("POW "):
+        let parts = line.splitWhitespace()
+        if parts.len != 3:
+          raise newException(RelayError, "invalid relay proof-of-work challenge")
+
+        let difficultyBits = try:
+          parseInt(parts[2])
+        except ValueError:
+          raise newException(RelayError, "invalid relay proof-of-work difficulty")
+
+        let solution = solveRelayPow(relayToken, parts[1], difficultyBits)
+        if solution.len == 0:
+          raise newException(RelayError, "failed to solve relay proof-of-work")
+        discard await transp.write(toBytes("POW " & solution & "\n"))
       else:
         raise newException(RelayError, "unexpected relay response: " & line)
   except CatchableError as exc:

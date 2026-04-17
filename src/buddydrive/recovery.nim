@@ -15,6 +15,41 @@ proc bytesToString*(bytes: seq[byte]): string =
   for i, b in bytes:
     result[i] = char(b)
 
+proc binaryToHex*(data: string): string =
+  result = newString(data.len * 2)
+  const hexChars = "0123456789abcdef"
+  for i, ch in data:
+    let b = byte(ch)
+    result[i * 2] = hexChars[int(b shr 4)]
+    result[i * 2 + 1] = hexChars[int(b and 0x0f)]
+
+proc hexToBinary*(hex: string): string =
+  if hex.len mod 2 != 0:
+    raise newException(ValueError, "Invalid hex string length")
+
+  result = newString(hex.len div 2)
+  for i in 0 ..< result.len:
+    let hi = hex[i * 2]
+    let lo = hex[i * 2 + 1]
+    var b = 0
+    if hi >= 'a' and hi <= 'f':
+      b = (int(hi) - int('a') + 10) shl 4
+    elif hi >= 'A' and hi <= 'F':
+      b = (int(hi) - int('A') + 10) shl 4
+    elif hi >= '0' and hi <= '9':
+      b = (int(hi) - int('0')) shl 4
+    else:
+      raise newException(ValueError, "Invalid hex string")
+    if lo >= 'a' and lo <= 'f':
+      b = b or (int(lo) - int('a') + 10)
+    elif lo >= 'A' and lo <= 'F':
+      b = b or (int(lo) - int('A') + 10)
+    elif lo >= '0' and lo <= '9':
+      b = b or (int(lo) - int('0'))
+    else:
+      raise newException(ValueError, "Invalid hex string")
+    result[i] = char(b)
+
 proc loadBip39Wordlist(): seq[string] =
   let wordlistPath = currentSourcePath().parentDir().parentDir().parentDir() / "wordlists" / "bip39_english.txt"
   if not fileExists(wordlistPath):
@@ -151,6 +186,16 @@ proc decryptConfigBlob*(encrypted: string, masterKey: array[32, byte]): string =
     raise newException(ValueError, "Encrypted data too short")
   
   result = crypto_secretbox_open_easy(masterKeyStr, encrypted)
+
+proc deriveSigningKeyPair*(masterKey: array[32, byte]): tuple[publicKey: string, secretKey: string] =
+  var seed = newString(32)
+  for i in 0 ..< 32:
+    seed[i] = char(masterKey[i])
+  result = crypto_sign_seed_keypair(seed)
+
+proc deriveVerifyKeyHex*(masterKey: array[32, byte]): string =
+  let (publicKey, _) = deriveSigningKeyPair(masterKey)
+  binaryToHex(publicKey)
 
 proc setupRecovery*(): tuple[mnemonic: string, recovery: RecoveryConfig] =
   result.mnemonic = generateMnemonic()

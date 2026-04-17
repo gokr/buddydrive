@@ -67,7 +67,7 @@ suite "Config sync e2e":
         check recovered.buddies.len == 1
         check recovered.recovery.masterKey == config.recovery.masterKey
 
-        let deleted = waitFor deleteConfigFromRelay(recovery.publicKeyB58, kvUrl)
+        let deleted = waitFor deleteConfigFromRelay(recovery, kvUrl)
         check deleted
 
   test "wrong mnemonic fails to recover":
@@ -87,7 +87,7 @@ suite "Config sync e2e":
         let recoveredOpt = waitFor attemptRecovery(wrongMnemonic, kvUrl, "")
         check recoveredOpt.isNone
 
-        discard waitFor deleteConfigFromRelay(recovery.publicKeyB58, kvUrl)
+        discard waitFor deleteConfigFromRelay(recovery, kvUrl)
 
   test "double sync works fine":
     runWithStrictFallback:
@@ -118,4 +118,4 @@ suite "Config sync e2e":
           recovered = deserializeConfigFromSync(fetched.get(), masterKey)
         check recovered.buddy.uuid == config.buddy.uuid
 
-        discard waitFor deleteConfigFromRelay(recovery.publicKeyB58, kvUrl)
+        discard waitFor deleteConfigFromRelay(recovery, kvUrl)

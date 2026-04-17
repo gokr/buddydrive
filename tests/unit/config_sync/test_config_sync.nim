@@ -1,6 +1,7 @@
 import std/unittest
 import std/times
 import chronos
+import webby/httpheaders
 import ../../../src/buddydrive/types
 import ../../../src/buddydrive/recovery
 import ../../../src/buddydrive/sync/config_sync
@@ -127,3 +128,12 @@ suite "syncConfigToRelay without recovery":
     cfg.recovery.masterKey = ""
     let result = waitFor syncConfigToRelay(cfg, "https://example.com")
     check not result
+
+suite "signed KV mutations":
+  test "buildSignedKvHeaders includes auth headers":
+    let (_, recovery) = setupRecovery()
+    let headers = buildSignedKvHeaders(recovery, "PUT", recovery.publicKeyB58, "payload")
+    check "X-BD-Verify-Key" in headers
+    check "X-BD-Version" in headers
+    check "X-BD-Timestamp" in headers
+    check "X-BD-Signature" in headers

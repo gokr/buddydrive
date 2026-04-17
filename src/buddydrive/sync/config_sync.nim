@@ -1,6 +1,7 @@
-import std/[strutils, options, base64]
+import std/[strutils, options, base64, times]
 import chronos
 import curly
+import libsodium/sodium
 import webby/httpheaders
 import ../types
 import ../config
@@ -11,6 +12,37 @@ type
 
 const CONFIG_SYNC_TIMEOUT = 10
 const DefaultKvApiUrl* = "https://buddydrive-tankfeud-ddaec82a.koyeb.app"
+
+var lastKvMutationVersion = 0'i64
+
+proc currentTimeMs(): int64 =
+  (epochTime() * 1000).int64
+
+proc nextKvMutationVersion(): int64 =
+  let now = currentTimeMs()
+  result = max(now, lastKvMutationVersion + 1)
+  lastKvMutationVersion = result
+
+proc canonicalKvMutation(httpMethod, lookupKey, verifyKeyHex, body: string, version, timestamp: int64): string =
+  httpMethod.toUpperAscii() & "\n" & lookupKey & "\n" & verifyKeyHex & "\n" & $version & "\n" & $timestamp & "\n" & body
+
+proc buildSignedKvHeaders*(recovery: RecoveryConfig, httpMethod, lookupKey, body: string): HttpHeaders =
+  if recovery.masterKey.len == 0:
+    raise newException(ConfigSyncError, "Missing recovery master key")
+
+  let masterKey = hexToBytes(recovery.masterKey)
+  let (verifyKey, secretKey) = deriveSigningKeyPair(masterKey)
+  let verifyKeyHex = binaryToHex(verifyKey)
+  let version = nextKvMutationVersion()
+  let timestamp = currentTimeMs()
+  let canonical = canonicalKvMutation(httpMethod, lookupKey, verifyKeyHex, body, version, timestamp)
+  let signatureHex = binaryToHex(crypto_sign_detached(secretKey, canonical))
+
+  result = emptyHttpHeaders()
+  result["X-BD-Verify-Key"] = verifyKeyHex
+  result["X-BD-Version"] = $version
+  result["X-BD-Timestamp"] = $timestamp
+  result["X-BD-Signature"] = signatureHex
 
 proc serializeConfigForSync*(config: AppConfig, masterKey: array[32, byte]): string =
   result = encryptConfigBlob(configToToml(config), masterKey)
@@ -41,7 +73,8 @@ proc syncConfigToRelay*(config: AppConfig, relayUrl: string): Future[bool] {.asy
   
   try:
     let encoded = encode(encryptedConfig)
-    let response = client.put(url, emptyHttpHeaders(), encoded.toOpenArray(0, encoded.len - 1), CONFIG_SYNC_TIMEOUT)
+    let headers = buildSignedKvHeaders(config.recovery, "PUT", pubkey, encoded)
+    let response = client.put(url, headers, encoded.toOpenArray(0, encoded.len - 1), CONFIG_SYNC_TIMEOUT)
     if response.code >= 200 and response.code < 300:
       return true
     else:
@@ -65,12 +98,16 @@ proc fetchConfigFromRelay*(publicKeyB58: string, relayUrl: string): Future[Optio
     echo "Error fetching config from relay: ", e.msg
     return none(string)
 
-proc deleteConfigFromRelay*(publicKeyB58: string, relayUrl: string): Future[bool] {.async.} =
+proc deleteConfigFromRelay*(recovery: RecoveryConfig, relayUrl: string): Future[bool] {.async.} =
+  if not recovery.enabled or recovery.masterKey.len == 0 or recovery.publicKeyB58.len == 0:
+    return false
+
   var client = newCurly()
-  let url = relayUrl.strip(chars = {'/'}) & "/kv/" & publicKeyB58
+  let url = relayUrl.strip(chars = {'/'}) & "/kv/" & recovery.publicKeyB58
   
   try:
-    let response = client.delete(url, emptyHttpHeaders(), CONFIG_SYNC_TIMEOUT)
+    let headers = buildSignedKvHeaders(recovery, "DELETE", recovery.publicKeyB58, "")
+    let response = client.delete(url, headers, CONFIG_SYNC_TIMEOUT)
     return response.code >= 200 and response.code < 300
   except Exception as e:
     echo "Error deleting config from relay: ", e.msg
