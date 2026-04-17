@@ -317,7 +317,67 @@ proc handler(request: Request) {.gcsafe, raises: [].} =
     defer:
       leaveRequest()
 
-    if request.path.startsWith("/kv/"):
+    if request.path.startsWith("/discovery/"):
+      let clientIp = trustedClientIp(request)
+      if not allowGeoAccess(clientIp):
+        respondText(request, 403, "Region not allowed")
+        return
+
+      let key = request.path[12..^1].strip(chars = {'/'})
+      if key.len == 0:
+        respondText(request, 400, "Missing discovery key")
+        return
+
+      case request.httpMethod
+      of "GET":
+        if not allowRequest(clientIp, false, key):
+          respondText(request, 429, "Rate limit exceeded")
+          return
+
+        let recordOpt = fetchDiscovery(theKvStore, key)
+        if recordOpt.isSome:
+          var h = emptyHttpHeaders()
+          h["Content-Type"] = "application/json"
+          request.respond(200, h, recordOpt.get())
+        else:
+          respondText(request, 404, "Discovery record not found or expired")
+
+      of "PUT", "POST":
+        if not allowRequest(clientIp, true, key):
+          respondText(request, 429, "Rate limit exceeded")
+          return
+        if request.body.len == 0:
+          respondText(request, 400, "Missing record body")
+          return
+        if request.body.len > MaxKvBodyBytes:
+          respondText(request, 413, "Discovery record too large")
+          return
+        if "X-HMAC" notin request.headers or request.headers["X-HMAC"].strip().len == 0:
+          respondText(request, 400, "Missing X-HMAC header")
+          return
+
+        if storeDiscovery(theKvStore, key, request.body, request.headers["X-HMAC"].strip()):
+          respondJson(request, 201, "{\"ok\":true}")
+        else:
+          respondText(request, 401, "HMAC mismatch or store error")
+
+      of "DELETE":
+        if not allowRequest(clientIp, true, key):
+          respondText(request, 429, "Rate limit exceeded")
+          return
+        if "X-HMAC" notin request.headers or request.headers["X-HMAC"].strip().len == 0:
+          respondText(request, 400, "Missing X-HMAC header")
+          return
+
+        if deleteDiscovery(theKvStore, key, request.headers["X-HMAC"].strip()):
+          request.respond(204)
+        else:
+          respondText(request, 404, "Discovery record not found or HMAC mismatch")
+
+      else:
+        respondText(request, 405, "Method not allowed")
+
+    elif request.path.startsWith("/kv/"):
       let clientIp = trustedClientIp(request)
       if not allowGeoAccess(clientIp):
         respondText(request, 403, "Region not allowed")
@@ -377,6 +437,9 @@ proc runKvApi*(kv: KvStore, port: int = 8080) =
   )
   echo "KV API HTTP server starting on port ", port
   echo "Endpoints:"
+  echo "  GET    /discovery/<key> - Fetch buddy address record"
+  echo "  PUT    /discovery/<key> - Store buddy address record"
+  echo "  DELETE /discovery/<key> - Delete buddy address record"
   echo "  GET    /kv/<pubkey>   - Fetch encrypted config"
   echo "  PUT    /kv/<pubkey>   - Store encrypted config"
   echo "  DELETE /kv/<pubkey>   - Delete config"

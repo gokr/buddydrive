@@ -4,6 +4,7 @@ import results
 import chronos
 import libp2p
 import libp2p/multiaddress
+import libp2p/peerid
 import libp2p/stream/connection
 from libp2p/protocols/protocol import LPProtocol
 import types
@@ -42,7 +43,7 @@ type
     masterKey*: Option[array[32, byte]]
     upnpPort*: int  ## Non-zero if we created a UPnP mapping that needs cleanup
 
-const BuddyDiscoveryInterval* = chronos.seconds(15)
+const BuddyDiscoveryInterval* = chronos.seconds(10 * 60)
 
 proc newDaemon*(config: AppConfig): Daemon =
   result = Daemon()
@@ -264,11 +265,14 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
 
     daemon.startupReachabilityDiagnostic()
     
-    daemon.discovery = newDiscovery(daemon.node)
+    daemon.discovery = newDiscovery(daemon.node, daemon.config.relayBaseUrl)
     await daemon.discovery.start()
 
     if daemon.config.buddies.len > 0:
-      asyncSpawn daemon.discovery.publishBuddyLoop(daemon.config.buddy.uuid)
+      for buddy in daemon.config.buddies:
+        if buddy.pairingCode.len > 0:
+          discard daemon.discovery.publishBuddy(buddy.pairingCode, daemon.config.relayRegion)
+          asyncSpawn daemon.discovery.publishBuddyLoop(buddy.pairingCode, daemon.config.relayRegion)
     else:
       echo "No buddies configured. Add buddies with 'buddydrive add-buddy' to start syncing."
     
@@ -328,6 +332,9 @@ proc stop*(daemon: Daemon): Future[void] {.async: (raises: []).} =
     daemon.buddyConnections.clear()
     
     if daemon.discovery != nil:
+      for buddy in daemon.config.buddies:
+        if buddy.pairingCode.len > 0:
+          discard daemon.discovery.unpublishBuddy(buddy.pairingCode)
       await daemon.discovery.stop()
     
     if daemon.node != nil:
@@ -520,18 +527,56 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
     if daemon.buddyConnections.hasKey(buddy.id.uuid):
       continue
     
+    if buddy.pairingCode.len == 0:
+      daemon.logDiagnostic(
+        buddyDiagnosticKey(buddy.id.uuid),
+        "Buddy " & buddy.id.name & " has no pairing code — cannot discover"
+      )
+      continue
     try:
-      let peers = await daemon.discovery.findBuddy(buddy.id.uuid)
-      if peers.len > 0:
-        let (peerId, addrs) = peers[0]
-        discard await daemon.connectToBuddy(buddy.id.uuid, peerId, addrs)
+      let record = daemon.discovery.findBuddy(buddy.pairingCode)
+      if record.isSome:
+        let rec = record.get()
+        writeCachedBuddyAddr(buddy.id.uuid, rec.peerId, rec.addresses, rec.relayRegion)
+
+        var addrs: seq[MultiAddress] = @[]
+        for addrStr in rec.addresses:
+          let maRes = MultiAddress.init(addrStr)
+          if maRes.isOk:
+            addrs.add(maRes.get())
+
+        let pidRes = PeerID.init(rec.peerId)
+        if pidRes.isOk and addrs.len > 0:
+          discard await daemon.connectToBuddy(buddy.id.uuid, pidRes.get(), addrs)
+        elif addrs.len == 0:
+          if rec.relayRegion.len > 0:
+            discard await daemon.connectToBuddyViaRelay(buddy.id.uuid)
+          else:
+            daemon.logDiagnostic(
+              buddyDiagnosticKey(buddy.id.uuid),
+              "Buddy " & buddy.id.name & " published no dialable addresses and no relay region"
+            )
       else:
-        daemon.logDiagnostic(
-          buddyDiagnosticKey(buddy.id.uuid),
-          "Buddy " & buddy.id.name & " (" & buddy.id.uuid.shortId() & ") not found on DHT yet"
-        )
+        let cached = readCachedBuddyAddr(buddy.id.uuid)
+        if cached.isSome:
+          var addrs: seq[MultiAddress] = @[]
+          for addrStr in cached.get().addresses:
+            let maRes = MultiAddress.init(addrStr)
+            if maRes.isOk:
+              addrs.add(maRes.get())
+
+          let pidRes = PeerID.init(cached.get().peerId)
+          if pidRes.isOk and addrs.len > 0:
+            discard await daemon.connectToBuddy(buddy.id.uuid, pidRes.get(), addrs)
+          elif cached.get().relayRegion.len > 0:
+            discard await daemon.connectToBuddyViaRelay(buddy.id.uuid)
+        else:
+          daemon.logDiagnostic(
+            buddyDiagnosticKey(buddy.id.uuid),
+            "Buddy " & buddy.id.name & " (" & buddy.id.uuid.shortId() & ") not found on relay yet"
+          )
     except Exception as e:
       daemon.logDiagnostic(
         buddyDiagnosticKey(buddy.id.uuid),
-        "DHT lookup failed for buddy " & buddy.id.name & ": " & e.msg
+        "Discovery lookup failed for buddy " & buddy.id.name & ": " & e.msg
       )

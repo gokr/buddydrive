@@ -82,6 +82,15 @@ proc migrateSchema(kv: KvStore) =
     )
   """)
 
+  kv.db.query("""
+    CREATE TABLE IF NOT EXISTS discovery_store (
+      discovery_key VARCHAR(128) PRIMARY KEY,
+      record_json TEXT NOT NULL,
+      auth_hash VARCHAR(128) NOT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  """)
+
   for stmt in [
     "ALTER TABLE config_store ADD COLUMN IF NOT EXISTS verify_key_hex VARCHAR(128) NOT NULL DEFAULT ''",
     "ALTER TABLE config_store ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0",
@@ -236,4 +245,78 @@ proc getConfigCount*(kv: KvStore): int =
       return 0
   except Exception as e:
     echo "Error getting config count: ", e.msg
+    return 0
+
+const DiscoveryTtlHours* = 6
+
+proc storeDiscovery*(kv: KvStore, key: string, recordJson: string, authHash: string): bool =
+  if not kv.connected:
+    return false
+
+  try:
+    withLock kv.lock:
+      let existing = kv.db.query("SELECT auth_hash FROM discovery_store WHERE discovery_key = ?", key)
+      var storedAuth = ""
+      for row in existing:
+        storedAuth = row[0]
+      if storedAuth.len > 0 and storedAuth != authHash:
+        return false
+      kv.db.query("DELETE FROM discovery_store WHERE discovery_key = ?", key)
+      kv.db.query("INSERT INTO discovery_store (discovery_key, record_json, auth_hash) VALUES (?, ?, ?)",
+                 key, recordJson, authHash)
+      return true
+  except Exception as e:
+    echo "Error storing discovery: ", e.msg
+    return false
+
+proc fetchDiscovery*(kv: KvStore, key: string): std_options.Option[string] =
+  if not kv.connected:
+    return std_options.none(string)
+
+  try:
+    withLock kv.lock:
+      let rows = kv.db.query(
+        "SELECT record_json FROM discovery_store WHERE discovery_key = ? AND updated_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? HOUR)",
+        key,
+        $DiscoveryTtlHours
+      )
+      for row in rows:
+        return std_options.some(row[0])
+      return std_options.none(string)
+  except Exception as e:
+    echo "Error fetching discovery: ", e.msg
+    return std_options.none(string)
+
+proc deleteDiscovery*(kv: KvStore, key: string, authHash: string): bool =
+  if not kv.connected:
+    return false
+
+  try:
+    withLock kv.lock:
+      let rows = kv.db.query("SELECT auth_hash FROM discovery_store WHERE discovery_key = ?", key)
+      var storedAuth = ""
+      for row in rows:
+        storedAuth = row[0]
+      if storedAuth.len == 0:
+        return false
+      if storedAuth != authHash:
+        return false
+      kv.db.query("DELETE FROM discovery_store WHERE discovery_key = ?", key)
+      return true
+  except Exception as e:
+    echo "Error deleting discovery: ", e.msg
+    return false
+
+proc getDiscoveryCount*(kv: KvStore): int =
+  if not kv.connected:
+    return 0
+
+  try:
+    withLock kv.lock:
+      let rows = kv.db.query("SELECT COUNT(*) FROM discovery_store")
+      for row in rows:
+        return parseInt(row[0])
+      return 0
+  except Exception as e:
+    echo "Error getting discovery count: ", e.msg
     return 0
