@@ -1,4 +1,6 @@
-# BuddyDrive Local Testing Tutorial
+# BuddyDrive Tutorial
+
+A hands-on guide to getting BuddyDrive running and testing it locally. For full command reference and configuration details, see [MANUAL.md](MANUAL.md).
 
 This tutorial shows how to smoke-test BuddyDrive on a single machine with two isolated instances.
 
@@ -13,7 +15,7 @@ Important: a full end-to-end sync does not currently work over loopback or priva
 ## Prerequisites
 
 ```bash
-cd /home/gokr/tankfeud/buddydrive
+cd buddydrive   # wherever you cloned the repo
 nimble build
 ```
 

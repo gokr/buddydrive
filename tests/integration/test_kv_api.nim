@@ -7,6 +7,7 @@ import ../../src/buddydrive/types
 import ../../src/buddydrive/recovery
 import ../../src/buddydrive/sync/config_sync
 import ../testutils
+import ../support/integration_harness
 
 proc safeSetupRecovery(): tuple[mnemonic: string, recovery: RecoveryConfig] {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -24,42 +25,12 @@ proc safeSerialize(config: AppConfig, masterKey: array[32, byte]): string {.gcsa
 
 var localKvRelayBinaryPath {.global.}: string
 
-proc repoRoot(): string =
-  currentSourcePath().parentDir().parentDir().parentDir()
-
 proc ensureLocalKvRelayBinary(): string =
-  if localKvRelayBinaryPath.len == 0:
-    let workspaceRoot = repoRoot().parentDir()
-    let debbySrc = workspaceRoot / "debby" / "src"
-    let jsonySrc = workspaceRoot / "jsony" / "src"
-    localKvRelayBinaryPath = getTempDir() / ("buddydrive_test_relay_kv_" & $getTime().toUnix())
-    let build = execCmdEx(
-      "nim c --path:" & quoteShell(debbySrc) & " --path:" & quoteShell(jsonySrc) & " -d:withKvStore -o:" & quoteShell(localKvRelayBinaryPath) & " relay/src/relay.nim",
-      workingDir = repoRoot()
-    )
-    doAssert build.exitCode == 0, build.output
-  localKvRelayBinaryPath
-
-proc freePort(): int =
-  let sock = newSocket()
-  defer: sock.close()
-  sock.bindAddr(Port(0))
-  let (_, port) = sock.getLocalAddr()
-  int(port)
-
-proc waitForKvApiReady(port: int) =
-  let client = newHttpClient()
-  defer: client.close()
-  let url = "http://127.0.0.1:" & $port & "/health"
-  for _ in 0 ..< 50:
-    try:
-      let resp = client.get(url)
-      if resp.code == Http200:
-        return
-    except CatchableError:
-      discard
-    sleep(100)
-  doAssert false, "local KV API did not become ready"
+  let workspaceRoot = repoRoot().parentDir()
+  let debbySrc = workspaceRoot / "debby" / "src"
+  let jsonySrc = workspaceRoot / "jsony" / "src"
+  let buildCmd = "nim c --path:" & quoteShell(debbySrc) & " --path:" & quoteShell(jsonySrc) & " -d:withKvStore -o:$OUT relay/src/relay.nim"
+  ensureBuiltBinary(localKvRelayBinaryPath, "buddydrive_test_relay_kv", buildCmd)
 
 suite "KV API":
   test "put then get then delete":
@@ -226,12 +197,9 @@ suite "KV API":
       )
       defer:
         putEnv("TIDB_CONNECTION_STRING", oldDsn)
-        if peekExitCode(relayProc) == -1:
-          terminate(relayProc)
-          discard waitForExit(relayProc, 5000)
-        close(relayProc)
+        stopProcessCleanly(relayProc)
 
-      waitForKvApiReady(kvPort)
+      waitForHttpReady("http://127.0.0.1:" & $kvPort & "/health")
 
       let kvUrl = "http://127.0.0.1:" & $kvPort
       let (_, recovery) = safeSetupRecovery()
@@ -290,12 +258,9 @@ suite "KV API":
         putEnv("BUDDYDRIVE_KV_EU_RANGES_FILE", oldGeoRanges)
         if fileExists(geoRangesFile):
           removeFile(geoRangesFile)
-        if peekExitCode(relayProc) == -1:
-          terminate(relayProc)
-          discard waitForExit(relayProc, 5000)
-        close(relayProc)
+        stopProcessCleanly(relayProc)
 
-      waitForKvApiReady(kvPort)
+      waitForHttpReady("http://127.0.0.1:" & $kvPort & "/health")
 
       let kvUrl = "http://127.0.0.1:" & $kvPort
       let (_, recovery) = safeSetupRecovery()

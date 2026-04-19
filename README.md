@@ -4,6 +4,14 @@ P2P folder sync and relay-backed restore for you and your buddies.
 
 BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing NATs and firewalls. It also supports a 12-word recovery phrase, a per-installation master key, and relay-backed config restore so you can rebuild a lost machine and resync missing files.
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Tutorial](docs/TUTORIAL.md) | Hands-on guide: local smoke-test with two instances |
+| [Manual](docs/MANUAL.md) | Complete reference: CLI, GUI, configuration, control API, security |
+| [Development Plan](docs/PLAN.md) | Architecture decisions, implementation history, remaining work |
+
 ## Features
 
 - **P2P Networking** - libp2p with relay-backed KV-store discovery, direct public TCP dialing, UPnP attempts, and relay fallback
@@ -14,6 +22,31 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 - **Web GUI** - browser-based UI served from the daemon, works on any device
 - **GTK4 GUI** - native desktop application for monitoring and configuration (Linux)
 - **Cross-Platform** - works on Linux, macOS, and Windows
+
+## Quick Start
+
+```bash
+# Initialize your BuddyDrive identity
+buddydrive init
+
+# Optional but recommended: set up recovery
+buddydrive setup-recovery
+
+# Add a folder to sync
+buddydrive add-folder ~/Documents --name docs
+
+# Pair with a buddy
+buddydrive add-buddy --generate-code
+# Share the generated code with your buddy
+
+# On your buddy's machine
+buddydrive add-buddy --id <your-id> --code <pairing-code>
+
+# Start the daemon
+buddydrive start
+```
+
+See [docs/TUTORIAL.md](docs/TUTORIAL.md) for a detailed local testing guide.
 
 ## Installation
 
@@ -94,31 +127,6 @@ The web GUI is built into the CLI — no separate build needed. When the daemon 
 
 The web GUI works on any device with a browser — phone, tablet, or headless server.
 
-## Quick Start
-
-See [docs/TUTORIAL.md](docs/TUTORIAL.md) for a detailed local testing guide.
-
-```bash
-# Initialize your BuddyDrive identity
-buddydrive init
-
-# Optional but recommended: set up recovery
-buddydrive setup-recovery
-
-# Add a folder to sync
-buddydrive add-folder ~/Documents --name docs
-
-# Pair with a buddy
-buddydrive add-buddy --generate-code
-# Share the generated code with your buddy
-
-# On your buddy's machine
-buddydrive add-buddy --id <your-id> --code <pairing-code>
-
-# Start the daemon
-buddydrive start
-```
-
 ## Concepts
 
 ### Buddy Identity
@@ -171,158 +179,6 @@ buddydrive config set relay-region eu
 
 The public relay for TCP fallback is at `01.proxy.koyeb.app:19447`. The KV store for config recovery is at `https://buddydrive-tankfeud-ddaec82a.koyeb.app`. See [relay/README.md](relay/README.md) for relay details and self-hosting notes.
 
-## Usage
-
-### CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `buddydrive init` | Generate identity and create config |
-| `buddydrive init --with-recovery` | Generate identity and set up recovery in one step |
-| `buddydrive config` | Show current config |
-| `buddydrive config set <key> ...` | Update runtime configuration |
-| `buddydrive add-folder <path>` | Add folder to sync |
-| `buddydrive remove-folder <name>` | Remove folder |
-| `buddydrive list-folders` | List configured folders |
-| `buddydrive add-buddy` | Add or pair with a buddy |
-| `buddydrive remove-buddy <id>` | Remove buddy |
-| `buddydrive list-buddies` | List paired buddies |
-| `buddydrive connect <address>` | Manual connect placeholder |
-| `buddydrive start [--port <control-port>]` | Start sync daemon in the foreground |
-| `buddydrive stop` | Stop command placeholder |
-| `buddydrive status` | Show configured folders, buddies, and sync window |
-| `buddydrive logs` | Show recent logs |
-| `buddydrive setup-recovery` | Generate and verify a 12-word recovery phrase, then sync encrypted config to the relay |
-| `buddydrive recover` | Restore config from a 12-word recovery phrase and then resync folders |
-| `buddydrive sync-config` | Manually push encrypted config to the relay and configured buddies |
-| `buddydrive export-recovery` | Show stored recovery public key and master key metadata |
-
-### Example Session
-
-```bash
-$ buddydrive init
-Initializing BuddyDrive...
-
-Generated buddy name: purple-banana
-Buddy ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890
-Config created at: ~/.buddydrive/config.toml
-
-$ buddydrive add-folder ~/Documents --name docs
-Folder added: docs
-  Path: /home/user/Documents
-  Encrypted: true
-  Append-only: false
-
-$ buddydrive add-buddy --generate-code
-Generating pairing code...
-
-Share this with your buddy:
-  Your Buddy ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890
-  Your Name: purple-banana
-  Pairing Code: X7K9-M2P4
-
-$ buddydrive start
-Starting BuddyDrive daemon...
-Starting daemon...
-...
-BuddyDrive is running!
-Web GUI (localhost): http://127.0.0.1:17521/
-Web GUI (LAN): http://<your-ip>:17521/w/<secret>/
-
-$ buddydrive status
-Buddy: purple-banana (a1b2c3d4...)
-Peer ID: (run 'buddydrive start' to connect)
-Sync window: always
-
-Folders:
-  docs
-    Path: /home/user/Documents
-    Encrypted: true
-    Append-only: false
-```
-
-## Current CLI Limitations
-
-- `buddydrive start --daemon` currently prints a note and continues in the foreground.
-- `buddydrive start --port <control-port>` is supported even though it is not shown in `help`; it changes the local control API port.
-- `buddydrive stop` is not implemented yet; use your process manager or `Ctrl+C` for foreground runs.
-- `buddydrive status` does not yet query the running daemon for live connection state.
-- `buddydrive connect` does not perform a manual direct dial yet.
-- `buddydrive recover` currently restores configuration from the relay path; the buddy fallback prompt is present, but that fetch path is not implemented yet.
-- `buddydrive export-recovery` does not reveal the original 12-word phrase because the phrase is not stored locally.
-
-## How It Works
-
-### Peer Discovery
-
-1. `buddydrive init` creates a local buddy identity and config file
-2. `buddydrive start` creates the libp2p node for the running session
-3. The daemon publishes your address to the relay at `/discovery/<derived-key>`, where the key is derived from the pairing code
-4. The daemon looks up configured buddies using the same derived key via the relay KV-store (every 10 minutes)
-5. It connects directly when a public TCP address is available, or via relay fallback when configured
-6. Cached addresses in `state.db` are used for graceful degradation when the relay is unavailable
-
-### Recovery And Transport Security
-
-- Direct libp2p connections use Noise transport encryption
-- Recovery setup derives a 32-byte master key from the 12-word phrase
-- Config sync encrypts the serialized config blob with the master key before uploading it to the relay KV store
-- Normal sync restores missing files by comparing remote file lists with the local folder state
-
-### Sync Protocol
-
-1. Scans folder for changes (polling-based)
-2. Exchanges file lists with buddy
-3. Requests missing files
-4. Transfers chunks (64KB)
-5. Both sides update SQLite index
-
-### Web GUI
-
-The daemon serves a browser-based UI on the control port. It uses the same REST API as the CLI:
-
-- **Localhost access**: `http://127.0.0.1:<port>/` — no authentication needed
-- **LAN access**: `http://<ip>:<port>/w/<secret>/` — secret path derived from buddy UUID
-- Assets are embedded in the binary at compile time via `staticRead` — no external files needed
-- The web GUI provides folder management, buddy pairing, settings, and log viewing
-
-## Configuration
-
-Config file location: `~/.buddydrive/config.toml`
-
-```toml
-[buddy]
-name = "purple-banana"
-id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-
-[recovery]
-enabled = true
-public_key = "6J8h2qFvExampleRecoveryKey"
-master_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-
-[network]
-listen_port = 41721
-announce_addr = "/ip4/203.0.113.10/tcp/41721"
-relay_base_url = "https://buddydrive.net/relays"
-relay_region = "eu"
-sync_window_start = ""
-sync_window_end = ""
-bandwidth_limit_kbps = 0
-
-[[folders]]
-name = "docs"
-path = "/home/user/Documents"
-encrypted = true
-append_only = false
-buddies = ["buddy-id-here"]
-
-[[buddies]]
-id = "buddy-id-here"
-name = "cranky-wrench"
-pairing_code = "ABCD-EFGH"
-added_at = "2026-04-10T12:00:00Z"
-```
-
 ## Roadmap
 
 - [ ] Delta sync (rolling hash)
@@ -343,35 +199,3 @@ Contributions welcome. Please feel free to submit pull requests.
 ## License
 
 MIT
-
-## Debian/Ubuntu Package
-
-### Build the Package
-
-```bash
-# Install build dependencies
-sudo apt install -y build-essential g++ git libsodium-dev libsqlite3-dev liblz4-dev debhelper dpkg-dev help2man
-
-# Build the package
-make deb
-
-# The .deb file will be in the parent directory
-sudo dpkg -i ../buddydrive_*.deb
-```
-
-### Using systemd
-
-```bash
-# Check if service is enabled/running
-systemctl status buddydrive
-
-# Enable to start on boot
-sudo systemctl enable buddydrive
-
-# Start/stop the service
-sudo systemctl start buddydrive
-sudo systemctl stop buddydrive
-
-# View logs
-journalctl -u buddydrive -f
-```

@@ -25,8 +25,7 @@ suite "Config sync e2e":
     runWithStrictFallback:
       block testBlock:
         let kvUrl = getKvApiUrl()
-        let (_, recovery) = safeSetupRecovery()
-        let masterKey = hexToBytes(recovery.masterKey)
+        let (mnemonic, recovery) = safeSetupRecovery()
 
         var config = newAppConfig(newBuddyId("aaaaaaaa-1111-1111-1111-111111111111", "sync-test-buddy"))
         config.recovery = recovery
@@ -47,14 +46,17 @@ suite "Config sync e2e":
           if strictIntegration(): check synced
           else: echo "  skipping: sync failed"; break testBlock
 
-        let fetched = waitFor fetchConfigFromRelay(recovery.publicKeyB58, kvUrl)
-        if fetched.isNone:
-          if strictIntegration(): check fetched.isSome
-          else: echo "  skipping: fetch failed"; break testBlock
+        let syncedAgain = waitFor syncConfigToRelay(config, kvUrl)
+        if not syncedAgain:
+          if strictIntegration(): check syncedAgain
+          else: echo "  skipping: sync retry failed"; break testBlock
 
-        var recovered: AppConfig
-        {.cast(gcsafe).}:
-          recovered = deserializeConfigFromSync(fetched.get(), masterKey)
+        let recoveredOpt = waitFor attemptRecovery(mnemonic, kvUrl, "")
+        if recoveredOpt.isNone:
+          if strictIntegration(): check recoveredOpt.isSome
+          else: echo "  skipping: recovery failed"; break testBlock
+
+        let recovered = recoveredOpt.get()
 
         check recovered.buddy.uuid == config.buddy.uuid
         check recovered.buddy.name == config.buddy.name
@@ -86,36 +88,5 @@ suite "Config sync e2e":
         let wrongMnemonic = safeGenerateMnemonic()
         let recoveredOpt = waitFor attemptRecovery(wrongMnemonic, kvUrl, "")
         check recoveredOpt.isNone
-
-        discard waitFor deleteConfigFromRelay(recovery, kvUrl)
-
-  test "double sync works fine":
-    runWithStrictFallback:
-      block testBlock:
-        let kvUrl = getKvApiUrl()
-        let (_, recovery) = safeSetupRecovery()
-        var config = newAppConfig(newBuddyId("eeeeeeee-5555-5555-5555-555555555555", "idempotent-test"))
-        config.recovery = recovery
-
-        let synced1 = waitFor syncConfigToRelay(config, kvUrl)
-        if not synced1:
-          if strictIntegration(): check synced1
-          else: echo "  skipping: sync1 failed"; break testBlock
-
-        let synced2 = waitFor syncConfigToRelay(config, kvUrl)
-        if not synced2:
-          if strictIntegration(): check synced2
-          else: echo "  skipping: sync2 failed"; break testBlock
-
-        let fetched = waitFor fetchConfigFromRelay(recovery.publicKeyB58, kvUrl)
-        if fetched.isNone:
-          if strictIntegration(): check fetched.isSome
-          else: echo "  skipping: fetch failed"; break testBlock
-
-        let masterKey = hexToBytes(recovery.masterKey)
-        var recovered: AppConfig
-        {.cast(gcsafe).}:
-          recovered = deserializeConfigFromSync(fetched.get(), masterKey)
-        check recovered.buddy.uuid == config.buddy.uuid
 
         discard waitFor deleteConfigFromRelay(recovery, kvUrl)

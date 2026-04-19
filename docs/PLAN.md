@@ -1,790 +1,501 @@
-# BuddyDrive - P2P Encrypted Folder Sync
+# BuddyDrive Development Plan
 
-## Overview
+Project plan, architecture decisions, implementation history, and remaining work. For user-facing documentation see [MANUAL.md](MANUAL.md) and [TUTORIAL.md](TUTORIAL.md).
 
-A CLI-based P2P encrypted folder sync tool in Nim that allows syncing folders with 1-2 buddies across the internet, bypassing NATs and firewalls.
+## Project Goal
 
-## Key Features
+Build BuddyDrive — a P2P encrypted folder sync tool in Nim that syncs folders with 1-2 buddies across the internet, bypassing NATs and firewalls. Also build BuddyDrive Relay — a TCP relay server and KV store for when direct P2P connections fail.
 
-- **P2P Networking**: libp2p with KV-store relay discovery, NAT traversal (hole punching), relay fallback
-- **Encryption**: libsodium (XChaCha20-Poly1305) for file contents AND filenames
-- **Sync**: Full file sync with polling-based scanning (MVP), delta sync later
-- **Discovery**: Relay KV-store with HMAC-authenticated records, keys derived from pairing codes
-- **Config**: `~/.buddydrive/` directory
-- **Index**: SQLite for file metadata tracking
-- **CLI**: Subcommand-based interface
+## Design Decisions
 
----
+- **CLI-first, GUI later** — direct GTK4 (not Owlkettle) for the desktop GUI
+- **libp2p** for P2P networking (direct transport, NAT traversal)
+- **libsodium** for encryption (XChaCha20-Poly1305)
+- **KV-store relay discovery** — replaced DHT-based discovery (DHT was unreliable)
+- **Pairing code reused as relay token** — auto-generated XXXX-XXXX format
+- **BIP39 12-word mnemonic** — the single recovery secret
+- **Asymmetric master key** from mnemonic — stored in plaintext in config.toml
+- **Config encrypted** with master key before syncing to relay and buddies
+- **Relay KV store** uses public key (Base58) as lookup key
+- **Recovery only needs the 12 words** — no need to remember a buddy ID + pairing code
+- **Direct-only connectivity preferred** — relay fallback is secondary
+- **Automatic UPnP** — users should not have to manually configure routers
+- **LZ4 compression** — for file chunks when it reduces size
+- **Region-based relay selection** — user chooses region, both buddies hash token to pick same relay
 
-## Project Structure
+## Key Discoveries
 
-```
-buddydrive/
-├── buddydrive.nimble
-├── config.nims
-├── src/
-│   ├── buddydrive.nim              # Main entry point
-│   ├── buddydrive_gui.nim          # GTK4 GUI entry point
-│   └── buddydrive/
-│       ├── cli.nim                  # CLI parsing
-│       ├── config.nim              # Config read/write
-│       ├── crypto.nim              # Encryption (libsodium)
-│       ├── types.nim               # Shared types
-│       ├── logutils.nim            # Logging setup
-│       ├── recovery.nim            # BIP39 mnemonic, key derivation, config encrypt/decrypt
-│       ├── control.nim             # REST API control server
-│       ├── control_web.nim         # Web GUI serving
-│       ├── daemon.nim              # Background sync daemon
-│       ├── nat.nim                 # NAT traversal (UPnP)
-│       ├── sync/
-│       │   ├── scanner.nim         # Polling file scanner
-│       │   ├── index.nim           # SQLite file index
-│       │   ├── transfer.nim        # File transfer
-│       │   ├── session.nim         # Sync sessions
-│       │   ├── policy.nim          # Sync policy
-│       │   └── config_sync.nim     # Config sync to relay/buddies, recovery logic
-│       ├── p2p/
-│       │   ├── node.nim            # libp2p node
-│       │   ├── discovery.nim       # KV-store relay discovery
-│       │   ├── protocol.nim       # BuddyDrive protocol
-│       │   ├── pairing.nim        # Buddy pairing handshake
-│       │   ├── messages.nim        # Protocol messages
-│       │   ├── rawrelay.nim        # Relay client for NAT fallback
-│       │   ├── synchandler.nim    # Sync handler
-│       └── syncmanager.nim        # Sync manager
-├── tests/
-│   ├── testutils.nim              # Shared test utilities
-│   ├── unit/                      # Unit tests (testament)
-│   │   ├── config/               # Config tests
-│   │   ├── config_sync/          # Config sync tests
-│   │   ├── control/              # Control API tests
-│   │   ├── control_web/          # Web control tests
-│   │   ├── crypto/               # Crypto tests
-│   │   ├── index/                # File index tests
-│   │   ├── messages/             # Protocol message tests
-│   │   ├── pairing/              # Pairing state tests
-│   │   ├── policy/               # Sync policy tests
-│   │   ├── rawrelay/             # Relay helper tests
-│   │   ├── recovery/             # Recovery tests
-│   │   ├── scanner/              # Scanner + crash safety tests
-│   │   └── types/                # Core type tests
-│   └── integration/              # Integration tests (testament)
-│       ├── test_cli_flows.nim
-│       ├── test_config_sync_e2e.nim
-│       ├── test_kv_api.nim
-│       ├── test_pairing.nim
-│       ├── test_relay_fallback.nim
-│       ├── test_relay_file_sync.nim
-│       └── test_relay_server.nim
-├── wordlists/
-│   ├── adjectives.txt
-│   ├── nouns.txt
-│   └── bip39_english.txt
-├── relay/
-│   └── src/
-│       ├── relay.nim              # TCP relay server
-│       ├── kvstore.nim           # TiDB MySQL KV store
-│       └── kvstore_api.nim       # KV HTTP API
-└── README.md
-```
+- **CGNAT is common** — ISP-level NAT prevents UPnP from getting public IPs (100.64.0.0/10 range)
+- **Koyeb TCP Proxy** — not suitable for multi-instance relay due to lack of session affinity
+- **`fmReadWrite` truncates** — use `fmReadWriteExisting` for subsequent chunks
+- **`reversed()` returns `seq[char]`** — base58 encoding needed manual reversal
+- **`crypto_generichash` returns `seq[byte]`** — not `string`, requires explicit `byte()` casts
+- **Chronos async enforces GC-safety** — `parsetoml.parseFile` must be wrapped with `{.cast(gcsafe).}:`
+- **Chronos async enforces exception tracking** — calls that can raise `SodiumError` must be wrapped in `try/except`
+- **`curly` requires `--mm:arc/orc` and `--threads:on`** — timeout is per-request, not on client
+- **Nim's `std/hashes.hash` is 64-bit non-cryptographic** — not suitable for cross-machine comparison; replaced with crypto_generichash streaming
+
+## Implementation History
+
+### Phase 1: Core Infrastructure — COMPLETE
+
+- Project structure, nimble package, config.nims
+- CLI framework with subcommands
+- TOML config read/write with atomic writes
+- Name generation, UUID generation, pairing code generation
+
+### Phase 2: libp2p Networking — COMPLETE
+
+- libp2p node creation with TCP transport, Noise security, Yamux multiplexer
+- KV-store relay discovery with HMAC authentication (replaced DHT)
+- Direct peer connection tested
+
+### Phase 3: Buddy Pairing — COMPLETE
+
+- Pairing handshake implemented
+- Buddy verification against config
+- BuddyConnection tracking in daemon
+
+### Phase 4: File Sync (v1 — to be replaced) — COMPLETE
+
+- File scanner with change detection (polling-based)
+- SQLite file index
+- Chunk-based file transfer (64KB)
+- Session-based sync coordination
+- LZ4 compression
+
+### Phase 5: Encryption — COMPLETE
+
+- libsodium secretbox for content
+- Password-based key derivation
+- Encrypted filename support (exists in crypto.nim but not wired)
+
+### Phase 6: Debian Packaging — COMPLETE
+
+### Phase 7: Relay Server — COMPLETE
+
+### Phase 8: Recovery System — COMPLETE
+
+### Phase 9: Crash Safety — PARTIALLY COMPLETE
+
+- [DONE] Atomic writes: temp file (`.buddytmp`) + flushFile + closeFile + moveFile
+- [DONE] Startup cleanup of leftover `.buddytmp` files
+- [DONE] flushAndClose with test-only failure mode
+
+### Phase 10: Discovery Migration — COMPLETE
 
 ---
 
-## CLI Commands
+## Current Sync Model — Problems
 
-```bash
-buddydrive init                          # Generate identity, create config
-buddydrive config                        # Show current config
-buddydrive add-folder <path> [options]   # Add folder to sync
-buddydrive remove-folder <name>          # Remove folder
-buddydrive list-folders                  # List configured folders
-buddydrive add-buddy [options]           # Add/pair with a buddy
-buddydrive remove-buddy <id>             # Remove buddy
-buddydrive list-buddies                   # List paired buddies
-buddydrive start [options]               # Start sync daemon
-buddydrive stop                          # Stop daemon
-buddydrive status                        # Show sync status
-buddydrive logs                          # Show recent logs
-```
+The existing sync implementation has fundamental issues that require a full replacement:
 
-### Examples
+1. **No encryption at rest** — `FolderConfig.encrypted` is stored but not wired into the transfer path. `encryptedPath` is always set to `path`. Files are stored plaintext on the buddy's machine.
 
-```bash
-# Initialize
-$ buddydrive init
-Generated buddy name: purple-banana
-Buddy ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890
-Config created at: ~/.buddydrive/config.toml
+2. **Broken hash function** — `scanner.nim:hashFile` uses Nim's `std/hashes.hash` (64-bit, non-cryptographic, reads entire file into memory). Not suitable for cross-machine comparison.
 
-# Add a folder
-$ buddydrive add-folder ~/Documents --name docs --encrypted
-Folder added: docs
-  Path: /home/user/Documents
-  Encrypted: yes
+3. **No move detection** — A renamed file appears as delete + add, causing a full re-upload.
 
-# Pair with a buddy
-$ buddydrive add-buddy --generate-code
-Share this with your buddy:
-  Buddy ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890
-  Pairing Code: X7K9-M2P4
+4. **No delete propagation** — `msgFileDelete` exists in the protocol but is never sent or handled.
 
-$ buddydrive add-buddy --id b2c3d4e5-f6a7-8901-bcde-f23456789012 --code X7K9-M2P4
-Enter password: ****
-Buddy paired: cranky-wrench
+5. **Hash not used in comparison** — `shouldSyncRemoteFile` only compares mtime and size. A corrupt file with the same size/mtime won't be re-synced.
 
-# Start syncing
-$ buddydrive start
-Starting BuddyDrive daemon...
-Published discovery record to relay
-Connected to buddy: cranky-wrench
-Watching 1 folder...
+6. **Global sync window** — `syncWindowStart/End` applies to all buddies equally. No per-buddy scheduling.
 
-# Check status
-$ buddydrive status
-Buddy: purple-banana
-Status: Online
-Folders:
-  docs  /home/user/Documents  [synced]  2.3 GB
-```
+7. **Initiation problem** — Both sides try to connect independently. When one side is behind CGNAT, the public side fails to dial and falls back to relay unnecessarily, even though the CGNAT side can dial out directly.
+
+8. **Incoming connections rejected during closed window** — `handleIncomingConnection` rejects sync when the local window is closed, even though the remote side wants to push.
 
 ---
 
-## Implementation Phases
+## New Sync Model — Design
 
-### Phase 1: Core Infrastructure (Days 1-2)
+### Core Principle
 
-1. **Project Setup**
-   - Create nimble package
-   - Set up config.nims
-   - Create directory structure
+BuddyDrive is primarily a **backup tool**: my files are stored encrypted on my buddy's machine. My buddy is lending me disk space, not co-authoring files. The buddy cannot read my filenames or content. A secondary "sharing" mode (encrypted=false) stores files plaintext for collaboration.
 
-2. **Types (`src/buddydrive/types.nim`)**
-   - Core type definitions
-   - BuddyId, PeerInfo, FolderConfig, AppConfig, FileInfo, FileChange
+### Folder Key Derivation
 
-3. **Logging (`src/buddydrive/logging.nim`)**
-   - Standard Nim logging wrapper
-   - File and console output
-
-4. **Config (`src/buddydrive/config.nim`)**
-   - TOML config at `~/.buddydrive/config.toml`
-   - Atomic writes
-   - loadConfig, saveConfig, initConfig
-
-5. **CLI (`src/buddydrive/cli.nim`)**
-   - Subcommand parsing
-   - Handle init, config commands
-
-6. **Wordlists**
-   - Adjectives and nouns for name generation
-
-**Deliverable**: `buddydrive init` and `buddydrive config` commands work
-
----
-
-### Phase 2: libp2p Networking (Days 3-5)
-
-1. **Node Setup (`src/buddydrive/p2p/node.nim`)**
-   - TCP transport
-   - Noise secure channel
-   - Yamux multiplexer
-
-2. **NAT Traversal**
-   - AutoNAT (detect NAT type)
-   - DCUTR (hole punching)
-   - Relay client (fallback)
-
-3. **Discovery (`src/buddydrive/p2p/discovery.nim`)**
-   - Relay KV-store publish/lookup via `/discovery/<derived-key>`
-   - Key derived from pairing code using `crypto_generichash`
-   - HMAC authentication on PUT/DELETE
-   - Periodic re-publish every 4h (TTL = 6h)
-
-**Deliverable**: Two instances can discover each other via relay KV-store
-
----
-
-### Phase 3: Buddy Pairing (Days 6-7)
-
-1. **Pairing Protocol**
-   - Generate pairing code (shared out-of-band)
-   - Pairing code used to derive relay discovery key and HMAC auth key
-   - Exchange public keys during handshake
-
-2. **Key Derivation**
-   - Argon2id for password → encryption key
-   - Per-buddy shared secrets
-
-3. **Authentication**
-   - Challenge-response with password
-
-**Deliverable**: Buddies can pair using ID + code + password
-
----
-
-### Phase 4: File Sync Protocol (Days 8-11)
-
-1. **File Index (`src/buddydrive/sync/index.nim`)**
-   - SQLite database
-   - Track file metadata (path, size, mtime, hash)
-   - Sync log
-
-2. **Scanner (`src/buddydrive/sync/scanner.nim`)**
-   - Polling-based (every 5s)
-   - Detect added, modified, deleted files
-   - Compute hashes for changed files
-
-3. **Encryption (`src/buddydrive/crypto.nim`)**
-   - XChaCha20-Poly1305 for file content
-   - Encrypted filenames (base64 encoded)
-   - Per-folder encryption keys
-
-4. **Protocol Messages (`src/buddydrive/p2p/messages.nim`)**
-   - MsgFileList, MsgFileRequest, MsgFileData, MsgFileAck, MsgFileDelete
-
-5. **Sync Protocol (`src/buddydrive/p2p/protocol.nim`)**
-   - Exchange file lists
-   - Request missing files
-   - Transfer encrypted chunks
-
-6. **Transfer (`src/buddydrive/sync/transfer.nim`)**
-   - Chunked transfer (64KB)
-   - Resume support
-
-**Deliverable**: Files sync between two buddies
-
----
-
-### Phase 5: Status & Monitoring (Days 12-13)
-
-1. **Status Command**
-   - Show buddy connection status
-   - Show folder sync progress
-   - Show recent activity
-
-2. **Daemon Mode**
-   - Fork to background
-   - PID file
-   - Signal handling (SIGTERM, SIGHUP)
-
-3. **Logging**
-   - Activity log
-   - Error tracking
-
-**Deliverable**: Can monitor sync progress, daemon runs in background
-
----
-
-### Phase 6: Testing & Polish (Days 14-15)
-
-1. **Test Harness**
-   - Local sync test (two instances)
-   - NAT traversal simulation
-   - Conflict scenarios
-
-2. **Unit Tests**
-   - Crypto tests
-   - Config tests
-   - Protocol tests
-
-3. **Documentation**
-   - README with usage
-   - Build instructions
-
-**Deliverable**: Stable, tested CLI sync tool
-
----
-
-## Technical Details
-
-### Peer Discovery Flow
+Each folder gets a 32-byte key derived deterministically from the master key + folder name:
 
 ```
-1. App generates: UUID + Ed25519 keypair
-2. Name derived: adjective-noun (e.g., "purple-banana")
-3. On startup: publish address to KV-store under key derived from pairing code
-4. Search for buddy: lookup buddy's address record in KV-store
-5. Connect via:
-   a. Direct (if public IP or UPnP succeeded)
-   b. Relay fallback (if relay_region configured)
+folder_key = crypto_generichash(masterKey + "/folder/" + folderName, 32)
 ```
 
-### Pairing Protocol
+For folders without recovery enabled (no master key), a random key is generated on `add-folder` and stored in config.toml. Both approaches allow the owner to derive the key later for restore.
+
+### Path Encryption
+
+Every relative path (e.g., `photos/2024/vacation.jpg`) is encrypted to an opaque string before being sent to the buddy. The buddy stores files on disk using the encrypted path as the filename. The owner can reverse this because they have the folder key.
+
+The existing `encryptFilename`/`decryptFilename` in `crypto.nim` does this but has a problem: each call generates a random nonce, so the same filename encrypts differently each time. This makes move detection impossible — you can't tell that a path changed.
+
+**Deterministic path encryption**: derive the nonce from the path itself so the same path always encrypts to the same ciphertext:
 
 ```
-Alice generates: pairing_code = random_6_chars()
-Alice shares pairing_code out-of-band with Bob
-
-Bob: add-buddy --id <alice-id> --code <code>
-Bob stores the pairing code for that buddy relationship
-
-On daemon start:
-Alice publishes: PUT /discovery/<derived_key> with HMAC
-  where derived_key = base58(blake2b(pairing_code + "/discovery"))
-Bob looks up: GET /discovery/<derived_key> (same derivation from his pairing code with Alice)
-Bob gets: Alice's peer ID, addresses, relay region
-Bob connects to Alice (direct or via relay)
-Alice validates handshake
-Both store buddy info
+nonce = crypto_generichash(folderKey + "/path/" + plaintextPath, NonceSize)
+encryptedPath = base64(crypto_secretbox_easy(folderKey, plaintextPath, nonce))
 ```
 
-### Sync Protocol
+This makes path comparison possible: same plaintext path → same encrypted path. Moved file → new encrypted path. The storage side can detect a rename by matching content hashes across encrypted paths.
 
-```
-1. Alice scans folder, detects changes
-2. Alice sends MsgFileList(files, hashes) to Bob
-3. Bob compares with his index
-4. Bob requests missing files: MsgFileRequest(path)
-5. Alice sends encrypted chunks: MsgFileData(offset, data)
-6. Bob decrypts, writes, sends MsgFileAck
-7. Both update index
-```
+### Content Hash — Streaming
 
-### Encryption Model
+Replace `hashFile` with a streaming blake2b hash that never loads the full file into memory:
 
 ```nim
-# Per-folder encryption key (derived from password + salt)
-folderKey = argon2id(password, salt, iterations=3, memory=64KB)
-
-# Encrypt file content
-encryptedData = xChaCha20Poly1305(data, folderKey, random_nonce)
-
-# Encrypt filename
-encryptedName = base64(xChaCha20Poly1305(originalPath, folderKey, nonce))
-
-# File on disk: <nonce><encrypted_content><auth_tag>
-# Filename: base64(nonce || encrypt(originalName))
+proc hashFileStream(path: string): array[32, byte] =
+  let state = crypto_generichash_init(key = "", hashlen = 32)
+  let f = open(path, fmRead)
+  var buf = newSeq[byte](64 * 1024)
+  while true:
+    let n = f.readBytes(buf, 0, buf.len)
+    if n == 0: break
+    crypto_generichash_update(state, buf[0 ..< n])
+  f.close()
+  crypto_generichash_final(state, 32)
 ```
 
-### File Index Schema
+This hashes files of any size (movies, databases) in 64KB chunks.
+
+### Chunk Encryption
+
+During transfer, each chunk is encrypted with the folder key. The nonce is derived deterministically from the encrypted path + chunk offset:
+
+```
+nonce = crypto_generichash(folderKey + "/chunk/" + encryptedPath + "/" + offset, NonceSize)
+encryptedChunk = crypto_secretbox_easy(folderKey, chunkData, nonce)
+```
+
+Deterministic nonces mean both sides can encrypt/decrypt without exchanging nonces per chunk. The nonce is unique per (file, offset) pair.
+
+### Owner Index (A) — Local SQLite Cache
+
+The owner's index is a **performance optimization**, not a source of truth. After a full restore it gets rebuilt by scanning local files.
 
 ```sql
 CREATE TABLE files (
   id INTEGER PRIMARY KEY,
-  folder_name TEXT NOT NULL,
-  path TEXT NOT NULL,
-  encrypted_path TEXT,
-  size INTEGER,
-  mtime INTEGER,
-  hash BLOB,
-  last_sync INTEGER,
-  UNIQUE(folder_name, path)
+  path TEXT NOT NULL,              -- plaintext relative path
+  encrypted_path TEXT NOT NULL,    -- encrypted + base64 relative path
+  content_hash BLOB NOT NULL,     -- blake2b-256 of plaintext
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  synced INTEGER DEFAULT 0,
+  last_sync INTEGER DEFAULT 0,
+  UNIQUE(path)
 );
+CREATE INDEX idx_content_hash ON files(content_hash);
+CREATE INDEX idx_encrypted_path ON files(encrypted_path);
+```
 
-CREATE TABLE sync_log (
+### Storage Index (B) — Local SQLite Cache
+
+The storage buddy's index is also a cache. It tracks what encrypted blobs B has so it can answer "I already have this content" without re-scanning disk.
+
+```sql
+CREATE TABLE files (
   id INTEGER PRIMARY KEY,
-  timestamp INTEGER,
-  folder_name TEXT,
-  file_path TEXT,
-  action TEXT,  -- 'upload', 'download', 'delete'
-  buddy_id TEXT,
-  bytes_transferred INTEGER
+  encrypted_path TEXT NOT NULL,   -- opaque path on disk
+  content_hash BLOB NOT NULL,     -- same hash as owner (of plaintext, or of ciphertext — see below)
+  size INTEGER NOT NULL,
+  owner_buddy TEXT NOT NULL,      -- which buddy owns this
+  UNIQUE(encrypted_path, owner_buddy)
 );
+CREATE INDEX idx_content_hash ON files(content_hash, owner_buddy);
+```
 
-CREATE TABLE buddies (
-  id TEXT PRIMARY KEY,
-  name TEXT,
-  public_key BLOB,
-  added_at INTEGER
+**Content hash on B's side**: B cannot compute the plaintext hash because B doesn't have the key. Two options:
+
+1. **A sends the hash** — A includes content_hash in the file list. B trusts A. Simple but B can't verify.
+2. **B hashes ciphertext** — B computes hash of the encrypted blob on disk. A sends the ciphertext hash. B can verify independently.
+
+Option 2 is better: B computes `hash(encrypted_blob_on_disk)`. A computes the same hash before sending. This lets B verify data integrity without knowing the content. The owner's index stores both `content_hash` (plaintext, for change detection) and `ciphertext_hash` (for sync comparison with B).
+
+Updated owner schema:
+
+```sql
+CREATE TABLE files (
+  id INTEGER PRIMARY KEY,
+  path TEXT NOT NULL,
+  encrypted_path TEXT NOT NULL,
+  content_hash BLOB NOT NULL,      -- blake2b-256 of plaintext (for local change detection)
+  ciphertext_hash BLOB NOT NULL,   -- blake2b-256 of encrypted blob (for sync with B)
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  synced INTEGER DEFAULT 0,
+  last_sync INTEGER DEFAULT 0,
+  UNIQUE(path)
 );
 ```
 
----
+### Change Detection — Owner Scan
 
-## Config File Format
+On each scan, the owner:
+
+1. Walks the folder directory
+2. For each file, computes `content_hash` (streaming blake2b) and `encrypted_path` (deterministic encryption)
+3. Compares against index:
+   - New path not in index → **added**
+   - Same path, different `content_hash` → **modified**
+   - Path in index but not on disk → **deleted**
+   - Same `content_hash` at new path, old path gone → **moved** (just a rename, no re-transfer)
+
+For modified files, also compute the new `ciphertext_hash` after encrypting.
+
+### Sync Protocol — Session Flow
+
+**Initiator** (deterministically chosen, see below) connects to the other buddy. Both directions of sync happen over the single connection.
+
+#### Step 1: Exchange File Lists
+
+Both sides send their file lists for shared folders. The format differs by role:
+
+**Owner → Storage**: list of `(encrypted_path, ciphertext_hash, size)` per folder
+**Storage → Owner**: list of `(encrypted_path, ciphertext_hash, size)` per folder
+
+The owner sends encrypted paths and ciphertext hashes — the storage side never sees plaintext paths or content hashes.
+
+For unencrypted (sharing) folders, `encrypted_path == path` and no encryption is applied.
+
+#### Step 2: Compute Deltas
+
+Each side compares its list against the other's:
+
+**Owner side** (what A needs to send to B):
+- B missing an `encrypted_path` that A has → upload
+- Same `encrypted_path`, different `ciphertext_hash` → re-upload (modified)
+- B has `encrypted_path` that A no longer has → B deletes it
+- B has `ciphertext_hash` at old `encrypted_path`, A has same hash at new path → move (B renames on disk)
+
+**Storage side** (what B needs to send to A):
+- A missing an `encrypted_path` that B has → A requests (restore scenario)
+- Same `encrypted_path`, different `ciphertext_hash` → A requests (file was modified on A's other buddy? edge case)
+
+For the primary backup use case, the flow is typically one-directional: A pushes to B. But the protocol is symmetric — restore is just A requesting files from B.
+
+#### Step 3: Transfer
+
+- **Uploads**: owner encrypts chunks on-the-fly during send. B stores the encrypted chunks directly to disk.
+- **Downloads** (restore): B sends encrypted chunks. A decrypts on-the-fly during write.
+- **Moves**: B renames the file on disk. No data transfer.
+- **Deletes**: B removes the file on disk.
+
+#### Step 4: Update Indexes
+
+Both sides update their SQLite indexes after successful transfer.
+
+### Deterministic Initiator Selection
+
+Both sides must agree on who initiates the connection. The rule:
+
+```
+1. If only one side has a public address: that side initiates
+2. If both have public addresses: lower buddy UUID initiates
+3. If neither has public addresses: relay fallback, lower UUID initiates
+```
+
+Both sides can compute this from the discovery records they see for each other. The discovery record already includes the peer's advertised addresses. A side knows its own reachability (did UPnP succeed? is announce_addr set?).
+
+**Discovery record extension**: add a `has_public_address: bool` field so each side can determine the other's reachability without examining the actual address list (which they may not have if the relay is down).
+
+```json
+{
+  "peerId": "...",
+  "addresses": ["..."],
+  "relayRegion": "eu",
+  "hasPublicAddress": true,
+  "syncTime": "03:00"
+}
+```
+
+### Per-Buddy Sync Time
+
+Replace the global `sync_window_start/end` with a per-buddy `sync_time` field. This is the time of day when the initiator should attempt to connect:
 
 ```toml
-# ~/.buddydrive/config.toml
-
-[buddy]
-name = "purple-banana"
-id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-public_key = "..."  # base64
-
-[[folders]]
-name = "docs"
-path = "/home/user/Documents"
-encrypted = true
-buddies = ["b2c3d4e5-f6a7-8901-bcde-f23456789012"]
-
 [[buddies]]
-id = "b2c3d4e5-f6a7-8901-bcde-f23456789012"
+id = "abc-123"
 name = "cranky-wrench"
-public_key = "..."
-added_at = 2026-04-09T10:30:00Z
+pairing_code = "ABCD-EFGH"
+sync_time = "03:00"    # connect at 03:00 daily
+added_at = "2026-04-10T12:00:00Z"
 ```
+
+The initiator connects at the scheduled `sync_time`. The other side **always accepts incoming syncs** — the sync time only controls when to *initiate*, not when to *accept*. This means:
+
+- If A is behind CGNAT and B is public, B initiates at B's configured `sync_time` for A
+- A accepts the incoming connection even if it's outside A's own `sync_time`
+- Both directions of sync happen over that one connection
+
+The `sync_time` field can also be empty (default: sync whenever the daemon is running, like the current "always" behavior).
+
+### Always Accept Incoming
+
+Remove the sync window check from `handleIncomingConnection`. The sync time controls initiation only:
+
+- `handleIncomingConnection`: accept all incoming from known buddies
+- `connectToBuddies` loop: only dial at the scheduled `sync_time` for that buddy
+
+If both buddies have `sync_time = "03:00"`, both try to connect at 03:00. One wins (deterministic initiator rule), the other's incoming connection handler accepts the winner's dial. The loser's outgoing attempt is skipped because `buddyConnections` already has an entry.
+
+### CGNAT Connection Flow
+
+Buddy A (CGNAT, no public address) and Buddy B (public):
+
+1. Discovery: A publishes private addresses + `hasPublicAddress: false`. B publishes public address + `hasPublicAddress: true`.
+2. Both sides compute initiator: B has public address, B is the initiator. But wait — B can't dial A.
+3. **Exception**: when only one side has a public address, the *other* side initiates (the CGNAT side dials out, because only the CGNAT side can reach the public side). Revised rule:
+
+```
+1. If one side has public address and the other doesn't: the side WITHOUT public address initiates
+   (it dials the public side directly; the public side can't dial back)
+2. If both have public addresses: lower buddy UUID initiates
+3. If neither has public addresses: relay fallback, lower UUID initiates
+```
+
+This ensures the CGNAT side always initiates the direct connection. The public side accepts. Sync flows both directions over that connection.
+
+### Restore Flow
+
+On a replacement machine with only the 12-word phrase:
+
+1. `buddydrive recover` → derive master key → fetch encrypted config from relay → write config.toml
+2. Config gives: folder keys, buddy IDs, pairing codes
+3. A connects to B (initiator rule applies)
+4. A sends `list_paths` request for each folder
+5. B responds with list of `(encrypted_path, size)` for A's files
+6. A decrypts each `encrypted_path` → plaintext path
+7. A checks local filesystem: for each path that doesn't exist locally, request the file from B
+8. A decrypts received chunks on-the-fly, writes to plaintext path
+9. A rebuilds local index by scanning the restored files
+
+No index blob needed. B's filesystem + A's folder key = complete restore.
+
+### Unencrypted Sharing Mode
+
+When `FolderConfig.encrypted = false`:
+- `encrypted_path == path` (no encryption)
+- Content is transferred plaintext
+- B can browse and read the files
+- Same sync protocol, just skip the encrypt/decrypt steps
+- `content_hash` and `ciphertext_hash` are the same (hash of plaintext)
+
+This is a secondary use case for active collaboration. The primary use case is always encrypted backup.
 
 ---
 
-## Dependencies
+## Implementation Plan
 
-```nimble
-version = "0.1.0"
-requires "nim >= 2.0.16"
-requires "libp2p >= 1.15"
-requires "libsodium >= 0.7"
-requires "parsetoml"
-requires "toml-serialization"
-requires "result"
-requires "sqlite3"
-```
+### Phase A: Crypto Foundation
 
----
+**Files**: `crypto.nim`, `types.nim`, `config.nim`
 
-## Conflict Resolution
+1. **Streaming content hash** — add `hashFileStream(path: string): array[32, byte]` using `crypto_generichash_init/update/final`
+2. **Ciphertext hash** — add `hashBytes(data: openArray[byte]): array[32, byte]` using `crypto_generichash`
+3. **Deterministic path encryption** — add `encryptPathDeterministic(plainPath, folderKey): string` and `decryptPathDeterministic(encPath, folderKey): string` using derived nonce
+4. **Chunk encryption** — add `encryptChunk(data, folderKey, encPath, offset): seq[byte]` and `decryptChunk(data, folderKey, encPath, offset): seq[byte]` using derived nonce
+5. **Folder key derivation** — add `deriveFolderKey(masterKey, folderName): string`
+6. **Add folder key to config** — `FolderConfig` gets a `folderKey` field. If recovery is enabled, derive from master key. Otherwise, generate random on `add-folder` and store in config.toml.
+7. **Remove old `hashFile`** — delete the broken `std/hashes`-based function from scanner.nim
 
-1. Compare modification times
-2. Later timestamp wins
-3. Losing version saved as: `file.conflict.YYYYMMDD-HHMMSS`
-4. User notified in logs
+### Phase B: Index Redesign
 
----
+**Files**: `index.nim`, `types.nim`
 
-## Error Handling
+1. **New owner schema** — add `ciphertext_hash` column, add `idx_content_hash` and `idx_encrypted_path` indexes
+2. **New storage schema** — new table with `encrypted_path`, `ciphertext_hash`, `size`, `owner_buddy`
+3. **Index API** — add methods: `getFileByHash`, `addStorageFile`, `getStorageFile`, `listByOwner`
+4. **Migration** — handle existing index.db gracefully (version column or schema check)
 
-- Network errors: Auto-reconnect with exponential backoff
-- File access errors: Log and skip, retry later
-- Sync errors: Store in error log, manual review
+### Phase C: Scanner Rewrite
 
----
+**Files**: `scanner.nim`
 
-## Debian Packaging
+1. **Use streaming hash** — `scanFile` calls `hashFileStream` instead of `hashFile`
+2. **Compute encrypted_path** — `scanFile` also computes `encrypted_path` via `encryptPathDeterministic`
+3. **Compute ciphertext_hash** — after encrypting, hash the ciphertext (or compute during transfer)
+4. **Move detection** — `scanChanges` checks for same `content_hash` at a new path when the old path disappears
 
-BuddyDrive will be distributed as a `.deb` package for easy installation on Debian/Ubuntu systems.
+### Phase D: Sync Protocol Update
 
-### Package Structure
+**Files**: `messages.nim`, `protocol.nim`, `transfer.nim`, `session.nim`
 
-```
-buddydrive_0.1.0_amd64.deb
-├── DEBIAN/
-│   ├── control          # Package metadata
-│   ├── preinst          # Pre-install script
-│   ├── postinst         # Post-install script
-│   ├── prerm            # Pre-remove script
-│   └── postrm           # Post-remove script
-├── usr/
-│   └── bin/
-│       └── buddydrive   # Main executable
-├── etc/
-│   └── systemd/
-│       └── system/
-│           └── buddydrive.service  # Systemd service
-└── usr/
-    └── share/
-        └── doc/
-            └── buddydrive/
-                ├── README.md
-                └── LICENSE
-```
+1. **Update FileList message** — include `ciphertext_hash` in `FileEntry`
+2. **Add ListPaths message** — new request/response pair for restore (B lists its encrypted_paths for a folder)
+3. **Add MoveFile message** — tell B to rename an encrypted_path (includes old and new path, plus content_hash for verification)
+4. **Add DeleteFile message handling** — wire up the existing `msgFileDelete` to actually delete on B's side
+5. **Encrypt chunks on send** — `sendFileData` encrypts each chunk before sending
+6. **Decrypt chunks on receive** — `receiveFileData` decrypts each chunk after receiving
+7. **Session flow** — rewrite `syncBuddyFolders` to handle both push (backup) and pull (restore) with move/delete support
+8. **Unencrypted shortcut** — when `folder.encrypted == false`, skip encrypt/decrypt steps
 
-### Systemd Service
+### Phase E: Connection & Scheduling
 
-```ini
-# /etc/systemd/system/buddydrive.service
-[Unit]
-Description=BuddyDrive P2P Sync Service
-After=network.target
+**Files**: `daemon.nim`, `types.nim`, `config.nim`, `p2p/discovery.nim`
 
-[Service]
-Type=simple
-User=buddydrive
-Group=buddydrive
-ExecStart=/usr/bin/buddydrive start
-Restart=on-failure
-RestartSec=5
+1. **Per-buddy sync_time** — add `syncTime: string` to `BuddyInfo`, update config read/write, remove global `syncWindowStart/End`
+2. **Discovery record extension** — add `hasPublicAddress: bool` and `syncTime: string` to published record
+3. **Deterministic initiator** — add `shouldInitiate(myConfig, buddyRecord): bool` proc
+4. **Remove incoming rejection** — remove sync window check from `handleIncomingConnection`
+5. **Scheduled dialing** — `connectToBuddies` only dials a buddy when within that buddy's `sync_time` window (e.g., ±15 minutes of the configured time, or always if syncTime is empty)
+6. **Connection reuse** — before dialing, check `daemon.node.switch` for existing transport connections to the buddy's peer ID; open a stream on existing connection instead of new dial
+7. **Connection upgrade** — when an incoming direct connection arrives and a relay connection already exists for that buddy, replace relay with direct
 
-[Install]
-WantedBy=multi-user.target
-```
+### Phase F: Restore
 
-### Post-Install Actions
+**Files**: `cli.nim`, `daemon.nim`, `p2p/protocol.nim`, `p2p/messages.nim`
 
-1. Create `buddydrive` user/group
-2. Enable systemd service
-3. Create config directory at `/var/lib/buddydrive/`
+1. **ListPaths protocol** — A requests B to list all encrypted_paths for a folder; B responds with list
+2. **Restore flow in CLI** — after `buddydrive recover` restores config, `buddydrive start` detects missing local files and requests them from B
+3. **Index rebuild** — after restoring files, scan them to populate the owner index
 
-### Build Command
+### Phase G: Testing
 
-```bash
-# Build the .deb package
-dpkg-deb --build buddydrive_0.1.0_amd64
-```
+1. **Unit tests** — streaming hash, deterministic path encryption/decryption, chunk encryption/decryption, folder key derivation, move detection, initiator selection
+2. **Integration test** — full encrypted backup: A adds folder, syncs to B, verify B has encrypted files
+3. **Integration test** — restore: delete A's files, restart A, restore from B, verify files match
+4. **Integration test** — move detection: rename file on A, sync, verify B renames without re-upload
+5. **Integration test** — CGNAT simulation: one side with no public address, verify correct initiator selection and direct connection
+6. **Integration test** — mixed encrypted/unencrypted: two folders, one encrypted one shared, verify correct behavior for each
 
-### Installation
+### Implementation Order
 
-```bash
-sudo dpkg -i buddydrive_0.1.0_amd64.deb
-sudo systemctl enable buddydrive
-sudo systemctl start buddydrive
-```
+A → B → C → D → E → F → G
+
+Each phase builds on the previous. Phase A (crypto) has no dependencies and can start immediately. Phase E (connection changes) is mostly independent of B/C/D and could be done in parallel.
 
 ---
 
-## Future Enhancements (Post-MVP)
+## Test Coverage
 
-1. Delta sync (rolling hash)
-2. Owlkettle GUI
-3. System tray integration
-4. Auto-start on boot
-5. Package managers (deb, rpm, brew, chocolatey)
-6. Multiple buddies per folder
-7. Selective sync (ignore patterns)
-8. Bandwidth limiting
-9. Version history
-11. **Unencrypted folder option** — Allow setting a folder to not be encrypted (encryption remains the default)
-12. Can we simplify the info to be sent to buddy with only one item, like buddy nickname/token
-13. Improve crash-resilience, see file `Crash-Safety-During-File-Sync.md`
-    - [DONE] Atomic writes: temp file (`.buddytmp`) + best-effort fsync + rename
-    - [DONE] Startup cleanup of leftover `.buddytmp` files
-    - [DONE] Ignore `.buddytmp` files during scans
-    - [SKIPPED] Transfer resumption from saved offset for large files
-14. GUI/control port follow-up
-    - [TODO] Make the GTK GUI read the actual control API port from `~/.buddydrive/port`
-    - [TODO] Remove the hardcoded `127.0.0.1:17521` assumption from the GUI
----
+### Unit Tests (16 files)
 
-## Recovery System
+`tests/unit/*/*.nim` — run via `nimble test` or `nimble testUnit`:
 
-### Goal
+config, config_sync, control, control_web, crypto, discovery, geoip_ranges, index, messages, pairing, policy, rawrelay, recovery, scanner, transfer crash safety, types
 
-Add a recovery system to BuddyDrive that allows users to recover their configuration and files if their machine is lost/destroyed, using a BIP39 12-word mnemonic as the single recovery secret.
+### Integration Tests (7 files)
 
-### Design Decisions
+`tests/integration/*.nim` — run via `nimble test` or `nimble testIntegration`:
 
-- **Pairing code** reused as relay token (auto-generated XXXX-XXXX) — serves dual purpose: pairing confirmation + relay shared secret (`relayToken` renamed to `pairingCode`)
-- **BIP39 12-word mnemonic** — the single recovery secret; user must write it down and verify by typing back 3 random words during setup
-- **Asymmetric master key** (public + private) generated from mnemonic — stored in plaintext in config.toml (if attacker has machine access, they already have all files)
-- **Single master key for all folders** — no per-folder keys; buddies never decrypt files, they only store encrypted blobs
-- **Config is encrypted** with master key before syncing to relay and to all connected buddies for recovery
-- **Relay KV store** stores the encrypted config file with the **public key** (Base58) as the lookup key — optional for the user but **default is true**
-- **Recovery only needs the 12 words** — no need to remember a buddy ID + pairing code. The mnemonic regenerates the asymmetric key, fetches the encrypted config from relay, decrypts it, and sync restores all folders
-- **Buddy fallback**: if relay unavailable, recover from a buddy (need buddy ID + pairing code) — secondary path only
-- **No selective restore** — sync automatically recreates missing local files
-- **Recovery is opt-in** by default
-- **GTK GUI** should have a nice recovery dialog with word grid and verification
-- **Web GUI** serves recovery controls from the daemon's control server (browser-based, any device)
-- **Config sync** happens during sync window (nightly) if config changed, and also via manual `buddydrive sync-config`
-- **First config sync** should happen immediately after setup
-- **No signing** needed for relay config uploads
-- **No test recovery** during setup (redundant if verification step passes)
+CLI flows, KV API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
 
-### TiDB Connection
+### Tests To Add (Phase G)
 
-```
-Set via `TIDB_CONNECTION_STRING` environment variable (stored in Koyeb secrets)
-```
+- Streaming hash vs full-file hash comparison
+- Deterministic path encryption roundtrip
+- Chunk encryption roundtrip
+- Folder key derivation from master key
+- Move detection in scanner
+- Initiator selection (various reachability combinations)
+- Full encrypted backup + restore
+- Mixed encrypted/unencrypted folders
 
-Default KV API URL: `https://buddydrive-tankfeud-ddaec82a.koyeb.app`
-Default TCP relay: `01.proxy.koyeb.app:19447`
+## Public Relay
 
-### Recovery CLI Commands
-
-```bash
-buddydrive setup-recovery    # Generate mnemonic, verify, encrypt config, sync to relay
-buddydrive recover           # Enter mnemonic, fetch encrypted config from relay, decrypt, restore
-buddydrive sync-config       # Manually push encrypted config to relay
-buddydrive export-recovery   # Export recovery info (mnemonic, public key)
-```
-
-### Recovery Files
-
-| File | Purpose |
-|------|---------|
-| `src/buddydrive/recovery.nim` | BIP39 mnemonic, key derivation, config encryption |
-| `src/buddydrive/sync/config_sync.nim` | Config sync to relay/buddies, recovery logic |
-| `relay/src/kvstore.nim` | TiDB MySQL interface for config KV store |
-| `relay/src/kvstore_api.nim` | HTTP API for KV store (GET/PUT/DELETE /kv/<pubkey>) |
-| `wordlists/bip39_english.txt` | BIP39 English wordlist (2048 words) |
-
-### Build/Lib Discoveries
-
-- `curly` HTTP library requires `--mm:arc or --mm:orc` and `--threads:on`
-- `curly` timeout is passed as a parameter to get/put/post/delete, not set on the client object
-- `curly` delete signature: `delete(curl: Curly, url: string, headers: sink HttpHeaders = emptyHttpHeaders(), timeout = 60): Response`
-- `curly` put signature: `put(curl: Curly, url: string, headers: sink HttpHeaders = emptyHttpHeaders(), body: openarray[char] = "".toOpenArray(0, -1), timeout = 60): Response`
-- `libsodium`'s `crypto_pwhash` signature: `crypto_pwhash(passwd: string, salt: openArray[byte], outlen: Natural, alg = phaDefault, opslimit = ..., memlimit = ...): seq[byte]`
-- `libsodium`'s `crypto_generichash` signature: `crypto_generichash(data: string, hashlen: int = ..., key: string = ""): seq[byte]` — NOT `crypto_generichash_blake2b`
-- `crypto_generichash` returns `seq[byte]` not `string`, so assignment to `array[32, byte]` requires explicit `byte()` casts
-- Nim's `reversed()` returns `seq[char]` not `string`, so base58 encoding needed manual reversal
-- Chronos async procs have strict exception tracking — calls to functions that can raise `SodiumError` must be wrapped in try/except
-- Chronos async procs also enforce GC-safety — `deserializeConfigFromSync` calls `loadConfig` which calls `parseFile` which is not GC-safe, causing build failure
-- `webby/httpheaders` needed for `emptyHttpHeaders()` used by curly
-- `std/options` needed for `Option`/`some`/`none`
-
----
-
-## Development Log
-
-### 2026-04-09
-- Project initialized
-- Phase 1 completed:
-  - Project structure created
-  - CLI framework with subcommands working
-  - Config file (TOML) read/write
-  - Name generation (adjective-noun)
-  - UUID generation
-  - Pairing code generation
-  - Commands: init, config, add-folder, remove-folder, list-folders, add-buddy, list-buddies, start, stop, status
-- Dependencies: libp2p, libsodium, parsetoml, results
-
-### Next Steps
-- Phase 2: libp2p networking - COMPLETE ✓
-  - libp2p node creation working ✓
-  - Node starts and binds to addresses ✓
-  - MultiAddress display working ✓
-  - Kademlia DHT integration ✓ (removed — replaced with KV-store relay discovery)
-  - DHT announce/findProvider API ✓ (removed — replaced with relay publish/lookup)
-  - KV-store relay discovery with HMAC authentication ✓
-  - Test harness for two local instances ✓
-  - Direct peer connection tested ✓
-
-- Phase 3: Buddy pairing protocol - COMPLETE ✓
-  - Pairing handshake implemented ✓
-  - Buddy verification against config ✓
-  - BuddyConnection tracking in daemon ✓
-
-- Phase 4: File sync - COMPLETE ✓
-  - File scanner with change detection ✓
-  - SQLite file index ✓
-  - Chunk-based file transfer ✓
-  - Session-based sync coordination ✓
-
-- Phase 5: Encryption - COMPLETE ✓
-  - libsodium secretbox for content ✓
-  - Password-based key derivation ✓
-  - Encrypted filename support ✓
-
-- Phase 6: Debian packaging - COMPLETE ✓
-  - debian/ directory with control, rules ✓
-  - systemd service unit file ✓
-  - Makefile for build/package ✓
-
-### Recovery System Progress
-
-- Phase 1: BIP39 wordlist + `RecoveryConfig` type + `recovery` field on `AppConfig` — COMPLETE
-- Phase 2: `recovery.nim` (mnemonic gen, validation, key derivation, config encrypt/decrypt, base58) — COMPLETE
-- Phase 3: `config_sync.nim` (relay sync, buddy sync, recovery logic) — COMPLETE
-- Phase 4: Relay KV store (`kvstore.nim` + `kvstore_api.nim` using Mummy) — COMPLETE
-- Phase 5: `config.nim` loads/saves `[recovery]` section — COMPLETE
-- Phase 6: CLI commands (`setup-recovery`, `recover`, `sync-config`, `export-recovery`) — COMPLETE
-- Phase 7: `daemon.nim` loads master key on startup — COMPLETE
-- Phase 8: REST API recovery endpoints — COMPLETE
-- Phase 9: Tests — COMPLETE
-- Phase 10: Web GUI merged from `simple-web-gui` branch — COMPLETE
-
-### Remaining Work
-
-- GTK GUI: BIP39 recovery dialog with word grid and verification of random words
-- End-to-end test of full recovery flow against Koyeb relay
-- Add recovery controls to web GUI
-
-### Test Coverage
-
-**Unit tests** (14 files, run via `nimble test`):
-- `test_config.nim` — config paths, save/load, folder/buddy management, TOML escaping
-- `test_config_sync.nim` — hashConfig, shouldSyncConfig, serialize/deserialize, syncConfigToRelay
-- `test_control.nim` — parseRequest, handleRequest routing, control API handlers
-- `test_control_web.nim` — isLocalhost, webSecret, rewriteLanRequest, serveWebRequest
-- `test_crypto.nim` — key generation, key pair, config blob encryption, key derivation, password hashing, encrypt/decrypt API
-- `test_index.nim` — SQLite file index add/get/remove, sync status tracking
-- `test_messages.nim` — protocol message encode/decode, edge cases
-- `test_pairing.nim` — BuddyConnection state machine, verifyBuddy
-- `test_policy.nim` — parseClockMinutes, sync window, shouldSyncRemoteFile
-- `test_rawrelay.nim` — relayAddrsForRegion, orderedRelayAddrs
-- `test_recovery.nim` — BIP39 mnemonic gen/validation, key derivation, Base58, config encrypt/decrypt, recovery setup, word helpers
-- `test_scanner.nim` — directory scanning, change detection, atomic write, chunk I/O
-- `test_transfer_crash_safety.nim` — interrupted receive, flush failure, mismatched size
-- `test_types.nim` — BuddyId, FolderConfig, AppConfig, ConnectionState, FileChangeKind
-- `test_discovery.nim` — discovery key derivation, HMAC computation
-- `test_geoip_ranges.nim` — EU IP range loading and matching
-
-**Integration tests** (7 files, run via `nimble test`):
-- `test_cli_flows.nim` — CLI binary: init, add-buddy, add-folder, sync-config, recover, export-recovery
-- `test_config_sync_e2e.nim` — sync config to relay + recover, wrong mnemonic, idempotent sync
-- `test_kv_api.nim` — KV API PUT/GET/DELETE, overwrite, 404, /health, edge cases
-- `test_pairing.nim` — full pairing protocol over libp2p
-- `test_relay_fallback.nim` — relay pairing via regional relay
-- `test_relay_file_sync.nim` — forward/reverse sync, append-only folder
-- `test_relay_server.nim` — relay server token-based pairing
-
-**Tests still to add:**
-- Buddy-to-buddy config sync test (once `syncConfigToBuddy` is implemented)
-- Test full recovery flow end-to-end
-- Test end-to-end sync between two machines with real connectivity
-- Add live connection status to `buddydrive status` command
-
----
-
-## Architecture Notes
-
-### Control Server / State Management
-
-The BuddyDrive daemon includes a control server running on `0.0.0.0:17521` by default that provides a REST API for monitoring and configuration. Both the web GUI and GTK4 GUI communicate with the daemon via this API.
-
-**Web GUI:**
-- Served from the control server at `http://127.0.0.1:<port>/` (localhost) and `http://<ip>:<port>/w/<secret>/` (LAN)
-- LAN access requires a secret path derived from the buddy UUID
-- Assets are embedded in the binary at compile time via `staticRead`
-- Provides folder management, buddy pairing, settings, and log viewing
-
-**State Storage:**
-- `~/.buddydrive/config.toml` - Static configuration (identity, folders, buddies)
-- `~/.buddydrive/state.db` - Runtime state (SQLite):
-  - `runtime_status` - peer ID, addresses, daemon running status
-  - `buddy_state` - connection state per buddy
-  - `folder_state` - sync progress per folder
-- `~/.buddydrive/index.db` - File metadata index (per-folder SQLite)
-
-**Key Endpoints:**
-- `GET /status` - Daemon status and identity
-- `GET /buddies` - Buddy list with connection state
-- `GET /folders` - Folder list with sync status
-- `POST /folders` - Add folder
-- `DELETE /folders/:name` - Remove folder
-- `POST /buddies/pair` - Pair with buddy (requires buddy ID and code)
-- `POST /buddies/pairing-code` - Generate pairing code
-- `POST /config` - Update configuration
-- `POST /sync/:folder` - Trigger folder sync
-
-### GUI Configuration Dialogs
-
-The GTK4 GUI provides comprehensive configuration:
-
-1. **Add Folder Dialog** - Name, path, encryption toggle
-2. **Pair Buddy Dialog** - Buddy ID, name (optional), pairing code
-3. **Settings Dialog:**
-   - Identity: Your buddy name
-   - Network: Listen port, announce address
-   - Relay: Base URL, region for fallback
-   - Sync Window: Optional time restrictions (HH:MM format)
-
-### Build Notes
-
-- Uses `--threads:on` for multi-threading
-- Control server uses `std/net` synchronous HTTP server in dedicated thread
-- SQLite access via `db_connector/db_sqlite` (bundled with Nim 2.2.8+)
-- Chronos async requires `{.cast(gcsafe).}` for cross-thread calls
-- GTK4 GUI uses `gtk_editable_get_text` not `gtk_entry_get_text`
-- Cdecl callbacks cannot capture locals; use `userData` with allocated strings
-
-### Testing
-
-Tests use `std/unittest` and run via testament with `nimble test`:
-
-- **Unit tests**: `tests/unit/*/*.nim` — 14 test files
-- **Integration tests**: `tests/integration/*.nim` — 8 test files
-
-Integration tests are environment-dependent:
-- Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to fail hard when services unavailable
-- Without this flag, tests skip gracefully
-
-### Public Relay
-
-A public relay is deployed on Koyeb for testing and production use:
-
-- **TCP relay**: `01.proxy.koyeb.app:19447` (for NAT traversal)
-- **KV API**: `https://buddydrive-tankfeud-ddaec82a.koyeb.app` (for encrypted config storage)
+- **TCP relay**: `01.proxy.koyeb.app:19447`
+- **KV API**: `https://buddydrive-tankfeud-ddaec82a.koyeb.app`
 - **Region**: Frankfurt (fra)
-- **Source**: `relay/` directory in repository
 
-To deploy your own relay, see `../relay/README.md`.
+To deploy your own relay, see [relay/README.md](../relay/README.md).

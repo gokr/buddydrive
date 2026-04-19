@@ -1,21 +1,12 @@
 import std/[os, osproc, strtabs, strutils, times, unittest]
 import ../../src/buddydrive/config as buddyconfig
 import ../testutils
+import ../support/integration_harness
 
 var cliBinaryPath {.global.}: string
 
-proc repoRoot(): string =
-  currentSourcePath().parentDir().parentDir().parentDir()
-
 proc ensureCliBinary(): string =
-  if cliBinaryPath.len == 0:
-    cliBinaryPath = getTempDir() / ("buddydrive_test_cli_" & $getTime().toUnix())
-    let build = execCmdEx(
-      "nim c -o:" & quoteShell(cliBinaryPath) & " src/buddydrive.nim",
-      workingDir = repoRoot()
-    )
-    doAssert build.exitCode == 0, build.output
-  cliBinaryPath
+  ensureBuiltBinary(cliBinaryPath, "buddydrive_test_cli", "nim c -o:$OUT src/buddydrive.nim")
 
 proc cliEnv(testDir: string): StringTableRef =
   result = newStringTable()
