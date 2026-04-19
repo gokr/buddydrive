@@ -196,7 +196,8 @@ tests/
 - `crypto_generichash` returns `seq[byte]` not `string`, so assignment to `array[32, byte]` requires explicit `byte()` casts
 - **Streaming hash**: use `crypto_generichash_init/update/final` for large files — never read full file into memory
 - **Deterministic path encryption**: derive nonce from `folderKey + "/path/" + plaintextPath` so same path always encrypts to same ciphertext (enables move detection)
-- **Chunk encryption**: derive nonce from `folderKey + "/chunk/" + encryptedPath + "/" + offset` for deterministic per-chunk nonces
+- **Chunk encryption with random nonces**: each chunk gets a random nonce (24 bytes, prepended to ciphertext). Deterministic nonces are unsafe for content — same (file, offset) may have different plaintext across versions, causing nonce reuse.
+- **Folder key from stable ID**: `folderKey = generichash(masterKey + "/folder/" + folderId)`. `folderId` is a UUID, not the folder name, so renaming doesn't orphan remote data.
 
 ## Current Sync Model — Known Issues
 
@@ -221,9 +222,11 @@ See `docs/PLAN.md` for the full implementation plan. Summary:
 - **Deterministic initiator**: CGNAT side initiates (dials the public side). If both public, lower UUID initiates.
 - **Streaming blake2b hash**: `crypto_generichash_init/update/final` — 64KB chunks, never full file in memory.
 - **Deterministic path encryption**: same path → same encrypted path. Enables move detection.
-- **Content-hash-based sync**: detect changes by hash, moves by hash appearing at new path, deletes by path disappearing.
+- **Random content nonces**: each chunk encrypted with random nonce (prepended). Same file encrypted twice produces different ciphertext — prevents nonce reuse.
+- **Content-hash-based sync**: owner sends plaintext blake2b hash to storage buddy. Detects changes, moves, and deletes.
+- **Owner-authoritative moves**: A tells B "rename X to Y". B does not infer moves from ciphertext identity.
 - **SQLite index is cache**: both sides maintain indexes for performance, but restore only needs the folder key + buddy's filesystem.
-- **Restore flow**: recover config from relay → connect to buddy → list encrypted paths → decrypt paths → request missing files → rebuild index
+- **Restore flow**: recover config from relay → connect to buddy → list encrypted paths → decrypt paths → request missing files → verify hashes → rebuild index
 
 ### HTTP Client (curly)
 
