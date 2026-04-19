@@ -10,6 +10,7 @@ import chronos
 import libp2p/multiaddress
 import types
 import config
+import crypto
 import daemon
 import control
 import recovery
@@ -425,6 +426,8 @@ proc handleAddFolder*(cmd: CommandLine) =
     return
   
   var folder = newFolderConfig(cmd.folderName, absPath, cmd.folderEncrypted)
+  folder.id = generateUuid()
+  folder.folderKey = crypto.generateKey()
   folder.appendOnly = cmd.folderAppendOnly
   
   if cmd.buddyId.len > 0:

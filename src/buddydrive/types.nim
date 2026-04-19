@@ -16,13 +16,16 @@ type
     id*: BuddyId
     pairingCode*: string
     addresses*: seq[string]
+    syncTime*: string
     addedAt*: Time
   
   FolderConfig* = object
+    id*: string
     name*: string
     path*: string
     encrypted*: bool
     appendOnly*: bool
+    folderKey*: string
     buddies*: seq[string]
   
   AppConfig* = object
@@ -93,10 +96,12 @@ proc newBuddyId*(uuid: string, name: string = ""): BuddyId =
   result.name = name
 
 proc newFolderConfig*(name, path: string, encrypted = true): FolderConfig =
+  result.id = ""
   result.name = name
   result.path = path
   result.encrypted = encrypted
   result.appendOnly = false
+  result.folderKey = ""
   result.buddies = @[]
 
 proc newAppConfig*(buddy: BuddyId): AppConfig =
