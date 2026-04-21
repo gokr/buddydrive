@@ -81,6 +81,27 @@ suite "isWithinSyncWindow":
     cfg.syncWindowEnd = "06:00"
     check isWithinSyncWindow(cfg)
 
+suite "shouldInitiateBuddySync":
+  test "always when sync time is empty":
+    var buddy: BuddyInfo
+    buddy.id = newBuddyId("buddy-1", "Alice")
+    buddy.syncTime = ""
+    check shouldInitiateBuddySync(buddy, dateTime(2026, mApr, 10, 12, 0, 0, 0, local()))
+
+  test "within tolerance around scheduled time":
+    var buddy: BuddyInfo
+    buddy.id = newBuddyId("buddy-1", "Alice")
+    buddy.syncTime = "03:00"
+    check shouldInitiateBuddySync(buddy, dateTime(2026, mApr, 10, 2, 50, 0, 0, local()))
+    check shouldInitiateBuddySync(buddy, dateTime(2026, mApr, 10, 3, 10, 0, 0, local()))
+    check not shouldInitiateBuddySync(buddy, dateTime(2026, mApr, 10, 3, 30, 0, 0, local()))
+
+  test "invalid sync time falls through to always":
+    var buddy: BuddyInfo
+    buddy.id = newBuddyId("buddy-1", "Alice")
+    buddy.syncTime = "bad"
+    check shouldInitiateBuddySync(buddy)
+
 suite "shouldSyncRemoteFile":
   test "new file always synced":
     var folder = newFolderConfig("docs", "/tmp/docs")

@@ -15,6 +15,7 @@ type
   BuddyInfo* = object
     id*: BuddyId
     pairingCode*: string
+    syncTime*: string
     addresses*: seq[string]
     addedAt*: Time
   
@@ -32,6 +33,7 @@ type
     announceAddr*: string
     relayBaseUrl*: string
     relayRegion*: string
+    storageBasePath*: string
     syncWindowStart*: string
     syncWindowEnd*: string
     bandwidthLimitKBps*: int
@@ -108,6 +110,7 @@ proc newAppConfig*(buddy: BuddyId): AppConfig =
   result.announceAddr = ""
   result.relayBaseUrl = ""
   result.relayRegion = ""
+  result.storageBasePath = ""
   result.syncWindowStart = ""
   result.syncWindowEnd = ""
   result.bandwidthLimitKBps = 0

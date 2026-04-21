@@ -1,4 +1,5 @@
 import std/[algorithm, options, tables]
+import std/os except FileInfo
 import chronos
 import libp2p/stream/connection
 import ../types
@@ -13,6 +14,11 @@ proc applicableFolders(config: AppConfig, buddyId: string): seq[FolderConfig] =
   for folder in config.folders:
     if folderAppliesToBuddy(folder, buddyId):
       result.add(folder)
+
+proc incomingFolderForBuddy(config: AppConfig, buddyId: string, folder: FolderConfig): FolderConfig =
+  result = folder
+  if config.storageBasePath.len > 0:
+    result.path = config.storageBasePath / buddyId / folder.name
 
 proc sendLocalFolderLists(
     config: AppConfig,
@@ -62,23 +68,23 @@ proc receiveRemoteFolderLists(
       raise newException(CatchableError, "unexpected message while receiving folder lists")
 
 proc requestPhase(
-    transfer: FileTransfer,
+    receiveTransfer: FileTransfer,
     conn: Connection,
     filesNeeded: seq[FileInfo],
 ): Future[bool] {.async.} =
   for fileInfo in filesNeeded:
-    if not await transfer.syncFile(conn, fileInfo):
+    if not await receiveTransfer.syncFile(conn, fileInfo):
       return false
 
   try:
-    await transfer.protocol.sendMessage(conn, newSyncDone())
+    await receiveTransfer.protocol.sendMessage(conn, newSyncDone())
     true
   except CatchableError:
     false
 
-proc servePhase(transfer: FileTransfer, conn: Connection): Future[bool] {.async.} =
+proc servePhase(sendTransfer: FileTransfer, conn: Connection): Future[bool] {.async.} =
   while true:
-    let msgOpt = await transfer.protocol.receiveMessage(conn)
+    let msgOpt = await sendTransfer.protocol.receiveMessage(conn)
     if msgOpt.isNone():
       return false
 
@@ -87,7 +93,7 @@ proc servePhase(transfer: FileTransfer, conn: Connection): Future[bool] {.async.
     of msgSyncDone:
       return true
     of msgFileRequest:
-      if not await transfer.sendFileData(conn, msg.requestPath, msg.requestOffset, msg.requestLength):
+      if not await sendTransfer.sendFileData(conn, msg.requestPath, msg.requestOffset, msg.requestLength):
         return false
     else:
       return false
@@ -101,21 +107,25 @@ proc syncFolder(
     conn: Connection,
     protocol: SyncProtocol,
 ): Future[bool] {.async.} =
-  let transfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
-  defer: transfer.close()
+  let sendTransfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
+  let receiveFolder = incomingFolderForBuddy(config, buddyId, folder)
+  let receiveTransfer = newFileTransfer(receiveFolder, protocol, config.bandwidthLimitKBps)
+  defer:
+    sendTransfer.close()
+    receiveTransfer.close()
 
-  let filesNeeded = transfer.compareWithRemote(remoteFiles)
+  let filesNeeded = receiveTransfer.compareWithRemote(remoteFiles)
   let requestFirst = config.buddy.uuid < remoteBuddyId
 
   if requestFirst:
-    if not await requestPhase(transfer, conn, filesNeeded):
+    if not await requestPhase(receiveTransfer, conn, filesNeeded):
       return false
-    if not await servePhase(transfer, conn):
+    if not await servePhase(sendTransfer, conn):
       return false
   else:
-    if not await servePhase(transfer, conn):
+    if not await servePhase(sendTransfer, conn):
       return false
-    if not await requestPhase(transfer, conn, filesNeeded):
+    if not await requestPhase(receiveTransfer, conn, filesNeeded):
       return false
 
   true

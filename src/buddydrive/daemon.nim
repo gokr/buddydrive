@@ -127,8 +127,8 @@ proc startupReachabilityDiagnostic(daemon: Daemon) =
       "for example /ip4/<public-ip>/tcp/" & $daemon.config.listenPort & "."
   )
 
-proc syncWindowDiagnosticKey(): string =
-  "sync-window"
+proc buddyScheduleDiagnosticKey(buddyId: string): string =
+  "buddy-schedule-" & buddyId
 
 proc buddyDiagnosticKey(buddyId: string): string {.raises: [].}
 proc statusUpdateLoop(daemon: Daemon) {.async: (raises: [CancelledError]).}
@@ -150,14 +150,6 @@ proc runBuddySync(daemon: Daemon, bc: BuddyConnection) {.async.} =
     )
 
 proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
-  if not isWithinSyncWindow(daemon.config):
-    daemon.logDiagnostic(
-      syncWindowDiagnosticKey(),
-      "Sync window is closed (" & syncWindowDescription(daemon.config) & "); rejecting incoming sync connections until the window opens."
-    )
-    await conn.close()
-    return
-
   let bc = newBuddyConnection()
   bc.conn = conn
   
@@ -181,16 +173,6 @@ proc reloadConfigIfChanged(daemon: Daemon) {.gcsafe.} =
         daemon.config = loadConfig()
         daemon.configMtime = mtime
         echo "Config reloaded from disk"
-        if isWithinSyncWindow(daemon.config):
-          daemon.logDiagnostic(
-            syncWindowDiagnosticKey(),
-            "Sync window is open (" & syncWindowDescription(daemon.config) & "); syncing is enabled."
-          )
-        else:
-          daemon.logDiagnostic(
-            syncWindowDiagnosticKey(),
-            "Sync window is closed (" & syncWindowDescription(daemon.config) & "); syncing is paused."
-          )
     except CatchableError as e:
       echo "Config reload failed: ", e.msg
 
@@ -216,6 +198,9 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
 
   for folder in daemon.config.folders:
     cleanupTempFiles(folder.path)
+    if daemon.config.storageBasePath.len > 0:
+      for buddyId in folder.buddies:
+        cleanupTempFiles(daemon.config.storageBasePath / buddyId / folder.name)
 
   try:
     var announceAddrs: seq[MultiAddress] = @[]
@@ -399,6 +384,9 @@ proc updateLiveStatus*(daemon: Daemon) =
 
 proc statusUpdateLoop(daemon: Daemon) {.async: (raises: [CancelledError]).} =
   while daemon.running:
+    if takeDaemonStopRequest():
+      asyncSpawn daemon.stop()
+      return
     daemon.updateLiveStatus()
     await chronos.sleepAsync(chronos.seconds(2))
 
@@ -512,20 +500,20 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
   if daemon.config.buddies.len == 0:
     return
 
-  if not isWithinSyncWindow(daemon.config):
-    daemon.logDiagnostic(
-      syncWindowDiagnosticKey(),
-      "Sync window is closed (" & syncWindowDescription(daemon.config) & "); postponing buddy sync attempts."
-    )
-    return
-
-  daemon.diagnostics.del(syncWindowDiagnosticKey())
-  
   echo "Checking ", daemon.config.buddies.len, " buddies..."
   
   for buddy in daemon.config.buddies:
     if daemon.buddyConnections.hasKey(buddy.id.uuid):
       continue
+
+    if not shouldInitiateBuddySync(buddy):
+      daemon.logDiagnostic(
+        buddyScheduleDiagnosticKey(buddy.id.uuid),
+        "Buddy " & buddy.id.name & " is scheduled for sync at " & syncTimeDescription(buddy) & "; skipping initiation for now."
+      )
+      continue
+
+    daemon.diagnostics.del(buddyScheduleDiagnosticKey(buddy.id.uuid))
     
     if buddy.pairingCode.len == 0:
       daemon.logDiagnostic(

@@ -53,6 +53,7 @@ suite "AppConfig":
     check cfg.announceAddr == ""
     check cfg.relayBaseUrl == ""
     check cfg.relayRegion == ""
+    check cfg.storageBasePath == ""
     check cfg.syncWindowStart == ""
     check cfg.syncWindowEnd == ""
     check cfg.bandwidthLimitKBps == 0

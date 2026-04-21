@@ -1,4 +1,4 @@
-import std/[os, osproc, strtabs, strutils, times, unittest]
+import std/[os, osproc, strtabs, strutils, unittest]
 import ../../src/buddydrive/config as buddyconfig
 import ../testutils
 import ../support/integration_harness

@@ -6,7 +6,6 @@ import config
 import control_web
 import recovery
 import sync/config_sync
-import sync/policy
 
 const
   DefaultControlPort* = 17521
@@ -55,6 +54,23 @@ proc getStateDb(): DbConn =
       last_seen INTEGER
     )
   """)
+
+proc getStopRequestPath*(): string =
+  config.getDataDir() / "stop-request"
+
+proc requestDaemonStop*() =
+  config.ensureDataDir()
+  writeFile(getStopRequestPath(), "1")
+
+proc takeDaemonStopRequest*(): bool =
+  try:
+    let path = getStopRequestPath()
+    if fileExists(path):
+      removeFile(path)
+      return true
+  except OSError:
+    discard
+  false
 
 proc writeRuntimeStatus*(peerId: string, addresses: seq[string], startTime: Time, running = true) =
   config.ensureDataDir()
@@ -177,9 +193,7 @@ proc statusJson(): JsonNode =
           "running": running,
           "uptime": uptime,
           "peerId": peerId,
-          "addresses": addresses,
-          "syncEnabled": isWithinSyncWindow(cfg),
-          "syncWindow": syncWindowDescription(cfg)
+          "addresses": addresses
         }
     finally:
       db.close()
@@ -194,18 +208,14 @@ proc statusJson(): JsonNode =
       "running": false,
       "uptime": 0,
       "peerId": "",
-      "addresses": [],
-      "syncEnabled": isWithinSyncWindow(cfg),
-      "syncWindow": syncWindowDescription(cfg)
+      "addresses": []
     }
   %*{
     "buddy": {"name": "Unknown", "id": ""},
     "running": false,
     "uptime": 0,
     "peerId": "",
-    "addresses": [],
-    "syncEnabled": true,
-    "syncWindow": "always"
+    "addresses": []
   }
 
 proc buddiesJson(): JsonNode =
@@ -235,6 +245,8 @@ proc buddiesJson(): JsonNode =
     buddies.add(%*{
       "id": buddy.id.uuid,
       "name": buddy.id.name,
+      "pairingCode": buddy.pairingCode,
+      "syncTime": buddy.syncTime,
       "state": "disconnected",
       "latencyMs": -1,
       "lastSync": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
@@ -268,6 +280,7 @@ proc foldersJson(): JsonNode =
       "name": folder.name,
       "path": folder.path,
       "encrypted": folder.encrypted,
+      "appendOnly": folder.appendOnly,
       "buddies": folder.buddies,
       "status": {
         "totalBytes": 0,
@@ -293,12 +306,15 @@ proc configJson(): JsonNode =
       "name": folder.name,
       "path": folder.path,
       "encrypted": folder.encrypted,
+      "append_only": folder.appendOnly,
       "buddies": folder.buddies
     })
   for buddy in cfg.buddies:
     buddies.add(%*{
       "id": buddy.id.uuid,
       "name": buddy.id.name,
+      "pairing_code": buddy.pairingCode,
+      "sync_time": buddy.syncTime,
       "addedAt": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
     })
   %*{
@@ -311,8 +327,8 @@ proc configJson(): JsonNode =
       "announce_addr": cfg.announceAddr,
       "relay_base_url": cfg.relayBaseUrl,
       "relay_region": cfg.relayRegion,
-      "sync_window_start": cfg.syncWindowStart,
-      "sync_window_end": cfg.syncWindowEnd
+      "storage_base_path": cfg.storageBasePath,
+      "bandwidth_limit_kbps": cfg.bandwidthLimitKBps
     },
     "folders": folders,
     "buddies": buddies
@@ -391,10 +407,47 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
       cfg.relayBaseUrl = net["relay_base_url"].getStr(cfg.relayBaseUrl)
     if net.hasKey("relay_region"):
       cfg.relayRegion = net["relay_region"].getStr(cfg.relayRegion)
-    if net.hasKey("sync_window_start"):
-      cfg.syncWindowStart = net["sync_window_start"].getStr(cfg.syncWindowStart)
-    if net.hasKey("sync_window_end"):
-      cfg.syncWindowEnd = net["sync_window_end"].getStr(cfg.syncWindowEnd)
+    if net.hasKey("storage_base_path"):
+      cfg.storageBasePath = net["storage_base_path"].getStr(cfg.storageBasePath)
+    if net.hasKey("bandwidth_limit_kbps"):
+      cfg.bandwidthLimitKBps = net["bandwidth_limit_kbps"].getInt(cfg.bandwidthLimitKBps)
+
+  if parsed.hasKey("folders"):
+    cfg.folders = @[]
+    for item in parsed["folders"].getElems():
+      var folder = newFolderConfig(
+        item{"name"}.getStr(""),
+        item{"path"}.getStr(""),
+        item{"encrypted"}.getBool(true)
+      )
+      folder.appendOnly = item{"append_only"}.getBool(false)
+      if item.hasKey("buddies"):
+        for buddyId in item["buddies"].getElems():
+          folder.buddies.add(buddyId.getStr())
+      if folder.name.len > 0 and folder.path.len > 0:
+        cfg.folders.add(folder)
+
+  if parsed.hasKey("buddies"):
+    cfg.buddies = @[]
+    for item in parsed["buddies"].getElems():
+      let buddyId = item{"id"}.getStr("")
+      if buddyId.len == 0:
+        continue
+      var buddy: BuddyInfo
+      buddy.id = newBuddyId(buddyId, item{"name"}.getStr(""))
+      buddy.pairingCode = item{"pairing_code"}.getStr("")
+      buddy.syncTime = item{"sync_time"}.getStr("")
+      buddy.addedAt = getTime()
+      for oldBuddy in oldCfg.buddies:
+        if oldBuddy.id.uuid == buddyId:
+          buddy.addedAt = oldBuddy.addedAt
+          break
+      if item.hasKey("addedAt"):
+        try:
+          buddy.addedAt = parseTime(item["addedAt"].getStr(), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
+        except ValueError:
+          discard
+      cfg.buddies.add(buddy)
 
   config.saveConfig(cfg)
 
@@ -403,7 +456,9 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
     cfg.listenPort != oldCfg.listenPort or
     cfg.announceAddr != oldCfg.announceAddr or
     cfg.relayBaseUrl != oldCfg.relayBaseUrl or
-    cfg.relayRegion != oldCfg.relayRegion
+    cfg.relayRegion != oldCfg.relayRegion or
+    cfg.storageBasePath != oldCfg.storageBasePath or
+    cfg.bandwidthLimitKBps != oldCfg.bandwidthLimitKBps
 
   (200, %*{"ok": true, "restartRequired": restartRequired})
 
@@ -420,6 +475,7 @@ proc pairBuddyFromBody(body: string): tuple[status: int, response: JsonNode] =
   var buddy: BuddyInfo
   buddy.id = newBuddyId(buddyId, buddyName)
   buddy.pairingCode = code
+  buddy.syncTime = parsed{"sync_time"}.getStr("")
   buddy.addedAt = getTime()
   cfg.addBuddy(buddy)
   (200, %*{"ok": true, "message": "Buddy paired successfully"})
@@ -574,6 +630,9 @@ proc handleRequest*(raw: string): string =
       of "/recovery/sync-config":
         let resp = syncConfigHandler()
         jsonResponse(resp.status, resp.response)
+      of "/daemon/stop":
+        requestDaemonStop()
+        jsonResponse(200, %*{"ok": true, "message": "Daemon stop requested"})
       else:
         if req.path.startsWith("/sync/"):
           jsonResponse(200, %*{"ok": true, "message": "Sync started", "folder": req.path[6 .. ^1]})

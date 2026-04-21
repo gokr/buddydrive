@@ -368,6 +368,11 @@ proc handleConfig*(cmd: CommandLine) =
     echo "  Relay region: ", cfg.relayRegion
   else:
     echo "  Relay region: (not set)"
+  if cfg.storageBasePath.len > 0:
+    echo "  Incoming storage base: ", cfg.storageBasePath
+    echo "    Layout: <storage base>/<buddy id>/<folder name>/..."
+  else:
+    echo "  Incoming storage base: (not set)"
   if cfg.bandwidthLimitKBps > 0:
     echo "  Bandwidth limit: ", cfg.bandwidthLimitKBps, " KB/s"
   else:
@@ -647,6 +652,9 @@ proc handleStatus*() =
   echo "Buddy: ", cfg.buddy.name, " (", cfg.buddy.uuid.shortId(), ")"
   echo "Peer ID: ", "(run 'buddydrive start' to connect)"
   echo "Sync window: ", syncWindowDescription(cfg)
+  if cfg.storageBasePath.len > 0:
+    echo "Incoming storage base: ", cfg.storageBasePath
+    echo "  Layout: <storage base>/<buddy id>/<folder name>/..."
   echo ""
   
   if cfg.folders.len > 0:

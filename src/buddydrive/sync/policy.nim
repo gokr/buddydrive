@@ -15,6 +15,12 @@ proc parseClockMinutes*(value: string): int =
   except ValueError:
     -1
 
+proc syncTimeDescription*(buddy: BuddyInfo): string =
+  if buddy.syncTime.len > 0:
+    buddy.syncTime
+  else:
+    "always"
+
 proc hasSyncWindow*(config: AppConfig): bool =
   config.syncWindowStart.len > 0 and config.syncWindowEnd.len > 0
 
@@ -40,6 +46,19 @@ proc isWithinSyncWindow*(config: AppConfig, currentTime: DateTime = now()): bool
     currentMinute >= startMinute and currentMinute < endMinute
   else:
     currentMinute >= startMinute or currentMinute < endMinute
+
+proc shouldInitiateBuddySync*(buddy: BuddyInfo, currentTime: DateTime = now(), toleranceMinutes = 15): bool =
+  if buddy.syncTime.len == 0:
+    return true
+
+  let scheduledMinute = parseClockMinutes(buddy.syncTime)
+  if scheduledMinute < 0:
+    return true
+
+  let currentMinute = currentTime.hour * 60 + currentTime.minute
+  var diff = abs(currentMinute - scheduledMinute)
+  diff = min(diff, 24 * 60 - diff)
+  diff <= toleranceMinutes
 
 proc shouldSyncRemoteFile*(folder: FolderConfig, remote: FileInfo, localFound: bool, local: FileInfo = default(FileInfo)): bool =
   if not localFound:

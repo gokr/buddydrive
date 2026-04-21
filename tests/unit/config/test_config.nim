@@ -59,6 +59,7 @@ suite "Config save and load":
       cfg.announceAddr = "/ip4/1.2.3.4/tcp/9999"
       cfg.relayBaseUrl = "https://relay.example.com"
       cfg.relayRegion = "eu"
+      cfg.storageBasePath = testDir / "storage"
       buddyconfig.saveConfig(cfg)
       let loaded = buddyconfig.loadConfig()
       check loaded.buddy.uuid == "aaaaaaaa-1111-1111-1111-111111111111"
@@ -67,6 +68,7 @@ suite "Config save and load":
       check loaded.announceAddr == "/ip4/1.2.3.4/tcp/9999"
       check loaded.relayBaseUrl == "https://relay.example.com"
       check loaded.relayRegion == "eu"
+      check loaded.storageBasePath == testDir / "storage"
 
   test "loadConfig missing file raises IOError":
     putEnv("BUDDYDRIVE_CONFIG_DIR", "/tmp/buddydrive_nonexistent_12345")

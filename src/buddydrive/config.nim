@@ -74,6 +74,7 @@ proc configToToml*(config: AppConfig, includeHeader = false): string =
   result.add("announce_addr = \"" & escapeToml(config.announceAddr) & "\"\n")
   result.add("relay_base_url = \"" & escapeToml(config.relayBaseUrl) & "\"\n")
   result.add("relay_region = \"" & escapeToml(config.relayRegion) & "\"\n")
+  result.add("storage_base_path = \"" & escapeToml(config.storageBasePath) & "\"\n")
   result.add("sync_window_start = \"" & escapeToml(config.syncWindowStart) & "\"\n")
   result.add("sync_window_end = \"" & escapeToml(config.syncWindowEnd) & "\"\n")
   result.add("bandwidth_limit_kbps = " & $config.bandwidthLimitKBps & "\n\n")
@@ -103,6 +104,7 @@ proc configToToml*(config: AppConfig, includeHeader = false): string =
       result.add("id = \"" & escapeToml(buddy.id.uuid) & "\"\n")
       result.add("name = \"" & escapeToml(buddy.id.name) & "\"\n")
       result.add("pairing_code = \"" & escapeToml(buddy.pairingCode) & "\"\n")
+      result.add("sync_time = \"" & escapeToml(buddy.syncTime) & "\"\n")
       result.add("added_at = \"" & buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'") & "\"\n")
 
 proc parseConfigToml*(toml: TomlValueRef): AppConfig =
@@ -115,6 +117,7 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
   result.announceAddr = ""
   result.relayBaseUrl = ""
   result.relayRegion = ""
+  result.storageBasePath = ""
   result.syncWindowStart = ""
   result.syncWindowEnd = ""
   result.bandwidthLimitKBps = 0
@@ -129,6 +132,7 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
     result.announceAddr = toml["network"]{"announce_addr"}.getStr("")
     result.relayBaseUrl = toml["network"]{"relay_base_url"}.getStr("")
     result.relayRegion = toml["network"]{"relay_region"}.getStr("")
+    result.storageBasePath = toml["network"]{"storage_base_path"}.getStr("")
     result.syncWindowStart = toml["network"]{"sync_window_start"}.getStr("")
     result.syncWindowEnd = toml["network"]{"sync_window_end"}.getStr("")
     result.bandwidthLimitKBps = toml["network"]{"bandwidth_limit_kbps"}.getInt(0)
@@ -154,6 +158,7 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
       buddy.id.uuid = buddyTbl["id"].getStr()
       buddy.id.name = buddyTbl{"name"}.getStr("")
       buddy.pairingCode = buddyTbl{"pairing_code"}.getStr("")
+      buddy.syncTime = buddyTbl{"sync_time"}.getStr("")
       buddy.addedAt = parseTime(buddyTbl{"added_at"}.getStr("1970-01-01T00:00:00Z"), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
       result.buddies.add(buddy)
 
