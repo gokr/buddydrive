@@ -35,8 +35,6 @@ type
     announceAddr*: string
     relayBaseUrl*: string
     relayRegion*: string
-    syncWindowStart*: string
-    syncWindowEnd*: string
     bandwidthLimitKBps*: int
     folders*: seq[FolderConfig]
     buddies*: seq[BuddyInfo]
@@ -47,15 +45,27 @@ type
     size*: int64
     mtime*: int64
     hash*: array[32, byte]
+    mode*: int
+    symlinkTarget*: string
   
   FileChangeKind* = enum
     fcAdded
     fcModified
     fcDeleted
+    fcMoved
   
   FileChange* = object
     kind*: FileChangeKind
     info*: FileInfo
+    oldPath*: string
+
+  StorageFileInfo* = object
+    encryptedPath*: string
+    contentHash*: array[32, byte]
+    size*: int64
+    mode*: int
+    symlinkTarget*: string
+    ownerBuddy*: string
   
   ConnectionState* = enum
     csDisconnected
@@ -113,8 +123,6 @@ proc newAppConfig*(buddy: BuddyId): AppConfig =
   result.announceAddr = ""
   result.relayBaseUrl = ""
   result.relayRegion = ""
-  result.syncWindowStart = ""
-  result.syncWindowEnd = ""
   result.bandwidthLimitKBps = 0
   result.folders = @[]
   result.buddies = @[]

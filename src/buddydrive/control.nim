@@ -6,7 +6,6 @@ import config
 import control_web
 import recovery
 import sync/config_sync
-import sync/policy
 
 const
   DefaultControlPort* = 17521
@@ -178,8 +177,8 @@ proc statusJson(): JsonNode =
           "uptime": uptime,
           "peerId": peerId,
           "addresses": addresses,
-          "syncEnabled": isWithinSyncWindow(cfg),
-          "syncWindow": syncWindowDescription(cfg)
+          "syncEnabled": true,
+          "syncWindow": "per-buddy"
         }
     finally:
       db.close()
@@ -195,8 +194,8 @@ proc statusJson(): JsonNode =
       "uptime": 0,
       "peerId": "",
       "addresses": [],
-      "syncEnabled": isWithinSyncWindow(cfg),
-      "syncWindow": syncWindowDescription(cfg)
+      "syncEnabled": true,
+      "syncWindow": "per-buddy"
     }
   %*{
     "buddy": {"name": "Unknown", "id": ""},
@@ -237,7 +236,8 @@ proc buddiesJson(): JsonNode =
       "name": buddy.id.name,
       "state": "disconnected",
       "latencyMs": -1,
-      "lastSync": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+      "lastSync": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+      "syncTime": buddy.syncTime
     })
   %*{"buddies": buddies}
 
@@ -299,7 +299,8 @@ proc configJson(): JsonNode =
     buddies.add(%*{
       "id": buddy.id.uuid,
       "name": buddy.id.name,
-      "addedAt": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+      "addedAt": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+      "syncTime": buddy.syncTime
     })
   %*{
     "buddy": {
@@ -310,9 +311,7 @@ proc configJson(): JsonNode =
       "listen_port": cfg.listenPort,
       "announce_addr": cfg.announceAddr,
       "relay_base_url": cfg.relayBaseUrl,
-      "relay_region": cfg.relayRegion,
-      "sync_window_start": cfg.syncWindowStart,
-      "sync_window_end": cfg.syncWindowEnd
+      "relay_region": cfg.relayRegion
     },
     "folders": folders,
     "buddies": buddies
@@ -391,10 +390,19 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
       cfg.relayBaseUrl = net["relay_base_url"].getStr(cfg.relayBaseUrl)
     if net.hasKey("relay_region"):
       cfg.relayRegion = net["relay_region"].getStr(cfg.relayRegion)
-    if net.hasKey("sync_window_start"):
-      cfg.syncWindowStart = net["sync_window_start"].getStr(cfg.syncWindowStart)
-    if net.hasKey("sync_window_end"):
-      cfg.syncWindowEnd = net["sync_window_end"].getStr(cfg.syncWindowEnd)
+
+  if parsed.hasKey("buddies"):
+    for buddyNode in parsed["buddies"]:
+      let buddyId = buddyNode{"id"}.getStr("")
+      if buddyId.len == 0:
+        continue
+      let idx = cfg.getBuddy(buddyId)
+      if idx < 0:
+        continue
+      if buddyNode.hasKey("syncTime"):
+        cfg.buddies[idx].syncTime = buddyNode["syncTime"].getStr(cfg.buddies[idx].syncTime)
+      elif buddyNode.hasKey("sync_time"):
+        cfg.buddies[idx].syncTime = buddyNode["sync_time"].getStr(cfg.buddies[idx].syncTime)
 
   config.saveConfig(cfg)
 

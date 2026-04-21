@@ -50,10 +50,12 @@ proc receiveRemoteFolderLists(
       for entry in msg.files:
         var info: FileInfo
         info.path = entry.path
-        info.encryptedPath = entry.path
+        info.encryptedPath = entry.encryptedPath
         info.size = entry.size
         info.mtime = entry.mtime
         info.hash = stringToHash(entry.hash)
+        info.mode = entry.mode
+        info.symlinkTarget = entry.symlinkTarget
         files.add(info)
       result[msg.folderName] = files
     of msgSyncDone:
@@ -61,11 +63,99 @@ proc receiveRemoteFolderLists(
     else:
       raise newException(CatchableError, "unexpected message while receiving folder lists")
 
-proc requestPhase(
+type
+  MoveInstruction = tuple[oldPath: string, newPath: string, hash: string]
+
+proc sameMoveCandidate(remote: FileInfo, local: FileInfo): bool =
+  remote.hash == local.hash and
+  remote.size == local.size and
+  remote.mode == local.mode and
+  remote.symlinkTarget == local.symlinkTarget
+
+proc computeOutboundDelta(
+    transfer: FileTransfer,
+    remoteFiles: seq[FileInfo],
+): tuple[moves: seq[MoveInstruction], deletes: seq[string], projectedRemote: seq[FileInfo]] =
+  let localFiles = transfer.scanner.scanDirectory()
+
+  var localByPath = initTable[string, FileInfo]()
+  var remoteByPath = initTable[string, FileInfo]()
+  var localByHash = initTable[string, FileInfo]()
+  var projectedByPath = initTable[string, FileInfo]()
+
+  for fileInfo in localFiles:
+    localByPath[fileInfo.path] = fileInfo
+    let key = hashToString(fileInfo.hash)
+    if key notin localByHash:
+      localByHash[key] = fileInfo
+
+  for fileInfo in remoteFiles:
+    remoteByPath[fileInfo.path] = fileInfo
+    projectedByPath[fileInfo.path] = fileInfo
+
+  var remotePaths: seq[string] = @[]
+  for path in remoteByPath.keys:
+    remotePaths.add(path)
+  remotePaths.sort(cmp)
+
+  for remotePath in remotePaths:
+    let remoteFile = remoteByPath[remotePath]
+    if remotePath in localByPath:
+      continue
+
+    let key = hashToString(remoteFile.hash)
+    if key in localByHash:
+      let localFile = localByHash[key]
+      if localFile.path in remoteByPath:
+        result.deletes.add(remotePath)
+        projectedByPath.del(remotePath)
+      elif sameMoveCandidate(remoteFile, localFile):
+        result.moves.add((remotePath, localFile.path, key))
+        projectedByPath.del(remotePath)
+        projectedByPath[localFile.path] = localFile
+      else:
+        result.deletes.add(remotePath)
+        projectedByPath.del(remotePath)
+    else:
+      result.deletes.add(remotePath)
+      projectedByPath.del(remotePath)
+
+  for path in projectedByPath.keys:
+    result.projectedRemote.add(projectedByPath[path])
+
+  result.projectedRemote.sort(proc(a, b: FileInfo): int = cmp(a.path, b.path))
+  result.moves.sort(proc(a, b: MoveInstruction): int = cmp((a.oldPath, a.newPath), (b.oldPath, b.newPath)))
+  result.deletes.sort(cmp)
+
+proc sendDeltaPhase(
     transfer: FileTransfer,
     conn: Connection,
-    filesNeeded: seq[FileInfo],
+    remoteFiles: seq[FileInfo],
 ): Future[bool] {.async.} =
+  let localFiles = transfer.scanner.scanDirectory()
+  var effectiveRemoteFiles = remoteFiles
+  if localFiles.len == 0 and remoteFiles.len > 0:
+    let refreshed = await transfer.requestListPaths(conn)
+    if refreshed.isSome:
+      effectiveRemoteFiles = refreshed.get()
+
+  let delta = transfer.computeOutboundDelta(effectiveRemoteFiles)
+  let filesNeeded = transfer.compareWithRemote(delta.projectedRemote)
+
+  for move in delta.moves:
+    if move.oldPath == move.newPath:
+      continue
+    try:
+      await transfer.protocol.sendMessage(conn, newMoveFile(move.oldPath, move.newPath, move.hash))
+    except CatchableError:
+      return false
+
+  for path in delta.deletes:
+    try:
+      await transfer.protocol.sendMessage(conn, newFileDelete(path))
+    except CatchableError:
+      return false
+
   for fileInfo in filesNeeded:
     if not await transfer.syncFile(conn, fileInfo):
       return false
@@ -89,6 +179,21 @@ proc servePhase(transfer: FileTransfer, conn: Connection): Future[bool] {.async.
     of msgFileRequest:
       if not await transfer.sendFileData(conn, msg.requestPath, msg.requestOffset, msg.requestLength):
         return false
+    of msgFileDelete:
+      try:
+        if not transfer.deleteLocalFile(msg.deletedPath):
+          return false
+      except CatchableError:
+        return false
+    of msgMoveFile:
+      try:
+        if not transfer.moveLocalFile(msg.oldPath, msg.newPath):
+          return false
+      except CatchableError:
+        return false
+    of msgListPathsRequest:
+      if not await transfer.sendListPathsResponse(conn):
+        return false
     else:
       return false
 
@@ -103,19 +208,19 @@ proc syncFolder(
 ): Future[bool] {.async.} =
   let transfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
   defer: transfer.close()
+  transfer.rebuildIndexFromDisk()
 
-  let filesNeeded = transfer.compareWithRemote(remoteFiles)
   let requestFirst = config.buddy.uuid < remoteBuddyId
 
   if requestFirst:
-    if not await requestPhase(transfer, conn, filesNeeded):
+    if not await sendDeltaPhase(transfer, conn, remoteFiles):
       return false
     if not await servePhase(transfer, conn):
       return false
   else:
     if not await servePhase(transfer, conn):
       return false
-    if not await requestPhase(transfer, conn, filesNeeded):
+    if not await sendDeltaPhase(transfer, conn, remoteFiles):
       return false
 
   true

@@ -228,6 +228,20 @@ suite "Streaming hash":
     check hashFileStream(f1) != hashFileStream(f2)
     removeDir(tmpDir)
 
+  test "hashFileStream matches hashBytes for file contents":
+    let tmpDir = getTempDir() / "buddydrive_test_hashfile4_" & $getTime().toUnix()
+    createDir(tmpDir)
+    let tmpFile = tmpDir / "blob.bin"
+    let content = "abc123".repeat(4096)
+    writeFile(tmpFile, content)
+    let fileHash = hashFileStream(tmpFile)
+    var bytes = newSeq[byte](content.len)
+    for i, ch in content:
+      bytes[i] = byte(ch)
+    let memHash = hashBytes(bytes)
+    check fileHash == memHash
+    removeDir(tmpDir)
+
 suite "Chunk encryption with random nonces":
   test "encryptChunk/decryptChunk round-trip":
     let key = generateKey()

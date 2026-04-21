@@ -2,6 +2,7 @@ import std/unittest
 import std/times
 import ../../../src/buddydrive/types
 import ../../../src/buddydrive/sync/policy
+import ../../../src/buddydrive/crypto
 
 suite "parseClockMinutes":
   test "valid HH:MM":
@@ -16,70 +17,39 @@ suite "parseClockMinutes":
     check parseClockMinutes("12:60") == -1
     check parseClockMinutes("") == -1
 
-suite "hasSyncWindow":
-  test "no sync window set":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    check not hasSyncWindow(cfg)
+suite "syncTimeDescription":
+  test "always when sync time empty":
+    check syncTimeDescription("") == "always"
 
-  test "both start and end set":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    cfg.syncWindowStart = "01:00"
-    cfg.syncWindowEnd = "06:00"
-    check hasSyncWindow(cfg)
+  test "shows time when set":
+    check syncTimeDescription("03:00") == "03:00"
 
-  test "only start set":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    cfg.syncWindowStart = "01:00"
-    check not hasSyncWindow(cfg)
+suite "isWithinSyncTime":
+  test "always within when sync time empty":
+    check isWithinSyncTime("")
 
-  test "only end set":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    cfg.syncWindowEnd = "06:00"
-    check not hasSyncWindow(cfg)
+  test "within 15 minute window around target":
+    check isWithinSyncTime("03:00", dateTime(2026, mApr, 10, 2, 45, 0, 0, local()))
+    check isWithinSyncTime("03:00", dateTime(2026, mApr, 10, 3, 15, 0, 0, local()))
+    check not isWithinSyncTime("03:00", dateTime(2026, mApr, 10, 3, 16, 0, 0, local()))
 
-suite "syncWindowDescription":
-  test "always when no window":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    check syncWindowDescription(cfg) == "always"
+  test "window wraps midnight":
+    check isWithinSyncTime("00:05", dateTime(2026, mApr, 10, 23, 55, 0, 0, local()))
+    check isWithinSyncTime("23:55", dateTime(2026, mApr, 11, 0, 5, 0, 0, local()))
 
-  test "shows range when window set":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    cfg.syncWindowStart = "01:00"
-    cfg.syncWindowEnd = "06:00"
-    check syncWindowDescription(cfg) == "01:00-06:00"
+  test "invalid sync time falls through to true":
+    check isWithinSyncTime("bad")
 
-suite "isWithinSyncWindow":
-  test "always within when no window":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    check isWithinSyncWindow(cfg)
+suite "shouldAttemptBuddySync":
+  test "empty sync time means always":
+    var buddy: BuddyInfo
+    check shouldAttemptBuddySync(buddy)
 
-  test "normal daytime window":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    cfg.syncWindowStart = "01:00"
-    cfg.syncWindowEnd = "06:00"
-    check not isWithinSyncWindow(cfg, dateTime(2026, mApr, 10, 0, 30, 0, 0, local()))
-    check isWithinSyncWindow(cfg, dateTime(2026, mApr, 10, 1, 30, 0, 0, local()))
-    check not isWithinSyncWindow(cfg, dateTime(2026, mApr, 10, 6, 30, 0, 0, local()))
-
-  test "overnight window crossing midnight":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    cfg.syncWindowStart = "22:00"
-    cfg.syncWindowEnd = "03:00"
-    check isWithinSyncWindow(cfg, dateTime(2026, mApr, 10, 22, 30, 0, 0, local()))
-    check isWithinSyncWindow(cfg, dateTime(2026, mApr, 11, 1, 30, 0, 0, local()))
-    check not isWithinSyncWindow(cfg, dateTime(2026, mApr, 11, 12, 0, 0, 0, local()))
-
-  test "start equals end means always":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    cfg.syncWindowStart = "12:00"
-    cfg.syncWindowEnd = "12:00"
-    check isWithinSyncWindow(cfg, dateTime(2026, mApr, 10, 12, 0, 0, 0, local()))
-
-  test "invalid window format falls through to true":
-    var cfg = newAppConfig(newBuddyId("uuid", "test"))
-    cfg.syncWindowStart = "bad"
-    cfg.syncWindowEnd = "06:00"
-    check isWithinSyncWindow(cfg)
+  test "buddy sync time uses scheduled window":
+    var buddy: BuddyInfo
+    buddy.syncTime = "03:00"
+    check shouldAttemptBuddySync(buddy, dateTime(2026, mApr, 10, 3, 5, 0, 0, local()))
+    check not shouldAttemptBuddySync(buddy, dateTime(2026, mApr, 10, 4, 0, 0, 0, local()))
 
 suite "shouldSyncRemoteFile":
   test "new file always synced":
@@ -87,52 +57,45 @@ suite "shouldSyncRemoteFile":
     var remote: FileInfo
     remote.path = "new.txt"
     remote.encryptedPath = "new.txt"
-    remote.size = 20
-    remote.mtime = 200
     check shouldSyncRemoteFile(folder, remote, false)
 
-  test "modified file synced when not append-only":
+  test "different hash triggers sync even with same mtime/size":
+    discard initCrypto()
     var folder = newFolderConfig("docs", "/tmp/docs")
     folder.appendOnly = false
     var local: FileInfo
     local.path = "existing.txt"
     local.encryptedPath = "existing.txt"
-    local.size = 10
-    local.mtime = 100
-    var remote: FileInfo
-    remote.path = "existing.txt"
-    remote.encryptedPath = "existing.txt"
-    remote.size = 99
-    remote.mtime = 300
-    check shouldSyncRemoteFile(folder, remote, true, local)
-
-  test "append-only preserves existing local file":
-    var folder = newFolderConfig("docs", "/tmp/docs")
-    folder.appendOnly = true
-    var local: FileInfo
-    local.path = "existing.txt"
-    local.encryptedPath = "existing.txt"
-    local.size = 10
+    local.size = 50
     local.mtime = 100
     for i in 0..<32: local.hash[i] = byte(i)
     var remote: FileInfo
     remote.path = "existing.txt"
     remote.encryptedPath = "existing.txt"
-    remote.size = 99
-    remote.mtime = 300
+    remote.size = 50
+    remote.mtime = 100
+    for i in 0..<32: remote.hash[i] = byte(i + 1)
+    check shouldSyncRemoteFile(folder, remote, true, local)
+
+  test "same mtime/size and hash not synced":
+    discard initCrypto()
+    var folder = newFolderConfig("docs", "/tmp/docs")
+    folder.appendOnly = false
+    var local: FileInfo
+    local.path = "file.txt"
+    local.encryptedPath = "file.txt"
+    local.size = 50
+    local.mtime = 100
+    for i in 0..<32: local.hash[i] = byte(i)
+    var remote: FileInfo
+    remote.path = "file.txt"
+    remote.encryptedPath = "file.txt"
+    remote.size = 50
+    remote.mtime = 100
+    remote.hash = local.hash
     check not shouldSyncRemoteFile(folder, remote, true, local)
 
-  test "append-only still syncs new files":
-    var folder = newFolderConfig("docs", "/tmp/docs")
-    folder.appendOnly = true
-    var remote: FileInfo
-    remote.path = "new.txt"
-    remote.encryptedPath = "new.txt"
-    remote.size = 20
-    remote.mtime = 200
-    check shouldSyncRemoteFile(folder, remote, false)
-
-  test "same mtime and size not synced":
+  test "different mtime triggers sync via quick check":
     var folder = newFolderConfig("docs", "/tmp/docs")
     folder.appendOnly = false
     var local: FileInfo
@@ -144,10 +107,10 @@ suite "shouldSyncRemoteFile":
     remote.path = "file.txt"
     remote.encryptedPath = "file.txt"
     remote.size = 50
-    remote.mtime = 100
-    check not shouldSyncRemoteFile(folder, remote, true, local)
+    remote.mtime = 200
+    check shouldSyncRemoteFile(folder, remote, true, local)
 
-  test "different size triggers sync even with same mtime":
+  test "different size triggers sync via quick check":
     var folder = newFolderConfig("docs", "/tmp/docs")
     folder.appendOnly = false
     var local: FileInfo
@@ -160,4 +123,42 @@ suite "shouldSyncRemoteFile":
     remote.encryptedPath = "file.txt"
     remote.size = 100
     remote.mtime = 100
+    check shouldSyncRemoteFile(folder, remote, true, local)
+
+  test "append-only preserves existing local file even with different hash":
+    discard initCrypto()
+    var folder = newFolderConfig("docs", "/tmp/docs")
+    folder.appendOnly = true
+    var local: FileInfo
+    local.path = "existing.txt"
+    local.encryptedPath = "existing.txt"
+    for i in 0..<32: local.hash[i] = byte(i)
+    var remote: FileInfo
+    remote.path = "existing.txt"
+    remote.encryptedPath = "existing.txt"
+    for i in 0..<32: remote.hash[i] = byte(i + 1)
+    check not shouldSyncRemoteFile(folder, remote, true, local)
+
+  test "append-only still syncs new files":
+    var folder = newFolderConfig("docs", "/tmp/docs")
+    folder.appendOnly = true
+    var remote: FileInfo
+    remote.path = "new.txt"
+    remote.encryptedPath = "new.txt"
+    check shouldSyncRemoteFile(folder, remote, false)
+
+  test "metadata difference triggers sync":
+    var folder = newFolderConfig("docs", "/tmp/docs")
+    var local: FileInfo
+    local.path = "file.txt"
+    local.encryptedPath = "file.txt"
+    local.size = 10
+    local.mtime = 100
+    local.mode = 0o644
+    var remote: FileInfo
+    remote.path = "file.txt"
+    remote.encryptedPath = "file.txt"
+    remote.size = 10
+    remote.mtime = 100
+    remote.mode = 0o755
     check shouldSyncRemoteFile(folder, remote, true, local)

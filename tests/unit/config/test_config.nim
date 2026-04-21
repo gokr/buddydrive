@@ -178,14 +178,17 @@ suite "Buddy management":
       var buddy: BuddyInfo
       buddy.id = newBuddyId("ii-uuid", "ivan")
       buddy.pairingCode = "swift-eagle"
+      buddy.syncTime = "03:00"
       buddy.addedAt = getTime()
       cfg.addBuddy(buddy)
       check cfg.buddies.len == 1
       check cfg.buddies[0].id.uuid == "ii-uuid"
       check cfg.buddies[0].pairingCode == "swift-eagle"
+      check cfg.buddies[0].syncTime == "03:00"
       let reloaded = buddyconfig.loadConfig()
       check reloaded.buddies.len == 1
       check reloaded.buddies[0].id.name == "ivan"
+      check reloaded.buddies[0].syncTime == "03:00"
 
   test "addBuddy updates existing buddy by uuid":
     withTestDir("updatebuddy"):

@@ -34,6 +34,8 @@ type
     discovery*: DiscoveryService
     syncProtocol*: SyncProtocol
     buddyConnections*: Table[string, BuddyConnection]
+    activeSyncs*: Table[string, bool]
+    pendingRelayFallbacks*: Table[string, bool]
     diagnostics*: Table[string, string]
     relayListCache*: RelayListCache
     discoveryLoop*: Future[void]
@@ -43,13 +45,23 @@ type
     masterKey*: Option[array[32, byte]]
     upnpPort*: int  ## Non-zero if we created a UPnP mapping that needs cleanup
 
-const BuddyDiscoveryInterval* = chronos.seconds(10 * 60)
+const
+  BuddyDiscoveryInterval* = chronos.seconds(10 * 60)
+  DirectDialAttemptCount = 2
+  DirectDialAttemptTimeoutSeconds = 30
+  RelayJoinDelaySeconds = 60
+  RelayFallbackTimeoutSeconds = 60
+  DirectDialAttemptTimeout = chronos.seconds(DirectDialAttemptTimeoutSeconds)
+  RelayJoinDelay = chronos.seconds(RelayJoinDelaySeconds)
+  RelayFallbackTimeout = chronos.seconds(RelayFallbackTimeoutSeconds)
 
 proc newDaemon*(config: AppConfig): Daemon =
   result = Daemon()
   result.config = config
   result.running = false
   result.buddyConnections = initTable[string, BuddyConnection]()
+  result.activeSyncs = initTable[string, bool]()
+  result.pendingRelayFallbacks = initTable[string, bool]()
   result.diagnostics = initTable[string, string]()
   result.relayListCache = initRelayListCache()
   try:
@@ -127,14 +139,79 @@ proc startupReachabilityDiagnostic(daemon: Daemon) =
       "for example /ip4/<public-ip>/tcp/" & $daemon.config.listenPort & "."
   )
 
-proc syncWindowDiagnosticKey(): string =
-  "sync-window"
-
 proc buddyDiagnosticKey(buddyId: string): string {.raises: [].}
 proc statusUpdateLoop(daemon: Daemon) {.async: (raises: [CancelledError]).}
+proc connectToBuddyViaRelay(daemon: Daemon, buddyId: string): Future[bool] {.async: (raises: []).}
+
+proc buddySyncDiagnosticKey(buddyId: string): string =
+  "buddy-sync-time-" & buddyId
+
+proc buddyRelayDiagnosticKey(buddyId: string): string =
+  "buddy-relay-" & buddyId
+
+proc isPubliclyReachable(daemon: Daemon): bool =
+  hasDirectReachability(daemon.node.getAdvertisedAddrs())
+
+proc hasReadyBuddyConnection(daemon: Daemon, buddyId: string): bool =
+  let bc = daemon.buddyConnections.getOrDefault(buddyId)
+  bc != nil and bc.isConnected()
+
+proc attemptRelayFallbackWithin(daemon: Daemon, buddyId: string, timeout: chronos.Duration): Future[bool] {.async: (raises: []).} =
+  let relayFut = daemon.connectToBuddyViaRelay(buddyId)
+  try:
+    return await relayFut.wait(timeout)
+  except AsyncTimeoutError:
+    await cancelAndWait(relayFut)
+    daemon.logDiagnostic(
+      buddyRelayDiagnosticKey(buddyId),
+      "Relay fallback for buddy " & buddyId.shortId() & " timed out after " & $timeout & "."
+    )
+    return false
+  except CatchableError as e:
+    daemon.logDiagnostic(
+      buddyRelayDiagnosticKey(buddyId),
+      "Relay fallback for buddy " & buddyId.shortId() & " failed: " & e.msg
+    )
+    return false
+
+proc waitAndJoinRelay(daemon: Daemon, buddyId: string) {.async: (raises: []).} =
+  daemon.pendingRelayFallbacks[buddyId] = true
+  defer:
+    daemon.pendingRelayFallbacks[buddyId] = false
+
+  try:
+    await chronos.sleepAsync(RelayJoinDelay)
+  except CancelledError:
+    return
+
+  if not daemon.running or daemon.hasReadyBuddyConnection(buddyId) or daemon.activeSyncs.getOrDefault(buddyId, false):
+    return
+
+  discard await daemon.attemptRelayFallbackWithin(buddyId, RelayFallbackTimeout)
+
+proc scheduleRelayJoin(daemon: Daemon, buddyId: string, remoteSyncTime: string) =
+  if daemon.config.relayRegion.len == 0:
+    return
+  if daemon.pendingRelayFallbacks.getOrDefault(buddyId, false):
+    return
+  if not isWithinSyncTime(remoteSyncTime):
+    return
+
+  daemon.logDiagnostic(
+    buddyRelayDiagnosticKey(buddyId),
+    "Waiting " & $RelayJoinDelaySeconds & " seconds for an incoming direct connection from buddy " & buddyId.shortId() & " before joining relay fallback."
+  )
+  asyncSpawn daemon.waitAndJoinRelay(buddyId)
 
 proc runBuddySync(daemon: Daemon, bc: BuddyConnection) {.async.} =
   let diagnosticKey = "buddy-" & bc.buddyId
+  if daemon.activeSyncs.getOrDefault(bc.buddyId, false):
+    return
+
+  daemon.activeSyncs[bc.buddyId] = true
+  defer:
+    daemon.activeSyncs[bc.buddyId] = false
+
   try:
     if await syncBuddyFolders(daemon.config, bc.buddyId, bc.conn, daemon.syncProtocol):
       echo "Folder sync finished with: ", bc.buddyName
@@ -150,20 +227,16 @@ proc runBuddySync(daemon: Daemon, bc: BuddyConnection) {.async.} =
     )
 
 proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
-  if not isWithinSyncWindow(daemon.config):
-    daemon.logDiagnostic(
-      syncWindowDiagnosticKey(),
-      "Sync window is closed (" & syncWindowDescription(daemon.config) & "); rejecting incoming sync connections until the window opens."
-    )
-    await conn.close()
-    return
-
   let bc = newBuddyConnection()
   bc.conn = conn
   
   let success = await bc.acceptHandshake(daemon.config)
   if success:
     echo "Buddy connected: ", bc.buddyName, " (", bc.buddyId.shortId(), ")"
+    if daemon.buddyConnections.hasKey(bc.buddyId):
+      let existing = daemon.buddyConnections[bc.buddyId]
+      if existing != nil:
+        await existing.close()
     daemon.buddyConnections[bc.buddyId] = bc
     asyncSpawn daemon.runBuddySync(bc)
   else:
@@ -181,16 +254,6 @@ proc reloadConfigIfChanged(daemon: Daemon) {.gcsafe.} =
         daemon.config = loadConfig()
         daemon.configMtime = mtime
         echo "Config reloaded from disk"
-        if isWithinSyncWindow(daemon.config):
-          daemon.logDiagnostic(
-            syncWindowDiagnosticKey(),
-            "Sync window is open (" & syncWindowDescription(daemon.config) & "); syncing is enabled."
-          )
-        else:
-          daemon.logDiagnostic(
-            syncWindowDiagnosticKey(),
-            "Sync window is closed (" & syncWindowDescription(daemon.config) & "); syncing is paused."
-          )
     except CatchableError as e:
       echo "Config reload failed: ", e.msg
 
@@ -271,8 +334,8 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     if daemon.config.buddies.len > 0:
       for buddy in daemon.config.buddies:
         if buddy.pairingCode.len > 0:
-          discard daemon.discovery.publishBuddy(buddy.pairingCode, daemon.config.relayRegion)
-          asyncSpawn daemon.discovery.publishBuddyLoop(buddy.pairingCode, daemon.config.relayRegion)
+          discard daemon.discovery.publishBuddy(buddy, daemon.config.relayRegion, daemon.isPubliclyReachable())
+          asyncSpawn daemon.discovery.publishBuddyLoop(buddy, daemon.config.relayRegion, daemon.isPubliclyReachable())
     else:
       echo "No buddies configured. Add buddies with 'buddydrive add-buddy' to start syncing."
     
@@ -463,10 +526,18 @@ proc explainDirectConnectivityFailure(addrs: seq[MultiAddress]): string =
 proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq[MultiAddress]): Future[bool] {.async: (raises: []).} =
   if not daemon.running:
     return false
-  
+
+  let directPhaseStartedAt = getTime()
   let dialAddrs = directDialableAddrs(addrs)
   if dialAddrs.len == 0:
-    if await daemon.connectToBuddyViaRelay(buddyId):
+    let elapsedSeconds = int((getTime() - directPhaseStartedAt).inSeconds)
+    if elapsedSeconds < RelayJoinDelaySeconds:
+      try:
+        await chronos.sleepAsync(chronos.seconds(RelayJoinDelaySeconds - elapsedSeconds))
+      except CancelledError:
+        return false
+
+    if await daemon.attemptRelayFallbackWithin(buddyId, RelayFallbackTimeout):
       return true
 
     daemon.logDiagnostic(
@@ -476,34 +547,51 @@ proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq
     )
     return false
   
-  try:
-    let conn = await daemon.node.switch.dial(peerId, dialAddrs, PairingProtocol)
-    echo "Connected to peer: ", $peerId
-    
-    let bc = newBuddyConnection()
-    bc.conn = conn
-    
-    let success = await bc.performHandshake(daemon.config)
-    if success:
-      echo "Handshake successful with: ", bc.buddyName
-      daemon.diagnostics.del(buddyDiagnosticKey(buddyId))
-      daemon.buddyConnections[bc.buddyId] = bc
-      asyncSpawn daemon.runBuddySync(bc)
-      return true
-    else:
+  var directFailures: seq[string] = @[]
+  for attempt in 1 .. DirectDialAttemptCount:
+    let dialFut = daemon.node.switch.dial(peerId, dialAddrs, PairingProtocol)
+    try:
+      let conn = await dialFut.wait(DirectDialAttemptTimeout)
+      echo "Connected to peer: ", $peerId
+
+      let bc = newBuddyConnection()
+      bc.conn = conn
+
+      let success = await bc.performHandshake(daemon.config)
+      if success:
+        echo "Handshake successful with: ", bc.buddyName
+        daemon.diagnostics.del(buddyDiagnosticKey(buddyId))
+        daemon.diagnostics.del(buddyRelayDiagnosticKey(buddyId))
+        daemon.buddyConnections[bc.buddyId] = bc
+        asyncSpawn daemon.runBuddySync(bc)
+        return true
+
       echo "Handshake failed with: ", $peerId
       await bc.close()
       return false
-  except Exception as e:
-    if await daemon.connectToBuddyViaRelay(buddyId):
-      return true
+    except AsyncTimeoutError:
+      await cancelAndWait(dialFut)
+      directFailures.add("attempt " & $attempt & " timed out after 30 seconds")
+    except Exception as e:
+      if not dialFut.finished():
+        await cancelAndWait(dialFut)
+      directFailures.add("attempt " & $attempt & " failed: " & e.msg)
 
-    daemon.logDiagnostic(
-      buddyDiagnosticKey(buddyId),
-      "Direct connection to buddy " & buddyId.shortId() & " failed after discovery: " & e.msg &
-        ". Verify that both peers are advertising public TCP addresses and that router port forwarding is configured, or configure relay fallback with relay_region."
-    )
-    return false
+  let elapsedSeconds = int((getTime() - directPhaseStartedAt).inSeconds)
+  if elapsedSeconds < RelayJoinDelaySeconds:
+    try:
+      await chronos.sleepAsync(chronos.seconds(RelayJoinDelaySeconds - elapsedSeconds))
+    except CancelledError:
+      return false
+
+  if await daemon.attemptRelayFallbackWithin(buddyId, RelayFallbackTimeout):
+    return true
+
+  daemon.logDiagnostic(
+    buddyDiagnosticKey(buddyId),
+      "Direct connection to buddy " & buddyId.shortId() & " failed after " & $DirectDialAttemptCount & " attempts (" & directFailures.join("; ") & ") and relay fallback did not connect within " & $RelayFallbackTimeoutSeconds & " seconds."
+  )
+  return false
 
 proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
   if not daemon.running:
@@ -512,20 +600,24 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
   if daemon.config.buddies.len == 0:
     return
 
-  if not isWithinSyncWindow(daemon.config):
-    daemon.logDiagnostic(
-      syncWindowDiagnosticKey(),
-      "Sync window is closed (" & syncWindowDescription(daemon.config) & "); postponing buddy sync attempts."
-    )
-    return
-
-  daemon.diagnostics.del(syncWindowDiagnosticKey())
+  let myPubliclyReachable = daemon.isPubliclyReachable()
   
   echo "Checking ", daemon.config.buddies.len, " buddies..."
   
   for buddy in daemon.config.buddies:
     if daemon.buddyConnections.hasKey(buddy.id.uuid):
-      continue
+      let existing = daemon.buddyConnections.getOrDefault(buddy.id.uuid)
+      if existing == nil:
+        daemon.buddyConnections.del(buddy.id.uuid)
+      elif not existing.isConnected():
+        try:
+          await existing.close()
+        except CatchableError:
+          discard
+        daemon.buddyConnections.del(buddy.id.uuid)
+      else:
+        daemon.diagnostics.del(buddySyncDiagnosticKey(buddy.id.uuid))
+        continue
     
     if buddy.pairingCode.len == 0:
       daemon.logDiagnostic(
@@ -537,6 +629,19 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
       let record = daemon.discovery.findBuddy(buddy.pairingCode)
       if record.isSome:
         let rec = record.get()
+        if not shouldInitiate(daemon.config.buddy.uuid, myPubliclyReachable, buddy.id.uuid, rec):
+          daemon.diagnostics.del(buddySyncDiagnosticKey(buddy.id.uuid))
+          daemon.scheduleRelayJoin(buddy.id.uuid, rec.syncTime)
+          continue
+
+        if not shouldAttemptBuddySync(buddy):
+          daemon.logDiagnostic(
+            buddySyncDiagnosticKey(buddy.id.uuid),
+            "Buddy " & buddy.id.name & " is outside its sync_time (" & syncTimeDescription(buddy.syncTime) & "); postponing outgoing sync attempt."
+          )
+          continue
+
+        daemon.diagnostics.del(buddySyncDiagnosticKey(buddy.id.uuid))
         writeCachedBuddyAddr(buddy.id.uuid, rec.peerId, rec.addresses, rec.relayRegion)
 
         var addrs: seq[MultiAddress] = @[]
@@ -550,7 +655,15 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
           discard await daemon.connectToBuddy(buddy.id.uuid, pidRes.get(), addrs)
         elif addrs.len == 0:
           if rec.relayRegion.len > 0:
-            discard await daemon.connectToBuddyViaRelay(buddy.id.uuid)
+            daemon.logDiagnostic(
+              buddyRelayDiagnosticKey(buddy.id.uuid),
+              "Buddy " & buddy.id.name & " published no direct dialable addresses; waiting " & $RelayJoinDelaySeconds & " seconds before relay fallback."
+            )
+            try:
+              await chronos.sleepAsync(RelayJoinDelay)
+            except CancelledError:
+              return
+            discard await daemon.attemptRelayFallbackWithin(buddy.id.uuid, RelayFallbackTimeout)
           else:
             daemon.logDiagnostic(
               buddyDiagnosticKey(buddy.id.uuid),
@@ -559,6 +672,18 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
       else:
         let cached = readCachedBuddyAddr(buddy.id.uuid)
         if cached.isSome:
+          if daemon.config.buddy.uuid >= buddy.id.uuid:
+            daemon.scheduleRelayJoin(buddy.id.uuid, buddy.syncTime)
+            continue
+
+          if not shouldAttemptBuddySync(buddy):
+            daemon.logDiagnostic(
+              buddySyncDiagnosticKey(buddy.id.uuid),
+              "Buddy " & buddy.id.name & " is outside its sync_time (" & syncTimeDescription(buddy.syncTime) & "); postponing outgoing sync attempt."
+            )
+            continue
+
+          daemon.diagnostics.del(buddySyncDiagnosticKey(buddy.id.uuid))
           var addrs: seq[MultiAddress] = @[]
           for addrStr in cached.get().addresses:
             let maRes = MultiAddress.init(addrStr)
@@ -569,7 +694,15 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
           if pidRes.isOk and addrs.len > 0:
             discard await daemon.connectToBuddy(buddy.id.uuid, pidRes.get(), addrs)
           elif cached.get().relayRegion.len > 0:
-            discard await daemon.connectToBuddyViaRelay(buddy.id.uuid)
+            daemon.logDiagnostic(
+              buddyRelayDiagnosticKey(buddy.id.uuid),
+              "Cached buddy info for " & buddy.id.name & " has no direct dialable addresses; waiting 60 seconds before relay fallback."
+            )
+            try:
+              await chronos.sleepAsync(RelayJoinDelay)
+            except CancelledError:
+              return
+            discard await daemon.attemptRelayFallbackWithin(buddy.id.uuid, RelayFallbackTimeout)
         else:
           daemon.logDiagnostic(
             buddyDiagnosticKey(buddy.id.uuid),

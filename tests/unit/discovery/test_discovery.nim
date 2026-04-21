@@ -51,3 +51,22 @@ suite "Discovery HMAC":
     let hmac1 = computeHmac(authKey1, "test data")
     let hmac2 = computeHmac(authKey2, "test data")
     check hmac1 != hmac2
+
+suite "Deterministic initiator":
+  test "non-public side initiates against public buddy":
+    let record = BuddyRecord(isPubliclyReachable: true)
+    check shouldInitiate("bbbb", false, "aaaa", record)
+
+  test "public side does not initiate against non-public buddy":
+    let record = BuddyRecord(isPubliclyReachable: false)
+    check not shouldInitiate("aaaa", true, "bbbb", record)
+
+  test "lower uuid initiates when both are public":
+    let record = BuddyRecord(isPubliclyReachable: true)
+    check shouldInitiate("aaaa", true, "bbbb", record)
+    check not shouldInitiate("cccc", true, "bbbb", record)
+
+  test "lower uuid initiates when neither is public":
+    let record = BuddyRecord(isPubliclyReachable: false)
+    check shouldInitiate("aaaa", false, "bbbb", record)
+    check not shouldInitiate("cccc", false, "bbbb", record)

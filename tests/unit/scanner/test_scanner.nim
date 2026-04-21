@@ -1,7 +1,12 @@
 import std/unittest
 import std/os except FileInfo
+import std/times
+import std/sequtils
 import ../../../src/buddydrive/types
 import ../../../src/buddydrive/sync/scanner
+import ../../../src/buddydrive/sync/transfer
+import ../../../src/buddydrive/p2p/protocol
+import ../../../src/buddydrive/crypto
 import ../../testutils
 
 suite "FileScanner construction":
@@ -54,9 +59,99 @@ suite "scanDirectory":
     let files = scanner.scanDirectory()
     check files.len == 0
 
+  test "scanDirectory reuses cached hash when metadata is unchanged":
+    withTestDir("scancache"):
+      discard initCrypto()
+      writeFile(testDir / "doc.txt", "alpha")
+      let folder = newFolderConfig("test", testDir)
+      let transfer = newFileTransfer(folder, newSyncProtocol())
+      defer: transfer.close()
+      let firstScan = transfer.scanner.scanDirectory()
+      check firstScan.len == 1
+      let originalHash = firstScan[0].hash
+      let originalMtime = firstScan[0].mtime
+      writeFile(testDir / "doc.txt", "bravo")
+      setLastModificationTime(testDir / "doc.txt", fromUnix(originalMtime))
+      let secondScan = transfer.scanner.scanDirectory()
+      check secondScan.len == 1
+      check secondScan[0].hash == originalHash
+
+suite "scanFile uses crypto hash":
+  test "scanFile computes blake2b content hash":
+    withTestDir("scanhash"):
+      discard initCrypto()
+      writeFile(testDir / "doc.txt", "some content here")
+      let folder = newFolderConfig("test", testDir)
+      let scanner = newFileScanner(folder)
+      let info = scanner.scanFile(testDir / "doc.txt")
+      check info.path == "doc.txt"
+      check info.size > 0
+      var zeroHash: array[32, byte]
+      check info.hash != zeroHash
+
+  test "same content produces same hash":
+    withTestDir("scanhashsame"):
+      discard initCrypto()
+      writeFile(testDir / "a.txt", "identical content")
+      writeFile(testDir / "b.txt", "identical content")
+      let folder = newFolderConfig("test", testDir)
+      let scanner = newFileScanner(folder)
+      let infoA = scanner.scanFile(testDir / "a.txt")
+      let infoB = scanner.scanFile(testDir / "b.txt")
+      check infoA.hash == infoB.hash
+
+  test "different content produces different hash":
+    withTestDir("scanhashdiff"):
+      discard initCrypto()
+      writeFile(testDir / "a.txt", "content A")
+      writeFile(testDir / "b.txt", "content B is different")
+      let folder = newFolderConfig("test", testDir)
+      let scanner = newFileScanner(folder)
+      let infoA = scanner.scanFile(testDir / "a.txt")
+      let infoB = scanner.scanFile(testDir / "b.txt")
+      check infoA.hash != infoB.hash
+
+suite "scanFile encrypted_path":
+  test "encrypted folder with folderKey computes encrypted_path":
+    withTestDir("scanencpath"):
+      discard initCrypto()
+      writeFile(testDir / "secret.txt", "secret stuff")
+      var folder = newFolderConfig("test", testDir)
+      folder.encrypted = true
+      folder.folderKey = generateKey()
+      let scanner = newFileScanner(folder)
+      let info = scanner.scanFile(testDir / "secret.txt")
+      check info.path == "secret.txt"
+      check info.encryptedPath != "secret.txt"
+      check info.encryptedPath.len > 0
+
+  test "unencrypted folder uses plaintext as encrypted_path":
+    withTestDir("scanunencpath"):
+      discard initCrypto()
+      writeFile(testDir / "shared.txt", "shared stuff")
+      var folder = newFolderConfig("test", testDir)
+      folder.encrypted = false
+      let scanner = newFileScanner(folder)
+      let info = scanner.scanFile(testDir / "shared.txt")
+      check info.path == "shared.txt"
+      check info.encryptedPath == "shared.txt"
+
+  test "encrypted path is deterministic":
+    withTestDir("scanencdet"):
+      discard initCrypto()
+      writeFile(testDir / "file.txt", "content")
+      var folder = newFolderConfig("test", testDir)
+      folder.encrypted = true
+      folder.folderKey = generateKey()
+      let scanner = newFileScanner(folder)
+      let info1 = scanner.scanFile(testDir / "file.txt")
+      let info2 = scanner.scanFile(testDir / "file.txt")
+      check info1.encryptedPath == info2.encryptedPath
+
 suite "scanChanges":
   test "added file detected":
     withTestDir("changeadd"):
+      discard initCrypto()
       writeFile(testDir / "new.txt", "new file")
       let folder = newFolderConfig("test", testDir)
       let scanner = newFileScanner(folder)
@@ -65,36 +160,69 @@ suite "scanChanges":
       check changes[0].kind == fcAdded
       check changes[0].info.path == "new.txt"
 
-  test "modified file detected":
+  test "modified file detected by mtime/size then hash":
     withTestDir("changemodify"):
-      var prev: seq[FileInfo] = @[]
-      var oldInfo: FileInfo
-      oldInfo.path = "doc.txt"
-      oldInfo.encryptedPath = "doc.txt"
-      oldInfo.size = 5
-      oldInfo.mtime = 100
-      prev.add(oldInfo)
-      writeFile(testDir / "doc.txt", "updated content")
+      discard initCrypto()
+      writeFile(testDir / "doc.txt", "old content")
       let folder = newFolderConfig("test", testDir)
       let scanner = newFileScanner(folder)
-      let changes = scanner.scanChanges(prev)
+      let prevFiles = scanner.scanDirectory()
+      writeFile(testDir / "doc.txt", "updated content that is longer than before")
+      let changes = scanner.scanChanges(prevFiles)
       check changes.len == 1
       check changes[0].kind == fcModified
 
   test "deleted file detected":
     withTestDir("changedelete"):
+      discard initCrypto()
       var prev: seq[FileInfo] = @[]
       var oldInfo: FileInfo
       oldInfo.path = "gone.txt"
       oldInfo.encryptedPath = "gone.txt"
       oldInfo.size = 10
       oldInfo.mtime = 100
+      for i in 0..<32: oldInfo.hash[i] = byte(i)
       prev.add(oldInfo)
       let folder = newFolderConfig("test", testDir)
       let scanner = newFileScanner(folder)
       let changes = scanner.scanChanges(prev)
       check changes.len == 1
       check changes[0].kind == fcDeleted
+
+  test "moved file detected by content hash match":
+    withTestDir("changemove"):
+      discard initCrypto()
+      writeFile(testDir / "original.txt", "same content")
+      let folder = newFolderConfig("test", testDir)
+      let scanner = newFileScanner(folder)
+      let prevFiles = scanner.scanDirectory()
+      removeFile(testDir / "original.txt")
+      createDir(testDir / "moved")
+      writeFile(testDir / "moved" / "original.txt", "same content")
+      let changes = scanner.scanChanges(prevFiles)
+      let moved = changes.filterIt(it.kind == fcMoved)
+      check moved.len == 1
+      check moved[0].info.path == "moved/original.txt"
+      check moved[0].oldPath == "original.txt"
+      let deleted = changes.filterIt(it.kind == fcDeleted)
+      check deleted.len == 0
+      let added = changes.filterIt(it.kind == fcAdded)
+      check added.len == 0
+
+  test "renamed file does not appear as delete + add":
+    withTestDir("changemovenodelta"):
+      discard initCrypto()
+      writeFile(testDir / "old_name.txt", "content here")
+      let folder = newFolderConfig("test", testDir)
+      let scanner = newFileScanner(folder)
+      let prevFiles = scanner.scanDirectory()
+      removeFile(testDir / "old_name.txt")
+      writeFile(testDir / "new_name.txt", "content here")
+      let changes = scanner.scanChanges(prevFiles)
+      let moved = changes.filterIt(it.kind == fcMoved)
+      check moved.len == 1
+      check moved[0].oldPath == "old_name.txt"
+      check moved[0].info.path == "new_name.txt"
 
 suite "Crash safety - atomic write":
   test "write chunks to temp then rename":
@@ -157,9 +285,38 @@ suite "File chunk I/O":
 
   test "scanFile populates file info":
     withTestDir("scanfile"):
+      discard initCrypto()
       writeFile(testDir / "doc.txt", "some content here")
       let folder = newFolderConfig("test", testDir)
       let scanner = newFileScanner(folder)
       let info = scanner.scanFile(testDir / "doc.txt")
       check info.path == "doc.txt"
       check info.size > 0
+      check info.mode > 0
+
+when defined(posix):
+  suite "scanFile metadata":
+    test "scanFile captures symlink target":
+      withTestDir("scansymlink"):
+        discard initCrypto()
+        createSymlink("target.txt", testDir / "link.txt")
+        let folder = newFolderConfig("test", testDir)
+        let scanner = newFileScanner(folder)
+        let info = scanner.scanFile(testDir / "link.txt")
+        check info.path == "link.txt"
+        check info.symlinkTarget == "target.txt"
+        check info.size == int64("target.txt".len)
+
+    test "metadata-only mode change is detected":
+      withTestDir("changemode"):
+        discard initCrypto()
+        let path = testDir / "script.sh"
+        writeFile(path, "echo hi")
+        setFilePermissions(path, {fpUserRead, fpUserWrite, fpGroupRead, fpOthersRead})
+        let folder = newFolderConfig("test", testDir)
+        let scanner = newFileScanner(folder)
+        let prevFiles = scanner.scanDirectory()
+        setFilePermissions(path, {fpUserRead, fpUserWrite, fpUserExec, fpGroupRead, fpOthersRead})
+        let changes = scanner.scanChanges(prevFiles)
+        check changes.len == 1
+        check changes[0].kind == fcModified
