@@ -10,6 +10,7 @@ import chronos
 import libp2p/multiaddress
 import types
 import config
+import crypto
 import daemon
 import control
 import recovery
@@ -207,9 +208,9 @@ proc parseCli*(): CommandLine =
         if args.len >= 4:
           result.configKey = args[2].toLowerAscii()
           case result.configKey
-          of "relay-base-url", "relay_base_url", "relay-region", "relay_region", "sync-window", "sync_window", "bandwidth-limit", "bandwidth_limit":
+          of "relay-base-url", "relay_base_url", "relay-region", "relay_region", "storage-base-path", "storage_base_path", "bandwidth-limit", "bandwidth_limit":
             result.configValue = args[3]
-          of "buddy-pairing-code", "buddy_pairing_code", "buddy-name", "buddy_name", "folder-append-only", "folder_append_only":
+          of "buddy-pairing-code", "buddy_pairing_code", "buddy-name", "buddy_name", "buddy-sync-time", "buddy_sync_time", "sync-time", "sync_time", "folder-append-only", "folder_append_only":
             if args.len >= 5:
               result.configTarget = args[3]
               result.configValue = args[4]
@@ -258,7 +259,7 @@ proc handleInit*() =
   echo "  Announce addr: (set [network].announce_addr after forwarding this port on your router)"
   echo "  Relay base URL: (set with 'buddydrive config set relay-base-url <url>')"
   echo "  Relay region: (set with 'buddydrive config set relay-region <region>')"
-  echo "  Sync window: always (set with 'buddydrive config set sync-window HH:MM-HH:MM')"
+  echo "  Buddy sync time: always (set per buddy with 'buddydrive config set buddy-sync-time <buddy-id> HH:MM')"
   echo ""
   echo "Next steps:"
   echo "  1. Add a folder: buddydrive add-folder <path> --name <name>"
@@ -284,6 +285,11 @@ proc handleConfig*(cmd: CommandLine) =
       saveConfig(cfg)
       echo "Relay region set to: ", cfg.relayRegion
       return
+    of "storage-base-path", "storage_base_path":
+      cfg.storageBasePath = cmd.configValue
+      saveConfig(cfg)
+      echo "Incoming storage base set to: ", cfg.storageBasePath
+      return
     of "bandwidth-limit", "bandwidth_limit":
       let kbps = parseInt(cmd.configValue)
       if kbps < 0:
@@ -297,19 +303,20 @@ proc handleConfig*(cmd: CommandLine) =
         let mbps = (kbps * 8) div 1000
         echo "Bandwidth limit set to: ", kbps, " KB/s (", mbps, " Mbps)"
       return
-    of "sync-window", "sync_window":
+    of "buddy-sync-time", "buddy_sync_time", "sync-time", "sync_time":
+      let idx = cfg.getBuddy(cmd.configTarget)
+      if idx < 0:
+        echo "Buddy not found: ", cmd.configTarget.shortId()
+        return
       if cmd.configValue.toLowerAscii() == "off":
-        cfg.syncWindowStart = ""
-        cfg.syncWindowEnd = ""
+        cfg.buddies[idx].syncTime = ""
       else:
-        let parts = cmd.configValue.split("-", maxsplit = 1)
-        if parts.len != 2 or parseClockMinutes(parts[0]) < 0 or parseClockMinutes(parts[1]) < 0:
-          echo "Invalid sync window. Use HH:MM-HH:MM or 'off'."
+        if parseClockMinutes(cmd.configValue) < 0:
+          echo "Invalid sync time. Use HH:MM or 'off'."
           return
-        cfg.syncWindowStart = parts[0]
-        cfg.syncWindowEnd = parts[1]
+        cfg.buddies[idx].syncTime = cmd.configValue
       saveConfig(cfg)
-      echo "Sync window set to: ", syncWindowDescription(cfg)
+      echo "Sync time for buddy ", cfg.buddies[idx].id.uuid.shortId(), " set to: ", syncTimeDescription(cfg.buddies[idx].syncTime)
       return
     of "buddy-pairing-code", "buddy_pairing_code", "pairing-code", "pairing_code":
       let idx = cfg.getBuddy(cmd.configTarget)
@@ -347,7 +354,7 @@ proc handleConfig*(cmd: CommandLine) =
       return
     else:
       echo "Unknown config key: ", cmd.configKey
-      echo "Supported keys: relay-base-url, relay-region, sync-window, bandwidth-limit, buddy-pairing-code, buddy-name, folder-append-only"
+      echo "Supported keys: relay-base-url, relay-region, storage-base-path, bandwidth-limit, buddy-pairing-code, buddy-name, buddy-sync-time, folder-append-only"
       return
 
   let cfg = loadConfig()
@@ -377,7 +384,6 @@ proc handleConfig*(cmd: CommandLine) =
     echo "  Bandwidth limit: ", cfg.bandwidthLimitKBps, " KB/s"
   else:
     echo "  Bandwidth limit: unlimited"
-  echo "  Sync window: ", syncWindowDescription(cfg)
   echo ""
   
   if cfg.folders.len > 0:
@@ -398,6 +404,7 @@ proc handleConfig*(cmd: CommandLine) =
       echo "    ID: ", buddy.id.uuid
       if buddy.pairingCode.len > 0:
         echo "    Pairing code: ", buddy.pairingCode
+      echo "    Sync time: ", syncTimeDescription(buddy.syncTime)
       echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired yet."
@@ -430,6 +437,8 @@ proc handleAddFolder*(cmd: CommandLine) =
     return
   
   var folder = newFolderConfig(cmd.folderName, absPath, cmd.folderEncrypted)
+  folder.id = generateUuid()
+  folder.folderKey = crypto.generateKey()
   folder.appendOnly = cmd.folderAppendOnly
   
   if cmd.buddyId.len > 0:
@@ -651,7 +660,6 @@ proc handleStatus*() =
   
   echo "Buddy: ", cfg.buddy.name, " (", cfg.buddy.uuid.shortId(), ")"
   echo "Peer ID: ", "(run 'buddydrive start' to connect)"
-  echo "Sync window: ", syncWindowDescription(cfg)
   if cfg.storageBasePath.len > 0:
     echo "Incoming storage base: ", cfg.storageBasePath
     echo "  Layout: <storage base>/<buddy id>/<folder name>/..."
@@ -671,11 +679,11 @@ proc handleStatus*() =
     echo "Use 'buddydrive add-folder <path> --name <name>' to add one."
   
   echo ""
-  
   if cfg.buddies.len > 0:
     echo "Buddies:"
     for buddy in cfg.buddies:
       echo "  ", buddy.id.name, " (", buddy.id.uuid.shortId(), ")"
+      echo "    Sync time: ", syncTimeDescription(buddy.syncTime)
       echo "    Status: Offline"
       if buddy.pairingCode.len > 0:
         echo "    Pairing code: ", buddy.pairingCode

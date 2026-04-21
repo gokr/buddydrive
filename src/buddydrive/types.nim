@@ -15,15 +15,17 @@ type
   BuddyInfo* = object
     id*: BuddyId
     pairingCode*: string
-    syncTime*: string
     addresses*: seq[string]
+    syncTime*: string
     addedAt*: Time
   
   FolderConfig* = object
+    id*: string
     name*: string
     path*: string
     encrypted*: bool
     appendOnly*: bool
+    folderKey*: string
     buddies*: seq[string]
   
   AppConfig* = object
@@ -34,8 +36,6 @@ type
     relayBaseUrl*: string
     relayRegion*: string
     storageBasePath*: string
-    syncWindowStart*: string
-    syncWindowEnd*: string
     bandwidthLimitKBps*: int
     folders*: seq[FolderConfig]
     buddies*: seq[BuddyInfo]
@@ -46,15 +46,27 @@ type
     size*: int64
     mtime*: int64
     hash*: array[32, byte]
+    mode*: int
+    symlinkTarget*: string
   
   FileChangeKind* = enum
     fcAdded
     fcModified
     fcDeleted
+    fcMoved
   
   FileChange* = object
     kind*: FileChangeKind
     info*: FileInfo
+    oldPath*: string
+
+  StorageFileInfo* = object
+    encryptedPath*: string
+    contentHash*: array[32, byte]
+    size*: int64
+    mode*: int
+    symlinkTarget*: string
+    ownerBuddy*: string
   
   ConnectionState* = enum
     csDisconnected
@@ -95,10 +107,12 @@ proc newBuddyId*(uuid: string, name: string = ""): BuddyId =
   result.name = name
 
 proc newFolderConfig*(name, path: string, encrypted = true): FolderConfig =
+  result.id = ""
   result.name = name
   result.path = path
   result.encrypted = encrypted
   result.appendOnly = false
+  result.folderKey = ""
   result.buddies = @[]
 
 proc newAppConfig*(buddy: BuddyId): AppConfig =
@@ -111,8 +125,6 @@ proc newAppConfig*(buddy: BuddyId): AppConfig =
   result.relayBaseUrl = ""
   result.relayRegion = ""
   result.storageBasePath = ""
-  result.syncWindowStart = ""
-  result.syncWindowEnd = ""
   result.bandwidthLimitKBps = 0
   result.folders = @[]
   result.buddies = @[]

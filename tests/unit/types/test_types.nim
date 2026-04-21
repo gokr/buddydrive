@@ -54,8 +54,6 @@ suite "AppConfig":
     check cfg.relayBaseUrl == ""
     check cfg.relayRegion == ""
     check cfg.storageBasePath == ""
-    check cfg.syncWindowStart == ""
-    check cfg.syncWindowEnd == ""
     check cfg.bandwidthLimitKBps == 0
     check cfg.folders.len == 0
     check cfg.buddies.len == 0

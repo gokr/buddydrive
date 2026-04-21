@@ -31,8 +31,8 @@ suite "Integer encoding":
 suite "FileList message":
   test "encode/decode round-trip":
     let msg = newFileList("myfolder", @[
-      FileEntry(path: "a.txt", size: 100, mtime: 1000, hash: "abc123"),
-      FileEntry(path: "b.txt", size: 200, mtime: 2000, hash: "def456")
+      FileEntry(path: "a.txt", encryptedPath: "enc_a", size: 100, mtime: 1000, hash: "abc123", mode: 0o644, symlinkTarget: ""),
+      FileEntry(path: "b.txt", encryptedPath: "enc_b", size: 200, mtime: 2000, hash: "def456", mode: 0o777, symlinkTarget: "target.txt")
     ])
     let encoded = encode(msg)
     check encoded.len > 0
@@ -43,8 +43,11 @@ suite "FileList message":
     check d.folderName == "myfolder"
     check d.files.len == 2
     check d.files[0].path == "a.txt"
+    check d.files[0].encryptedPath == "enc_a"
     check d.files[0].size == 100
     check d.files[1].hash == "def456"
+    check d.files[1].mode == 0o777
+    check d.files[1].symlinkTarget == "target.txt"
 
   test "empty file list":
     let msg = newFileList("empty", @[])
@@ -128,6 +131,38 @@ suite "FileDelete message":
     check decoded.get().kind == msgFileDelete
     check decoded.get().deletedPath == "old_file.txt"
 
+suite "MoveFile message":
+  test "encode/decode round-trip":
+    let msg = newMoveFile("old.txt", "new.txt", "abc123")
+    let decoded = decode(encode(msg))
+    check decoded.isOk
+    check decoded.get().kind == msgMoveFile
+    check decoded.get().oldPath == "old.txt"
+    check decoded.get().newPath == "new.txt"
+    check decoded.get().moveHash == "abc123"
+
+suite "ListPaths messages":
+  test "request round-trip":
+    let msg = newListPathsRequest("folder")
+    let decoded = decode(encode(msg))
+    check decoded.isOk
+    check decoded.get().kind == msgListPathsRequest
+    check decoded.get().listFolderName == "folder"
+
+  test "response round-trip":
+    let msg = newListPathsResponse("folder", @[
+      FileEntry(path: "a.txt", encryptedPath: "enc_a", size: 1, mtime: 2, hash: "h1", mode: 0o644, symlinkTarget: ""),
+      FileEntry(path: "link", encryptedPath: "enc_link", size: 6, mtime: 3, hash: "h2", mode: 0o777, symlinkTarget: "target"),
+    ])
+    let decoded = decode(encode(msg))
+    check decoded.isOk
+    check decoded.get().kind == msgListPathsResponse
+    check decoded.get().listResponseFolderName == "folder"
+    check decoded.get().listFiles.len == 2
+    check decoded.get().listFiles[1].path == "link"
+    check decoded.get().listFiles[1].encryptedPath == "enc_link"
+    check decoded.get().listFiles[1].symlinkTarget == "target"
+
 suite "Ping/Pong messages":
   test "ping round-trip":
     let msg = newPing()
@@ -170,7 +205,7 @@ suite "Decode edge cases":
     check decoded.isErr
 
   test "truncated FileList returns error":
-    let msg = newFileList("folder", @[FileEntry(path: "a.txt", size: 1, mtime: 1, hash: "x")])
+    let msg = newFileList("folder", @[FileEntry(path: "a.txt", encryptedPath: "enc", size: 1, mtime: 1, hash: "x", mode: 0o644, symlinkTarget: "")])
     var encoded = encode(msg)
     let truncated = encoded[0 ..< encoded.len - 5]
     let decoded = decode(truncated)

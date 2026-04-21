@@ -15,54 +15,40 @@ proc parseClockMinutes*(value: string): int =
   except ValueError:
     -1
 
-proc syncTimeDescription*(buddy: BuddyInfo): string =
-  if buddy.syncTime.len > 0:
-    buddy.syncTime
+proc syncTimeDescription*(syncTime: string): string =
+  if syncTime.len > 0:
+    syncTime
   else:
     "always"
 
-proc hasSyncWindow*(config: AppConfig): bool =
-  config.syncWindowStart.len > 0 and config.syncWindowEnd.len > 0
-
-proc syncWindowDescription*(config: AppConfig): string =
-  if hasSyncWindow(config):
-    config.syncWindowStart & "-" & config.syncWindowEnd
-  else:
-    "always"
-
-proc isWithinSyncWindow*(config: AppConfig, currentTime: DateTime = now()): bool =
-  if not hasSyncWindow(config):
+proc isWithinSyncTime*(syncTime: string, currentTime: DateTime = now(), toleranceMinutes = 15): bool =
+  if syncTime.len == 0:
     return true
 
-  let startMinute = parseClockMinutes(config.syncWindowStart)
-  let endMinute = parseClockMinutes(config.syncWindowEnd)
-  if startMinute < 0 or endMinute < 0:
+  let targetMinute = parseClockMinutes(syncTime)
+  if targetMinute < 0:
     return true
 
   let currentMinute = currentTime.hour * 60 + currentTime.minute
-  if startMinute == endMinute:
-    return true
-  if startMinute < endMinute:
-    currentMinute >= startMinute and currentMinute < endMinute
-  else:
-    currentMinute >= startMinute or currentMinute < endMinute
+  let diff = abs(currentMinute - targetMinute)
+  let wrappedDiff = min(diff, (24 * 60) - diff)
+  wrappedDiff <= toleranceMinutes
+
+proc shouldAttemptBuddySync*(buddy: BuddyInfo, currentTime: DateTime = now(), toleranceMinutes = 15): bool =
+  isWithinSyncTime(buddy.syncTime, currentTime, toleranceMinutes)
 
 proc shouldInitiateBuddySync*(buddy: BuddyInfo, currentTime: DateTime = now(), toleranceMinutes = 15): bool =
-  if buddy.syncTime.len == 0:
-    return true
-
-  let scheduledMinute = parseClockMinutes(buddy.syncTime)
-  if scheduledMinute < 0:
-    return true
-
-  let currentMinute = currentTime.hour * 60 + currentTime.minute
-  var diff = abs(currentMinute - scheduledMinute)
-  diff = min(diff, 24 * 60 - diff)
-  diff <= toleranceMinutes
+  shouldAttemptBuddySync(buddy, currentTime, toleranceMinutes)
 
 proc shouldSyncRemoteFile*(folder: FolderConfig, remote: FileInfo, localFound: bool, local: FileInfo = default(FileInfo)): bool =
   if not localFound:
     return true
   if folder.appendOnly:
     return false
-  remote.mtime > local.mtime or remote.size != local.size
+  if remote.mtime != local.mtime or remote.size != local.size:
+    return true
+  if remote.hash != local.hash:
+    return true
+  if remote.mode != local.mode or remote.symlinkTarget != local.symlinkTarget:
+    return true
+  false

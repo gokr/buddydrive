@@ -1,9 +1,10 @@
-import std/[strutils, json, options]
+import std/[json, options]
 import results
 import chronos
 import curly
 import webby/httpheaders
 import libsodium/sodium
+import ../types
 import ../recovery
 import node
 
@@ -29,6 +30,8 @@ type
     peerId*: string
     addresses*: seq[string]
     relayRegion*: string
+    isPubliclyReachable*: bool
+    syncTime*: string
     timestamp*: string
 
 const
@@ -60,6 +63,11 @@ proc newDiscovery*(node: BuddyNode, relayBaseUrl: string): DiscoveryService =
   result.relayBaseUrl = relayBaseUrl
   result.started = false
 
+proc shouldInitiate*(myBuddyId: string, myPubliclyReachable: bool, buddyId: string, buddyRecord: BuddyRecord): bool =
+  if myPubliclyReachable != buddyRecord.isPubliclyReachable:
+    return not myPubliclyReachable
+  myBuddyId < buddyId
+
 proc start*(discovery: DiscoveryService) {.async.} =
   if discovery.started:
     return
@@ -68,12 +76,15 @@ proc start*(discovery: DiscoveryService) {.async.} =
 proc stop*(discovery: DiscoveryService) {.async.} =
   discovery.started = false
 
-proc publishBuddy*(discovery: DiscoveryService, pairingCode: string, relayRegion: string = ""): bool =
+proc publishBuddy*(discovery: DiscoveryService, buddy: BuddyInfo, relayRegion: string = "", isPubliclyReachable = false): bool =
   if not discovery.started:
     return false
 
-  let discoveryKey = try: deriveDiscoveryKey(pairingCode) except: return false
-  let authKey = try: deriveAuthKey(pairingCode) except: return false
+  if buddy.pairingCode.len == 0:
+    return false
+
+  let discoveryKey = try: deriveDiscoveryKey(buddy.pairingCode) except: return false
+  let authKey = try: deriveAuthKey(buddy.pairingCode) except: return false
 
   let addrs = discovery.node.getAdvertisedAddrs()
   var addrStrs: seq[string] = @[]
@@ -82,7 +93,9 @@ proc publishBuddy*(discovery: DiscoveryService, pairingCode: string, relayRegion
 
   var j = %*{
     "peerId": discovery.node.peerIdStr(),
-    "addresses": addrStrs
+    "addresses": addrStrs,
+    "isPubliclyReachable": isPubliclyReachable,
+    "syncTime": buddy.syncTime
   }
   if relayRegion.len > 0:
     j["relayRegion"] = %relayRegion
@@ -143,6 +156,10 @@ proc findBuddy*(discovery: DiscoveryService, pairingCode: string): Option[BuddyR
         record.addresses.add(addr.getStr())
       if j.hasKey("relayRegion"):
         record.relayRegion = j["relayRegion"].getStr()
+      if j.hasKey("isPubliclyReachable"):
+        record.isPubliclyReachable = j["isPubliclyReachable"].getBool(false)
+      if j.hasKey("syncTime"):
+        record.syncTime = j["syncTime"].getStr("")
       if j.hasKey("timestamp"):
         record.timestamp = j["timestamp"].getStr()
       return some(record)
@@ -151,7 +168,7 @@ proc findBuddy*(discovery: DiscoveryService, pairingCode: string): Option[BuddyR
     echo "Error finding buddy: ", e.msg
     return none(BuddyRecord)
 
-proc publishBuddyLoop*(discovery: DiscoveryService, pairingCode: string, relayRegion: string = "") {.async.} =
+proc publishBuddyLoop*(discovery: DiscoveryService, buddy: BuddyInfo, relayRegion: string = "", isPubliclyReachable = false) {.async.} =
   while discovery.started:
-    discard discovery.publishBuddy(pairingCode, relayRegion)
+    discard discovery.publishBuddy(buddy, relayRegion, isPubliclyReachable)
     await sleepAsync(PublishInterval)

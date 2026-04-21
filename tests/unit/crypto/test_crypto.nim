@@ -1,5 +1,7 @@
 import std/unittest
 import std/strutils
+import std/os
+import std/times
 import ../../../src/buddydrive/crypto
 import ../../../src/buddydrive/recovery
 
@@ -167,12 +169,25 @@ suite "Encrypt/Decrypt API edge cases":
     except:
       check true
 
-  test "encryptFilename/decryptFilename round-trip":
+  test "encryptPath/decryptPath round-trip":
     let key = generateKey()
-    let filename = "test_document.txt"
-    let enc = encryptFilename(filename, key)
-    let dec = decryptFilename(enc, key)
-    check dec == filename
+    let plainPath = "photos/2024/vacation.jpg"
+    let enc = encryptPath(plainPath, key)
+    let dec = decryptPath(enc, key)
+    check dec == plainPath
+
+  test "encryptPath is deterministic":
+    let key = generateKey()
+    let plainPath = "documents/report.pdf"
+    let enc1 = encryptPath(plainPath, key)
+    let enc2 = encryptPath(plainPath, key)
+    check enc1 == enc2
+
+  test "encryptPath produces different ciphertext for different paths":
+    let key = generateKey()
+    let enc1 = encryptPath("photos/a.jpg", key)
+    let enc2 = encryptPath("photos/b.jpg", key)
+    check enc1 != enc2
 
   test "encrypt with invalid key size raises":
     expect CryptoError:
@@ -182,3 +197,101 @@ suite "Encrypt/Decrypt API edge cases":
     let enc = EncryptedData(nonce: "x", ciphertext: "y")
     expect CryptoError:
       discard decrypt(enc, "shortkey")
+
+suite "Streaming hash":
+  test "hashFileStream returns 32 bytes":
+    let tmpDir = getTempDir() / "buddydrive_test_hashfile_" & $getTime().toUnix()
+    createDir(tmpDir)
+    let tmpFile = tmpDir / "testfile.txt"
+    writeFile(tmpFile, "hello world")
+    let hash = hashFileStream(tmpFile)
+    check hash.len == 32
+    removeDir(tmpDir)
+
+  test "hashFileStream is deterministic":
+    let tmpDir = getTempDir() / "buddydrive_test_hashfile2_" & $getTime().toUnix()
+    createDir(tmpDir)
+    let tmpFile = tmpDir / "testfile.txt"
+    writeFile(tmpFile, "same content")
+    let h1 = hashFileStream(tmpFile)
+    let h2 = hashFileStream(tmpFile)
+    check h1 == h2
+    removeDir(tmpDir)
+
+  test "hashFileStream produces different hashes for different content":
+    let tmpDir = getTempDir() / "buddydrive_test_hashfile3_" & $getTime().toUnix()
+    createDir(tmpDir)
+    let f1 = tmpDir / "a.txt"
+    let f2 = tmpDir / "b.txt"
+    writeFile(f1, "content A")
+    writeFile(f2, "content B")
+    check hashFileStream(f1) != hashFileStream(f2)
+    removeDir(tmpDir)
+
+  test "hashFileStream matches hashBytes for file contents":
+    let tmpDir = getTempDir() / "buddydrive_test_hashfile4_" & $getTime().toUnix()
+    createDir(tmpDir)
+    let tmpFile = tmpDir / "blob.bin"
+    let content = "abc123".repeat(4096)
+    writeFile(tmpFile, content)
+    let fileHash = hashFileStream(tmpFile)
+    var bytes = newSeq[byte](content.len)
+    for i, ch in content:
+      bytes[i] = byte(ch)
+    let memHash = hashBytes(bytes)
+    check fileHash == memHash
+    removeDir(tmpDir)
+
+suite "Chunk encryption with random nonces":
+  test "encryptChunk/decryptChunk round-trip":
+    let key = generateKey()
+    let data = @[byte(1), byte(2), byte(3), byte(4), byte(5)]
+    let enc = encryptChunk(data, key)
+    let dec = decryptChunk(enc, key)
+    check dec == data
+
+  test "encryptChunk prepends nonce (24 bytes + mac)":
+    let key = generateKey()
+    let data = @[byte(42)]
+    let enc = encryptChunk(data, key)
+    check enc.len == data.len + NonceSize + MacSize
+
+  test "encryptChunk produces different ciphertext each time":
+    let key = generateKey()
+    let data = @[byte(1), byte(2), byte(3)]
+    let enc1 = encryptChunk(data, key)
+    let enc2 = encryptChunk(data, key)
+    check enc1 != enc2
+
+  test "decryptChunk with wrong key fails":
+    let key1 = generateKey()
+    let key2 = generateKey()
+    let data = @[byte(1), byte(2), byte(3)]
+    let enc = encryptChunk(data, key1)
+    expect CatchableError:
+      discard decryptChunk(enc, key2)
+
+suite "Folder key derivation":
+  test "deriveFolderKey is deterministic":
+    let masterKey = generateKey()
+    let folderId = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+    let k1 = deriveFolderKey(masterKey, folderId)
+    let k2 = deriveFolderKey(masterKey, folderId)
+    check k1 == k2
+
+  test "deriveFolderKey returns 32 bytes":
+    let masterKey = generateKey()
+    let folderId = "test-folder-id"
+    let k = deriveFolderKey(masterKey, folderId)
+    check k.len == KeySize
+
+  test "deriveFolderKey with different folder IDs produces different keys":
+    let masterKey = generateKey()
+    let k1 = deriveFolderKey(masterKey, "folder-aaa")
+    let k2 = deriveFolderKey(masterKey, "folder-bbb")
+    check k1 != k2
+
+  test "deriveFolderKey with different master keys produces different keys":
+    let k1 = deriveFolderKey(generateKey(), "same-folder")
+    let k2 = deriveFolderKey(generateKey(), "same-folder")
+    check k1 != k2

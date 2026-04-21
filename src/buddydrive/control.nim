@@ -193,7 +193,9 @@ proc statusJson(): JsonNode =
           "running": running,
           "uptime": uptime,
           "peerId": peerId,
-          "addresses": addresses
+          "addresses": addresses,
+          "syncEnabled": true,
+          "syncWindow": "per-buddy"
         }
     finally:
       db.close()
@@ -208,7 +210,9 @@ proc statusJson(): JsonNode =
       "running": false,
       "uptime": 0,
       "peerId": "",
-      "addresses": []
+      "addresses": [],
+      "syncEnabled": true,
+      "syncWindow": "per-buddy"
     }
   %*{
     "buddy": {"name": "Unknown", "id": ""},
@@ -246,10 +250,10 @@ proc buddiesJson(): JsonNode =
       "id": buddy.id.uuid,
       "name": buddy.id.name,
       "pairingCode": buddy.pairingCode,
-      "syncTime": buddy.syncTime,
       "state": "disconnected",
       "latencyMs": -1,
-      "lastSync": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+      "lastSync": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+      "syncTime": buddy.syncTime
     })
   %*{"buddies": buddies}
 
@@ -315,7 +319,8 @@ proc configJson(): JsonNode =
       "name": buddy.id.name,
       "pairing_code": buddy.pairingCode,
       "sync_time": buddy.syncTime,
-      "addedAt": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+      "addedAt": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+      "syncTime": buddy.syncTime
     })
   %*{
     "buddy": {
