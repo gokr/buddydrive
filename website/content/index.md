@@ -7,7 +7,7 @@ tagline: Backup your life, with a friend
 
 **Title:** BuddyDrive
 **Subtitle:** Backup your life, with a friend.
-**Description:** Peer-to-peer folder sync with relay-backed restore. Keep your documents, photos, and other important folders on a trusted buddy machine, then rebuild a lost machine with a 12-word recovery phrase and resync missing files.
+**Description:** Peer-to-peer encrypted folder sync with relay-backed restore. Keep your documents, photos, and other important folders encrypted on a trusted buddy machine, then rebuild a lost machine with a 12-word recovery phrase and resync missing files.
 
 **CTA Primary:** Get Started
 **CTA Secondary:** Learn More
@@ -48,7 +48,7 @@ Pair with a friend, family member, or trusted colleague. Keep an offsite copy on
 
 ### Direct Transport Encryption
 
-Direct libp2p peer connections use Noise transport encryption, and relay-backed config backups are encrypted with your recovery master key before upload.
+Direct libp2p peer connections use Noise transport encryption. Folder contents are encrypted with XChaCha20-Poly1305 before being stored on your buddy's machine — they see only opaque encrypted blobs, not your filenames or file data. Relay-backed config backups are encrypted with your recovery master key before upload.
 
 ### Recovery Phrase
 
@@ -56,7 +56,7 @@ Set up a 12-word recovery phrase once. BuddyDrive derives a master key from it, 
 
 ### Automatic Sync
 
-Changed files sync automatically in the background. If a file is missing locally but still exists on your buddy, the next successful sync can restore it.
+Changed files sync automatically in the background. File moves are detected via content hashing (no re-upload for renames). If a file is missing locally but still exists on your buddy, the next successful sync restores it with hash verification.
 
 ### Append-Only Protection
 

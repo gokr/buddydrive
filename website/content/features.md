@@ -25,8 +25,9 @@ Your Machine <--direct or relay--> Buddy's Machine
 BuddyDrive uses a relay KV-store for peer discovery and libp2p for direct transport. Current connectivity options include direct public TCP connections and relay fallback. Features:
 
 - **Relay KV-store discovery** - find your buddy via pairing-code-derived keys on the relay
+- **Deterministic initiator selection** - the side without a public address initiates; if both same reachability, lower buddy UUID initiates
 - **Relay fallback** - available when both peers store the same pairing code for the relationship
-- **Multi-address support** - connects via standard libp2p multiaddrs
+- **Always accept incoming** - incoming connections from known buddies are accepted regardless of sync time
 - **Yamux multiplexing** - multiple streams over one connection
 
 ### Automatic File Sync
@@ -38,6 +39,15 @@ Once paired and configured, BuddyDrive runs in the background:
 - **Chunked transfer** - handles large files efficiently
 - **Resume-friendly flow** - interrupted transfers can continue
 
+### Encrypted Backup
+
+When folder encryption is enabled (the default), filenames and file contents are encrypted before being stored on your buddy's machine:
+
+- **Deterministic path encryption** — same filename always encrypts to the same ciphertext, enabling move detection without re-uploading
+- **Random content nonces** — each 64KB chunk is encrypted with a fresh random nonce, preventing nonce reuse across file versions
+- **Opaque storage** — your buddy sees only encrypted blobs, not your filenames or file contents
+- **Unencrypted sharing mode** — set `encrypted = false` to share files plaintext for collaboration
+
 ### Restore Missing Files
 
 The sync engine restores missing local files when they still exist on the buddy side:
@@ -45,7 +55,15 @@ The sync engine restores missing local files when they still exist on the buddy 
 - Lose a local copy
 - Reconnect to your buddy
 - BuddyDrive requests the missing file during the next sync
-- The file is recreated locally
+- The file is recreated locally and hash-verified
+
+### Move and Delete Detection
+
+BuddyDrive detects file renames and deletes efficiently:
+
+- **Moved files** — detected via content hash matching; the buddy renames the encrypted path without re-uploading
+- **Deleted files** — propagated to the buddy with a delete instruction
+- **Content-hash-based comparison** — streaming blake2b hash used for change detection, not just mtime/size
 
 ### Folder Policies
 
@@ -79,7 +97,7 @@ Pairing uses a short code that you share with your buddy out-of-band:
 
 ### Direct Transport Encryption
 
-Direct libp2p peer connections use Noise transport encryption. Recovery config blobs synced to the relay are encrypted with the recovery master key before upload.
+Direct libp2p peer connections use Noise transport encryption. Recovery config blobs synced to the relay are encrypted with the recovery master key before upload. Folder contents are encrypted with XChaCha20-Poly1305 before being stored on the buddy's machine.
 
 ### Recovery Metadata
 
@@ -98,6 +116,7 @@ When both you and your buddy edit the same file:
 - **Last-write-wins** by default
 - **Append-only mode** avoids remote overwrites of existing local files
 - **Missing files can still be restored** even in append-only mode
+- **Move detection** avoids full re-upload when a file is renamed
 - **No built-in version history yet**
 
 ### Large File Support
@@ -143,12 +162,11 @@ Run on servers, NAS boxes, or Raspberry Pi with the CLI only.
 
 ## Limitations
 
-Current limitations to be aware of:
-
 - Background sync depends on peers connecting successfully
 - One buddy per folder today
-- `recover` restores config from the relay path today; the buddy fallback prompt is not wired up yet
+- `recover` restores config from the relay path today; buddy-backed config fetch is not implemented yet
 - `export-recovery` shows stored recovery metadata, not the original phrase
+- `init --with-recovery` is shown in help but not implemented; use `init` then `setup-recovery`
 - No mobile apps yet
 - No file versioning yet
 

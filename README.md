@@ -14,10 +14,13 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 
 ## Features
 
-- **P2P Networking** - libp2p with relay-backed KV-store discovery, direct public TCP dialing, UPnP attempts, and relay fallback
+- **P2P Networking** - libp2p with relay-backed KV-store discovery, deterministic initiator selection, direct public TCP dialing, UPnP attempts, and relay fallback
+- **Encrypted Backup** - files stored encrypted on your buddy's machine (filenames and content); deterministic path encryption for move detection, random content nonces for safety
+- **Streaming Blake2b Hashing** - content-hashed sync with move and delete detection, no full-file-in-memory hashing
 - **Recovery And Restore** - 12-word recovery phrase, stored master key, encrypted config sync to relay, and config restore on a new machine
-- **Restore Missing Files** - normal sync recreates files that exist on your buddy but are missing locally
-- **Folder Policies** - append-only mode prevents remote overwrites of existing local files
+- **Restore Missing Files** - normal sync recreates files that exist on your buddy but are missing locally, with hash verification
+- **Per-Buddy Sync Scheduling** - each buddy can have its own sync time; incoming connections always accepted
+- **Folder Policies** - append-only mode prevents remote overwrites of existing local files; per-folder encryption flag
 - **Simple CLI** - easy to use command-line interface
 - **Web GUI** - browser-based UI served from the daemon, works on any device
 - **GTK4 GUI** - native desktop application for monitoring and configuration (Linux)
@@ -168,7 +171,8 @@ Append-only folders still protect existing local files from being overwritten by
 
 ### Connectivity Notes
 
-- BuddyDrive connects peers when it discovers a public TCP address for the buddy, or when relay fallback is configured.
+- BuddyDrive uses deterministic initiator selection: the side without a public address initiates (it dials the public side directly); if both are public or both private, the side with the lower buddy UUID initiates.
+- Incoming connections from known buddies are always accepted regardless of sync time.
 - For direct connections, forward the configured `listen_port` on your router and set `[network].announce_addr` in `~/.buddydrive/config.toml` to a public multiaddr such as `/ip4/<public-ip>/tcp/41721`.
 - For relay fallback, configure relay region. The stored pairing code is reused as the relay shared secret:
 
@@ -177,20 +181,31 @@ buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
 ```
 
+- Per-buddy sync scheduling: set a sync time for each buddy to control when to initiate connections:
+
+```bash
+buddydrive config set buddy-sync-time <buddy-id> 03:00
+```
+
 The public relay for TCP fallback is at `01.proxy.koyeb.app:19447`. The KV store for config recovery is at `https://buddydrive-tankfeud-ddaec82a.koyeb.app`. See [relay/README.md](relay/README.md) for relay details and self-hosting notes.
 
 ## Roadmap
 
-- [ ] Delta sync (rolling hash)
+- [x] Delta sync (content-hash-based move/delete detection)
 - [x] GTK4 desktop app
 - [x] Web GUI (browser-based, served from daemon)
 - [x] Bandwidth limiting
+- [x] Encrypted backup (filenames + content encrypted on buddy's machine)
+- [x] Per-buddy sync scheduling
+- [x] Move and delete propagation
 - [ ] System tray integration
 - [ ] Auto-start on boot
-- [ ] Package for distros (deb, rpm, brew)
+- [ ] Debian package (deb)
+- [ ] Package for other distros (rpm, brew)
 - [ ] Multiple buddies per folder
 - [ ] Selective sync (ignore patterns)
 - [ ] Version history
+- [ ] Buddy-backed config fetch for recovery
 
 ## Contributing
 

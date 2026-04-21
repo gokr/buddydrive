@@ -111,11 +111,19 @@ Optional:
 - `--port <control-port>` - change the local control API port
 - `--daemon` - accepted, but currently continues in the foreground
 
+### Per-Buddy Sync Time
+
+Each buddy can have an optional sync time that controls when to initiate connections. Incoming connections are always accepted:
+
+```bash
+buddydrive config set buddy-sync-time <buddy-id> 03:00
+```
+
+When empty (default), the daemon initiates whenever it discovers a buddy address.
+
 ### Connectivity Notes
 
-BuddyDrive discovers buddies by publishing and looking up address records on the relay. Discovery keys are derived from the pairing code, so both sides automatically find each other. Lookup runs every 10 minutes; cached addresses allow reconnection even if the relay is temporarily unavailable.
-
-BuddyDrive connects peers in one of two ways:
+BuddyDrive connects peers using deterministic initiator selection: the side without a public address initiates (it dials the public side directly), or the side with the lower buddy UUID if both are the same reachability. Incoming connections from known buddies are always accepted. Connectivity options:
 
 1. Direct connection with a public TCP address
 2. Relay fallback using the stored pairing code
@@ -146,6 +154,7 @@ buddydrive status
 - `buddydrive status` shows configured state, not live daemon connectivity
 - `buddydrive connect` does not perform a manual direct dial yet
 - `buddydrive export-recovery` shows stored recovery metadata, not the original 12-word phrase
+- `buddydrive init --with-recovery` is shown in help but not implemented; use `init` then `setup-recovery`
 
 ## GUI
 
@@ -212,7 +221,7 @@ buddydrive add-folder ~/Documents --name docs --append-only
 # Configure relay fallback
 buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu
-buddydrive config set buddy-pairing-code abc123 swift-eagle
+buddydrive config set buddy-pairing-code abc123 ABCD-EFGH
 
 # Set up recovery
 buddydrive setup-recovery
@@ -245,21 +254,23 @@ listen_port = 41721
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
 relay_base_url = "https://buddydrive.net/relays"
 relay_region = "eu"
-sync_window_start = ""
-sync_window_end = ""
+storage_base_path = ""
 bandwidth_limit_kbps = 0
 
 [[folders]]
+id = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
 name = "docs"
 path = "/home/alice/Documents"
 encrypted = true
 append_only = false
+folder_key = "a1b2c3d4e5f6..."
 buddies = ["bob-uuid"]
 
 [[buddies]]
 id = "bob-uuid"
 name = "Bob"
-pairing_code = "swift-eagle"
+pairing_code = "ABCD-EFGH"
+sync_time = "03:00"
 added_at = "2026-04-10T12:00:00Z"
 ```
 

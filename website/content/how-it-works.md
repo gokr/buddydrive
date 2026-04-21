@@ -80,8 +80,10 @@ How two buddies find each other:
 Current connectivity options:
 
 - **Public TCP address** - direct connection when `announce_addr` points to a reachable public address
-- **Relay fallback** - used when `relay_region` is set and both sides store the same buddy `pairing_code`
 - **UPnP** - automatic port forwarding attempt when no explicit `announce_addr` is set
+- **Relay fallback** - used when `relay_region` is set and both sides store the same buddy `pairing_code`
+- **Deterministic initiator** - the side without a public address initiates; if both same reachability, lower buddy UUID initiates
+- **Always accept incoming** - incoming connections from known buddies are accepted regardless of sync time
 
 ## File Sync
 
@@ -89,25 +91,22 @@ Current connectivity options:
 
 The sync manager monitors configured folders:
 
-1. Scan files in the folder
-2. Capture path, size, mtime, and local hash state
+1. Scan files in the folder using streaming blake2b hash (64KB chunks, never full file in memory)
+2. Capture path, encrypted path, size, mtime, content hash, mode, and symlink target
 3. Compare against the previous index
-4. Queue added, modified, and deleted files
+4. Detect added, modified, deleted, and moved files (move detection via content hash matching)
 
 ### Transfer Protocol
 
-File transfer uses a simple chunked protocol:
+File transfer uses a chunked protocol with encryption:
 
-```json
-{
-  "type": "file_request",
-  "path": "photos/2024/vacation.jpg",
-  "offset": 0,
-  "length": 65536
-}
+```text
+File list exchange → Delta computation (moves, deletes, missing) → Chunked transfer → Hash verification
 ```
 
-Chunks are sent in 64KB blocks. LZ4 compression is used when it helps.
+Chunks are sent in 64KB blocks. LZ4 compression is used when it helps. When folder encryption is enabled, chunks are encrypted with random nonces (XChaCha20-Poly1305). Paths are encrypted with deterministic nonces so the same filename always encrypts the same way.
+
+Restored files are hash-verified after write.
 
 ### Restore Behavior
 
@@ -163,17 +162,19 @@ Local HTTP server (default port 17521) for GUI communication:
 
 ### Current
 
-- Sync is triggered when buddies connect
+- Sync uses deterministic initiator selection (CGNAT-correct)
 - One buddy per folder today
-- Buddy-backed config fetch for `recover` is not implemented yet
-- No delta sync for large files
+- Buddy-backed config fetch for `recover` is not implemented yet (relay path works)
+- No delta sync for large files (partial-chunk diffs)
 - No selective download
 
 ### Planned
 
 - Better background daemon management
 - Multiple buddies per folder
-- Delta sync
-- More polished restore UX in the GUI
+- Delta sync (rolling hash for partial-chunk diffs)
+- Connection upgrade (replace relay with direct when possible)
+- Long-lived CGNAT connections (keepalive)
+- Buddy-backed config fetch for recovery
 
 See [Features](/features) for user-facing capabilities or [Security](/security) for current security scope.

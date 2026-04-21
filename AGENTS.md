@@ -199,22 +199,9 @@ tests/
 - **Chunk encryption with random nonces**: each chunk gets a random nonce (24 bytes, prepended to ciphertext). Deterministic nonces are unsafe for content — same (file, offset) may have different plaintext across versions, causing nonce reuse.
 - **Folder key from stable ID**: `folderKey = generichash(masterKey + "/folder/" + folderId)`. `folderId` is a UUID, not the folder name, so renaming doesn't orphan remote data.
 
-## Current Sync Model — Known Issues
+## Current Sync Model
 
-The existing sync implementation has fundamental problems. See `docs/PLAN.md` for the full replacement plan. Key issues:
-
-- **No encryption at rest**: `FolderConfig.encrypted` is stored but not wired into transfer path. `encryptedPath` is always set to `path`.
-- **Broken hash function**: `scanner.nim:hashFile` uses `std/hashes.hash` (64-bit non-cryptographic, reads entire file into memory). Not suitable for cross-machine comparison.
-- **No move detection**: renamed file appears as delete + add, causing full re-upload.
-- **No delete propagation**: `msgFileDelete` exists in protocol but is never sent or handled.
-- **Hash not used in comparison**: `shouldSyncRemoteFile` only compares mtime and size.
-- **Global sync window**: `syncWindowStart/End` applies to all buddies equally. No per-buddy scheduling.
-- **Initiation problem**: both sides try to connect independently. CGNAT side causes unnecessary relay fallback.
-- **Incoming rejected during closed window**: `handleIncomingConnection` rejects when window is closed.
-
-## New Sync Model (in progress)
-
-See `docs/PLAN.md` for the full implementation plan. Summary:
+The new sync model is now **largely implemented**. See `docs/PLAN.md` for the full design and remaining work. Key implemented features:
 
 - **Encrypted backup model**: files stored encrypted on buddy's machine (filenames + content). Buddy is storage, not co-author.
 - **Per-buddy sync_time**: replaces global sync window. Controls when to initiate, not when to accept.
@@ -225,8 +212,19 @@ See `docs/PLAN.md` for the full implementation plan. Summary:
 - **Random content nonces**: each chunk encrypted with random nonce (prepended). Same file encrypted twice produces different ciphertext — prevents nonce reuse.
 - **Content-hash-based sync**: owner sends plaintext blake2b hash to storage buddy. Detects changes, moves, and deletes.
 - **Owner-authoritative moves**: A tells B "rename X to Y". B does not infer moves from ciphertext identity.
+- **Delete propagation**: `msgFileDelete` is sent and handled.
+- **Hash verification on restore**: `verifyRestoredFile` re-scans and checks hash after write.
 - **SQLite index is cache**: both sides maintain indexes for performance, but restore only needs the folder key + buddy's filesystem.
 - **Restore flow**: recover config from relay → connect to buddy → list encrypted paths → decrypt paths → request missing files → verify hashes → rebuild index
+
+### Remaining Work
+
+- **Buddy-backed config fetch**: `syncConfigToBuddy()` and `fetchConfigFromBuddy()` are not implemented yet. Recovery works via relay path only.
+- **Connection reuse**: check for existing transport connections before new dial — not yet implemented.
+- **Connection upgrade**: replace relay with direct when possible — not yet implemented.
+- **Long-lived CGNAT connections**: keepalive and prompt redial — not yet implemented.
+- **`init --with-recovery`**: parsed as CLI flag but does nothing. Use `init` then `setup-recovery`.
+- **Large folder listings**: file list exchange uses a single framed message (30MB max). Pagination or streaming deferred.
 
 ### HTTP Client (curly)
 
@@ -266,7 +264,7 @@ See `docs/PLAN.md` for the full implementation plan. Summary:
 - **lz4wrapper** (fork) — LZ4 compression for file chunks
 - **nim-zlib** (pinned) — zlib for libp2p; pinned because libp2p declares underspecified version
 
-## Recovery System (in progress)
+## Recovery System
 
 See `docs/PLAN.md` for full details. Key points:
 
@@ -275,14 +273,14 @@ See `docs/PLAN.md` for full details. Key points:
 - Config encrypted before syncing to relay/buddies
 - Public key (Base58) used as relay KV store lookup key
 - TiDB Cloud for relay KV store
-- Default KV API URL: `https://01.proxy.koyeb.app`
+- Default KV API URL: `https://buddydrive-tankfeud-ddaec82a.koyeb.app`
 - Default TCP relay: `01.proxy.koyeb.app:19447`
 
 ## Testing
 
 Tests use `std/unittest` and run via testament with `nimble test`:
 
-- **Unit tests**: `tests/unit/*/*.nim` — 16 test files covering config, crypto, recovery, messages, policy, scanner, transfer crash safety, control, control_web, rawrelay, index, pairing, types, config_sync, discovery, geoip_ranges
+- **Unit tests**: `tests/unit/*/*.nim` — 17 test files covering config, crypto, recovery, messages, policy, scanner, transfer crash safety, control, control_web, rawrelay, index, pairing, types, config_sync, discovery, session, geoip_ranges
 - **Integration tests**: `tests/integration/*.nim` — 7 test files covering CLI flows, KV API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
 
 Integration tests are environment-dependent:
@@ -291,7 +289,7 @@ Integration tests are environment-dependent:
 
 Test environment variables:
 - `BUDDYDRIVE_STRICT_INTEGRATION=1` — fail on unavailable services
-- `BUDDYDRIVE_KV_API_URL` — override KV API URL (default: `https://01.proxy.koyeb.app`)
+- `BUDDYDRIVE_KV_API_URL` — override KV API URL (default: `https://buddydrive-tankfeud-ddaec82a.koyeb.app`)
 - `BUDDYDRIVE_LOCAL_KV_DSN` — local KV database connection string
 
 Test utilities (`tests/testutils.nim`):

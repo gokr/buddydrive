@@ -8,11 +8,14 @@ BuddyDrive is designed around a simple principle: you should understand exactly 
 
 ## What Exists Today
 
-BuddyDrive currently has two security layers that are important to understand:
+BuddyDrive currently has these security layers:
 
 | Component | Algorithm | Purpose |
 |-----------|-----------|---------|
 | Direct peer transport | libp2p Noise | Encrypt direct libp2p connections |
+| Folder content encryption | libsodium `crypto_secretbox` (XChaCha20-Poly1305) | Encrypt filenames and file contents stored on buddy's machine |
+| Path encryption | Deterministic nonce from folderKey + path | Same path always encrypts to same ciphertext (enables move detection) |
+| Chunk encryption | Random nonce per 64KB chunk | Prevents nonce reuse across file versions |
 | Recovery config backup | libsodium `crypto_secretbox` | Encrypt config synced to relay |
 | Pairing code | Shared secret | Match buddies, derive discovery keys, HMAC-authenticate relay records, and relay fallback sessions |
 | Recovery phrase | 12-word mnemonic | Re-derive recovery metadata on a new machine |
@@ -39,27 +42,31 @@ The pairing code is a shared secret between buddies:
 
 ## Current Scope And Limits
 
-This is the part that matters most when comparing the docs to the current codebase:
-
 - Direct libp2p transport is encrypted by Noise
+- Folder contents (filenames and file data) are encrypted with XChaCha20-Poly1305 before being stored on the buddy's machine when `encrypted = true` (the default)
 - Recovery config blobs synced to the relay are encrypted with the recovery master key
 - Restore works by recovering config first and then letting normal sync recreate missing files
+- Restored files are hash-verified after write
 - Append-only protects existing local files from remote overwrite
 
-Current limitation: application-level encryption for synced folder contents is not wired into the active sync path yet. Pair only with buddies you trust to hold your files.
+When `encrypted = false` (sharing mode), files are stored plaintext on the buddy's machine. Pair only with buddies you trust for unencrypted folders.
 
 ## What Your Buddy Can See Today
 
-Your buddy can see:
+When folder encryption is enabled (default):
 
-- The folders and files you sync with them
-- File contents they receive through normal sync
-- Total storage use and sync timing
-
-Your buddy cannot see:
-
+Your buddy **cannot** see:
+- Your original filenames (encrypted with deterministic path encryption)
+- Your file contents (encrypted with random nonces per chunk)
 - The encrypted recovery config stored in the relay without your recovery phrase
 - Your other buddies' configuration unless you share it with them
+
+Your buddy **can** see:
+- The total storage use and sync timing
+- The size of encrypted blobs on disk
+
+When folder encryption is disabled (`encrypted = false`):
+- Your buddy can see folder and file names, and read file contents
 
 ## Threat Model
 
@@ -73,7 +80,7 @@ Your buddy cannot see:
 
 ### What We Do Not Protect Against
 
-**Untrusted buddies**: if you pair with someone you do not trust, they can receive your synced files.
+**Untrusted buddies with unencrypted folders**: if you pair with someone you do not trust and use `encrypted = false`, they can read your synced files.
 
 **Your machine compromised**: malware on your machine can read files before or during sync.
 
@@ -100,4 +107,4 @@ Only pair with people you trust:
 
 ## Bottom Line
 
-BuddyDrive already protects direct libp2p transport and encrypts relay-backed recovery config with your master key. Recovery and restore are now part of the product, but synced folder contents should still be treated as visible to the buddy who stores them in the current implementation.
+BuddyDrive protects direct libp2p transport with Noise, encrypts relay-backed recovery config with your master key, and encrypts folder filenames and contents with XChaCha20-Poly1305 before storing them on your buddy's machine. Your buddy sees only opaque encrypted blobs. Set `encrypted = false` only for active collaboration with buddies you trust.

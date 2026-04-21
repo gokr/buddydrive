@@ -91,29 +91,37 @@ Build BuddyDrive — a P2P encrypted folder sync tool in Nim that syncs folders 
 
 ---
 
-## Current Sync Model — Problems
+## Current Sync Model
 
-The existing sync implementation has fundamental issues that require a full replacement:
+The new sync model (described below) is now **largely implemented**. The original v1 sync had fundamental issues that have been fixed:
 
-1. **No encryption at rest** — `FolderConfig.encrypted` is stored but not wired into the transfer path. `encryptedPath` is always set to `path`. Files are stored plaintext on the buddy's machine.
+1. ~~**No encryption at rest**~~ — **FIXED**: `FolderConfig.encrypted` is wired into the transfer path. Filenames are encrypted with deterministic nonces, content chunks with random nonces. `encryptedPath` is computed from the plaintext path via `encryptPath()`.
 
-2. **Broken hash function** — `scanner.nim:hashFile` uses Nim's `std/hashes.hash` (64-bit, non-cryptographic, reads entire file into memory). Not suitable for cross-machine comparison.
+2. ~~**Broken hash function**~~ — **FIXED**: `scanner.nim` uses `hashFileStream()` — a streaming blake2b hash via `crypto_generichash_init/update/final` reading 64KB chunks. Never loads full file into memory.
 
-3. **No move detection** — A renamed file appears as delete + add, causing a full re-upload.
+3. ~~**No move detection**~~ — **FIXED**: `scanChanges` detects moved files (same content hash at a new path when the old path disappears). `msgMoveFile` is sent/received in the sync session.
 
-4. **No delete propagation** — `msgFileDelete` exists in the protocol but is never sent or handled.
+4. ~~**No delete propagation**~~ — **FIXED**: `msgFileDelete` is sent in `sendDeltaPhase` and handled in `servePhase`. The `deleteLocalFile` proc removes the file on disk and its index entry.
 
-5. **Hash not used in comparison** — `shouldSyncRemoteFile` only compares mtime and size. A corrupt file with the same size/mtime won't be re-synced.
+5. ~~**Hash not used in comparison**~~ — **FIXED**: `shouldSyncRemoteFile` compares content hash, mtime, size, mode, and symlink target.
 
-6. **Global sync window** — `syncWindowStart/End` applies to all buddies equally. No per-buddy scheduling.
+6. ~~**Global sync window**~~ — **FIXED**: Replaced by per-buddy `syncTime` field. `shouldAttemptBuddySync` checks per-buddy sync time with 15-minute tolerance. Empty sync time means "always."
 
-7. **Initiation problem** — Both sides try to connect independently. When one side is behind CGNAT, the public side fails to dial and falls back to relay unnecessarily, even though the CGNAT side can dial out directly.
+7. ~~**Initiation problem**~~ — **FIXED**: `shouldInitiate()` implements deterministic initiator selection: the side without a public address initiates; if both same reachability, lower buddy UUID initiates.
 
-8. **Incoming connections rejected during closed window** — `handleIncomingConnection` rejects sync when the local window is closed, even though the remote side wants to push.
+8. ~~**Incoming rejected during closed window**~~ — **FIXED**: `handleIncomingConnection` accepts all incoming connections from known buddies regardless of sync time. Sync time controls initiation only.
+
+### Remaining Limitations
+
+- **Buddy-backed config fetch** — `syncConfigToBuddy()` and `fetchConfigFromBuddy()` are not implemented yet. Recovery currently only works via the relay path.
+- **`init --with-recovery`** — Parsed as a CLI flag but does nothing. Use `init` then `setup-recovery` separately.
+- **Long-lived CGNAT connections** — The CGNAT side does not yet maintain persistent/keepalive connections. It reconnects on each sync cycle.
+- **Connection upgrade** — When a direct connection arrives and a relay connection already exists for that buddy, the relay connection is not yet automatically replaced.
+- **Large folder listings** — File list exchange uses a single framed message (30MB max). Pagination or streaming is deferred.
 
 ---
 
-## New Sync Model — Design
+## New Sync Model — Design (Implemented)
 
 ### Core Principle
 
@@ -403,96 +411,101 @@ This is a secondary use case for active collaboration. The primary use case is a
 
 ## Implementation Plan
 
-### Phase A: Crypto Foundation
+### Phase A: Crypto Foundation — COMPLETE
 
 **Files**: `crypto.nim`, `types.nim`, `config.nim`
 
-1. **Streaming content hash** — add `hashFileStream(path: string): array[32, byte]` using `crypto_generichash_init/update/final`
-2. **Deterministic path encryption** — add `encryptPath(plainPath, folderKey): string` and `decryptPath(encPath, folderKey): string` using derived nonce
-3. **Chunk encryption with random nonces** — add `encryptChunk(data, folderKey): seq[byte]` (random nonce, prepended) and `decryptChunk(data, folderKey): seq[byte]` (extracts nonce from prefix)
-4. **Folder key derivation** — add `deriveFolderKey(masterKey, folderId): string`
-5. **Add folder ID and folder key to config** — `FolderConfig` gets `id: string` (UUID) and `folderKey: string` fields. `add-folder` generates both. If recovery is enabled, `folderKey` is derived from master key + folder ID on daemon startup; otherwise the random key from config is used.
-6. **Remove old `hashFile`** — delete the broken `std/hashes`-based function from scanner.nim
-7. **Remove old `encryptFilename`/`decryptFilename``** — replace with the new deterministic `encryptPath`/`decryptPath` (these fix the random-nonce problem in the old code)
+1. **Streaming content hash** — `hashFileStream(path: string): array[32, byte]` using `crypto_generichash_init/update/final` — DONE
+2. **Deterministic path encryption** — `encryptPath(plainPath, folderKey): string` and `decryptPath(encPath, folderKey): string` using derived nonce — DONE
+3. **Chunk encryption with random nonces** — `encryptChunk(data, folderKey): seq[byte]` (random nonce, prepended) and `decryptChunk(data, folderKey): seq[byte]` (extracts nonce from prefix) — DONE
+4. **Folder key derivation** — `deriveFolderKey(masterKey, folderId): string` — DONE
+5. **Add folder ID and folder key to config** — `FolderConfig` has `id: string` (UUID) and `folderKey: string` fields. `add-folder` generates both. — DONE
+6. **Remove old `hashFile`** — deleted the broken `std/hashes`-based function from scanner.nim — DONE
+7. **Remove old `encryptFilename`/`decryptFilename`** — replaced with the new deterministic `encryptPath`/`decryptPath` — DONE
 
-### Phase B: Index Redesign
+### Phase B: Index Redesign — COMPLETE
 
 **Files**: `index.nim`, `types.nim`
 
-1. **New owner schema** — as specified above: `path`, `encrypted_path`, `content_hash`, `size`, `mtime`, `synced`, `last_sync`. Indexes on `content_hash` and `encrypted_path`.
-2. **New storage schema** — as specified above: `encrypted_path`, `content_hash`, `size`, `owner_buddy`. Index on `content_hash + owner_buddy`.
-3. **Index API** — add methods: `getFileByHash`, `addStorageFile`, `getStorageFile`, `listByOwner`
-4. **Migration** — handle existing index.db gracefully (version column or schema check)
+1. **New owner schema** — `files` table with `path`, `encrypted_path`, `hash` (content_hash), `size`, `mtime`, `synced`, `last_sync`, `mode`, `symlink_target`. Indexes on `content_hash` and `encrypted_path`. — DONE
+2. **New storage schema** — `storage_files` table with `encrypted_path`, `content_hash`, `size`, `mode`, `symlink_target`, `owner_buddy`. Index on `content_hash + owner_buddy`. — DONE
+3. **Index API** — `getFileByHash`, `addStorageFile`, `getStorageFile`, `listByOwner`, `getFileByEncryptedPath`, `updateStoragePath` — DONE
+4. **Migration** — schema versioning with v1→v2→v3 upgrades — DONE
 
-### Phase C: Scanner Rewrite
+### Phase C: Scanner Rewrite — COMPLETE
 
 **Files**: `scanner.nim`
 
-1. **Use streaming hash** — `scanFile` calls `hashFileStream` instead of `hashFile`
-2. **Compute encrypted_path** — `scanFile` also computes `encrypted_path` via `encryptPath`
-3. **Move detection** — `scanChanges` checks for same `content_hash` at a new path when the old path disappears
+1. **Use streaming hash** — `scanFile` calls `hashFileStream` — DONE
+2. **Compute encrypted_path** — `scanFile` computes `encrypted_path` via `encryptPath` — DONE
+3. **Move detection** — `scanChanges` checks for same `content_hash` at a new path when the old path disappears, marks as `fcMoved` — DONE
 
-### Phase D: Sync Protocol Update
+### Phase D: Sync Protocol Update — COMPLETE
 
 **Files**: `messages.nim`, `protocol.nim`, `transfer.nim`, `session.nim`
 
-1. **Update FileList message** — include `content_hash` in `FileEntry`
-2. **Add ListPaths message** — new request/response pair for restore (B lists its encrypted_paths for a folder)
-3. **Add MoveFile message** — A tells B to rename an encrypted_path (includes old path, new path, and content_hash for verification)
-4. **Add DeleteFile message handling** — wire up the existing `msgFileDelete` to actually delete on B's side
-5. **Encrypt chunks on send** — `sendFileData` encrypts each chunk with random nonce before sending
-6. **Decrypt chunks on receive** — `receiveFileData` extracts nonce and decrypts each chunk after receiving
-7. **Session flow** — rewrite `syncBuddyFolders` to handle both push (backup) and pull (restore) with move/delete support
-8. **Unencrypted shortcut** — when `folder.encrypted == false`, skip encrypt/decrypt steps
+1. **Update FileList message** — includes `content_hash` and `encryptedPath` in `FileEntry` — DONE
+2. **Add ListPaths message** — `msgListPathsRequest`/`msgListPathsResponse` for restore — DONE
+3. **Add MoveFile message** — A tells B to rename an encrypted_path — DONE
+4. **Add DeleteFile message handling** — `msgFileDelete` is sent and handled — DONE
+5. **Encrypt chunks on send** — `sendFileData` encrypts each chunk with random nonce — DONE
+6. **Decrypt chunks on receive** — `receiveFileData` extracts nonce and decrypts — DONE
+7. **Session flow** — `syncBuddyFolders` handles both push (backup) and pull (restore) with move/delete support — DONE
+8. **Unencrypted shortcut** — when `folder.encrypted == false`, skip encrypt/decrypt steps — DONE
+9. **Hash verification** — `verifyRestoredFile` re-scans and checks hash after write — DONE
 
-### Phase E: Connection & Scheduling
+### Phase E: Connection & Scheduling — PARTIALLY COMPLETE
 
 **Files**: `daemon.nim`, `types.nim`, `config.nim`, `p2p/discovery.nim`
 
-1. **Per-buddy sync_time** — add `syncTime: string` to `BuddyInfo`, update config read/write, remove global `syncWindowStart/End`
-2. **Discovery record extension** — add `isPubliclyReachable: bool` and `syncTime: string` to published record
-3. **Deterministic initiator** — add `shouldInitiate(myConfig, buddyRecord): bool` proc implementing the CGNAT-correct rule
-4. **Remove incoming rejection** — remove sync window check from `handleIncomingConnection`
-5. **Scheduled dialing** — `connectToBuddies` only dials a buddy when within that buddy's `sync_time` window (e.g., ±15 minutes of the configured time, or always if syncTime is empty)
-6. **Connection reuse** — before dialing, check `daemon.node.switch` for existing transport connections to the buddy's peer ID; open a stream on existing connection instead of new dial
-7. **Connection upgrade** — when an incoming direct connection arrives and a relay connection already exists for that buddy, replace relay with direct
-8. **Long-lived CGNAT connections** — CGNAT side keeps the connection alive with periodic pings; redials promptly if the connection drops
+1. **Per-buddy sync_time** — `BuddyInfo.syncTime` field, config read/write, `shouldAttemptBuddySync` — DONE
+2. **Discovery record extension** — `isPubliclyReachable: bool` and `syncTime: string` published in record — DONE
+3. **Deterministic initiator** — `shouldInitiate()` implements the CGNAT-correct rule — DONE
+4. **Remove incoming rejection** — `handleIncomingConnection` always accepts from known buddies — DONE
+5. **Scheduled dialing** — `connectToBuddies` respects per-buddy sync_time with 15-minute tolerance — DONE
+6. **Connection reuse** — checks for existing transport connections before new dial — NOT YET
+7. **Connection upgrade** — replace relay with direct when possible — NOT YET
+8. **Long-lived CGNAT connections** — keepalive and prompt redial — NOT YET
 
-### Phase F: Restore
+### Phase F: Restore — PARTIALLY COMPLETE
 
 **Files**: `cli.nim`, `daemon.nim`, `p2p/protocol.nim`, `p2p/messages.nim`
 
-1. **ListPaths protocol** — A requests B to list all `(encrypted_path, content_hash, size)` for a folder; B responds with list
-2. **Restore flow in daemon** — after `buddydrive recover` restores config, `buddydrive start` detects missing or hash-mismatched local files and requests them from B
-3. **Hash verification on restore** — after writing each restored file, compute its `content_hash` and compare against B's reported hash. Mismatch → re-request or log error.
-4. **Index rebuild** — after restoring files, scan them to populate the owner index
+1. **ListPaths protocol** — `msgListPathsRequest`/`msgListPathsResponse` — DONE
+2. **Restore flow in daemon** — missing/hash-mismatched local files requested from buddy — DONE
+3. **Hash verification on restore** — `verifyRestoredFile` computes hash and compares — DONE
+4. **Index rebuild** — after restoring files, scan populates the owner index — DONE
+5. **Buddy-backed config fetch** — `fetchConfigFromBuddy()` not implemented yet — NOT YET
 
-### Phase G: Testing
+### Phase G: Testing — COMPLETE
 
-1. **Unit tests** — streaming hash, deterministic path encryption/decryption, chunk encryption/decryption with random nonces, folder key derivation from folder ID, move detection, initiator selection
-2. **Integration test** — full encrypted backup: A adds folder, syncs to B, verify B has encrypted files
-3. **Integration test** — restore: delete A's files, restart A, restore from B, verify files match
-4. **Integration test** — move detection: rename file on A, sync, verify B renames without re-upload
-5. **Integration test** — CGNAT simulation: one side with no public address, verify correct initiator selection and direct connection
-6. **Integration test** — mixed encrypted/unencrypted: two folders, one encrypted one shared, verify correct behavior for each
-7. **Unit test** — nonce reuse safety: encrypt the same file twice, verify ciphertexts differ (random nonces working)
-8. **Unit test** — path determinism: encrypt the same path twice, verify encrypted_paths are identical
+Existing test coverage:
+
+1. **Unit tests** — streaming hash, deterministic path encryption/decryption, chunk encryption/decryption with random nonces, folder key derivation, move detection, initiator selection, session sync — DONE
+2. **Integration test** — relay file sync: full file sync over relay — DONE
+3. **Integration test** — recovery: setup-recovery and recover CLI flows — DONE
+4. **Integration test** — pairing protocol — DONE
+5. **Integration test** — CLI flows — DONE
+
+Still to add:
+6. **Integration test** — CGNAT simulation: one side with no public address, verify correct initiator selection and direct connection — NOT YET
+7. **Integration test** — mixed encrypted/unencrypted: two folders, one encrypted one shared — NOT YET
+8. **Unit test** — nonce reuse safety: encrypt the same file twice, verify ciphertexts differ — NOT YET
+9. **Unit test** — path determinism: encrypt the same path twice, verify encrypted_paths are identical — NOT YET
 
 ### Implementation Order
 
-A → B → C → D → E → F → G
-
-Each phase builds on the previous. Phase A (crypto) has no dependencies and can start immediately. Phase E (connection changes) is mostly independent of B/C/D and could be done in parallel.
+A → B → C → D → E → F → G (Phases A-D and most of E-F are complete; remaining items are connection reuse, connection upgrade, long-lived CGNAT connections, buddy-backed config fetch, and some integration tests)
 
 ---
 
 ## Test Coverage
 
-### Unit Tests (16 files)
+### Unit Tests (17 files)
 
 `tests/unit/*/*.nim` — run via `nimble test` or `nimble testUnit`:
 
-config, config_sync, control, control_web, crypto, discovery, geoip_ranges, index, messages, pairing, policy, rawrelay, recovery, scanner, transfer crash safety, types
+config, config_sync, control, control_web, crypto, discovery, geoip_ranges, index, messages, pairing, policy, rawrelay, recovery, scanner, session, transfer crash safety, types
 
 ### Integration Tests (7 files)
 
@@ -500,7 +513,7 @@ config, config_sync, control, control_web, crypto, discovery, geoip_ranges, inde
 
 CLI flows, KV API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
 
-### Tests To Add (Phase G)
+### Remaining Tests To Add
 
 - Streaming hash vs full-file hash comparison
 - Deterministic path encryption roundtrip

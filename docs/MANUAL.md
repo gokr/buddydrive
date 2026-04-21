@@ -109,7 +109,7 @@ journalctl -u buddydrive -f
 | Command | Description |
 |---------|-------------|
 | `buddydrive init` | Generate identity and create config |
-| `buddydrive init --with-recovery` | Generate identity and set up recovery in one step |
+| `buddydrive init --with-recovery` | Not yet implemented (use `init` then `setup-recovery`) |
 | `buddydrive config` | Show current config |
 | `buddydrive config set <key> ...` | Update runtime configuration |
 | `buddydrive add-folder <path>` | Add folder to sync |
@@ -120,13 +120,26 @@ journalctl -u buddydrive -f
 | `buddydrive list-buddies` | List paired buddies |
 | `buddydrive connect <address>` | Manual connect placeholder |
 | `buddydrive start [--port <control-port>]` | Start sync daemon in the foreground |
-| `buddydrive stop` | Stop command placeholder |
-| `buddydrive status` | Show configured folders, buddies, and sync window |
+| `buddydrive stop` | Stop command (not yet implemented; use Ctrl+C) |
+| `buddydrive status` | Show configured folders, buddies, and sync time |
 | `buddydrive logs` | Show recent logs |
 | `buddydrive setup-recovery` | Generate and verify a 12-word recovery phrase, then sync encrypted config to the relay |
 | `buddydrive recover` | Restore config from a 12-word recovery phrase and then resync folders |
 | `buddydrive sync-config` | Manually push encrypted config to the relay and configured buddies |
 | `buddydrive export-recovery` | Show stored recovery public key and master key metadata |
+
+### config set Keys
+
+| Key | Arguments | Description |
+|-----|-----------|-------------|
+| `relay-base-url` | `<url>` | Set relay list URL |
+| `relay-region` | `<region>` | Set relay region (eu, us, local) |
+| `storage-base-path` | `<path>` | Set base path for storing buddy files |
+| `bandwidth-limit` | `<kbps>` | Set bandwidth limit (0 = unlimited) |
+| `buddy-pairing-code` | `<buddy-id> <code>` | Set pairing code for a buddy |
+| `buddy-name` | `<name>` | Update your buddy display name |
+| `buddy-sync-time` | `<buddy-id> <HH:MM>` | Set per-buddy sync time (empty = always) |
+| `folder-append-only` | `<folder-name> <on\|off>` | Toggle folder append-only mode |
 
 ### add-folder Options
 
@@ -154,6 +167,7 @@ journalctl -u buddydrive -f
 
 ### Current CLI Limitations
 
+- `buddydrive init --with-recovery` is shown in help but not implemented; use `init` then `setup-recovery` separately
 - `buddydrive start --daemon` currently prints a note and continues in the foreground
 - `buddydrive stop` is not implemented yet; use your process manager or `Ctrl+C`
 - `buddydrive status` does not yet query the running daemon for live connection state
@@ -202,20 +216,19 @@ Append-only folders still protect existing local files from being overwritten by
 
 ### Folder Policies
 
-- **Encrypted** — folder encryption flag (default true). Note: application-level encryption for synced folder contents is not wired into the active sync path yet
+- **Encrypted** — folder encryption flag (default true). When enabled, filenames and content are encrypted before being stored on the buddy's machine. Path encryption uses deterministic nonces (same path always encrypts the same way, enabling move detection). Content encryption uses random nonces per chunk (prevents nonce reuse across versions).
 - **Append-only** — prevents remote overwrites of existing local files. Missing files are still created
 - **Buddy-specific** — restrict a folder to sync with a specific buddy
 
-### Sync Window
+### Per-Buddy Sync Time
 
-Time-based scheduling restricts sync to a window. Configure with:
+Each buddy can have an optional sync time that controls when to initiate a connection. Incoming connections from known buddies are always accepted regardless of sync time.
 
 ```bash
-buddydrive config set sync-window-start 22:00
-buddydrive config set sync-window-end 06:00
+buddydrive config set buddy-sync-time <buddy-id> 03:00
 ```
 
-When both fields are empty (default), sync runs at all times.
+When sync time is empty (default), the daemon initiates connections whenever it discovers a buddy address. When set to a time like `03:00`, the daemon only initiates within a 15-minute tolerance window around that time.
 
 ## How It Works
 
@@ -223,10 +236,11 @@ When both fields are empty (default), sync runs at all times.
 
 1. `buddydrive init` creates a local buddy identity and config file
 2. `buddydrive start` creates the libp2p node for the running session
-3. The daemon publishes your address to the relay at `/discovery/<derived-key>`, where the key is derived from the pairing code
+3. The daemon publishes your address to the relay at `/discovery/<derived-key>`, where the key is derived from the pairing code. The record includes peerId, addresses, `isPubliclyReachable`, sync time, and relay region
 4. The daemon looks up configured buddies using the same derived key via the relay KV-store (every 10 minutes)
-5. It connects directly when a public TCP address is available, or via relay fallback when configured
-6. Cached addresses in `state.db` are used for graceful degradation when the relay is unavailable
+5. Deterministic initiator selection: the side without a public address initiates; if both are the same reachability, the lower buddy UUID initiates
+6. It connects directly when a public TCP address is available, or via relay fallback when configured
+7. Cached addresses in `state.db` are used for graceful degradation when the relay is unavailable
 
 ### Recovery and Transport Security
 
@@ -237,12 +251,14 @@ When both fields are empty (default), sync runs at all times.
 
 ### Sync Protocol
 
-1. Scans folder for changes (polling-based)
-2. Exchanges file lists with buddy
-3. Requests missing files
-4. Transfers chunks (64KB, LZ4 compressed when beneficial)
-5. Both sides update SQLite index
-6. File writes use atomic `.buddytmp` + `flushFile` + `moveFile` for crash safety
+1. Scans folder for changes (polling-based) using streaming blake2b hash
+2. Detects added, modified, deleted, and moved files (move detection via content hash matching)
+3. Exchanges file lists with buddy (includes encrypted paths and content hashes)
+4. Computes deltas: missing files, modified files, moves, and deletes
+5. Transfers chunks (64KB, LZ4 compressed when beneficial, encrypted with random nonces)
+6. Both sides update SQLite index
+7. Restored files are hash-verified after write
+8. File writes use atomic `.buddytmp` + `flushFile` + `moveFile` for crash safety
 
 ### NAT Traversal
 
@@ -280,21 +296,23 @@ listen_port = 41721
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
 relay_base_url = "https://buddydrive.net/relays"
 relay_region = "eu"
-sync_window_start = ""
-sync_window_end = ""
+storage_base_path = ""
 bandwidth_limit_kbps = 0
 
 [[folders]]
+id = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
 name = "docs"
 path = "/home/user/Documents"
 encrypted = true
 append_only = false
+folder_key = "a1b2c3d4e5f6..."
 buddies = ["buddy-id-here"]
 
 [[buddies]]
 id = "buddy-id-here"
 name = "cranky-wrench"
 pairing_code = "ABCD-EFGH"
+sync_time = "03:00"
 added_at = "2026-04-10T12:00:00Z"
 ```
 
@@ -379,6 +397,9 @@ Common error codes: `FOLDER_NOT_FOUND`, `BUDDY_NOT_FOUND`, `INVALID_REQUEST`, `N
 | Component | Algorithm | Purpose |
 |-----------|-----------|---------|
 | Direct peer transport | libp2p Noise | Encrypt direct libp2p connections |
+| Folder content encryption | libsodium `crypto_secretbox` (XChaCha20-Poly1305) | Encrypt filenames and file contents stored on buddy's machine |
+| Path encryption | Deterministic nonce from folderKey + path | Same path always encrypts to same ciphertext (enables move detection) |
+| Chunk encryption | Random nonce per 64KB chunk | Prevents nonce reuse across file versions |
 | Recovery config backup | libsodium `crypto_secretbox` | Encrypt config synced to relay |
 | Pairing code | Shared secret | Match buddies, derive discovery keys, HMAC-authenticate relay records, relay fallback |
 | Recovery phrase | 12-word mnemonic | Re-derive recovery metadata on a new machine |
@@ -388,18 +409,28 @@ Common error codes: `FOLDER_NOT_FOUND`, `BUDDY_NOT_FOUND`, `INVALID_REQUEST`, `N
 **Protected against:**
 
 - Network interception on direct libp2p connections (Noise transport)
+- Buddy reading your files (encrypted filenames and content when folder encryption is enabled)
 - Relay compromise for config backup (encrypted with recovery master key)
 - Lost machine (recovery rebuilds config, sync restores files)
+- File corruption (restored files are hash-verified after write)
 
 **Not protected against:**
 
-- Untrusted buddies (paired buddies can receive your synced files)
+- Untrusted buddies when folder encryption is disabled (`encrypted = false` shares files plaintext)
 - Machine compromise (malware can read files before or during sync)
 - Denial of service (attacker can prevent peer connections)
 
-### Current Scope Limit
+### Encryption Details
 
-Application-level encryption for synced folder contents is not wired into the active sync path yet. Pair only with buddies you trust to hold your files.
+When `encrypted = true` on a folder:
+- **Filenames** are encrypted with deterministic nonces derived from `folderKey + "/path/" + plaintextPath`, then base64-encoded. Same path always produces the same encrypted path, enabling move detection.
+- **File content** is split into 64KB chunks, each encrypted with a random 24-byte nonce prepended to the ciphertext. Random nonces prevent nonce reuse when the same file is modified across versions.
+- **Folder key** is derived from `crypto_generichash(masterKey + "/folder/" + folderId)` when recovery is enabled, or a random key stored in `folder_key` in config.toml otherwise.
+- Your buddy stores fully opaque encrypted blobs — they cannot read filenames or content.
+
+When `encrypted = false`:
+- Files are stored plaintext on the buddy's machine for collaboration.
+- Content hashes (blake2b-256) are still used for change detection and move detection.
 
 ## Relay Server
 
@@ -454,17 +485,24 @@ Set different `listen_port` values in each instance's config, and use different 
 
 ### `buddydrive status` shows buddies as offline
 
-Expected. The CLI status command reads configured state and sync window, but does not yet report live daemon connectivity.
+Expected. The CLI status command reads configured state, but does not yet report live daemon connectivity.
 
 ## Roadmap
 
-- [ ] Delta sync (rolling hash)
+- [x] Encrypted backup (filenames + content encrypted on buddy's machine)
+- [x] Move and delete propagation
+- [x] Content-hash-based sync (streaming blake2b)
+- [x] Per-buddy sync scheduling
+- [x] Deterministic initiator selection (CGNAT-correct)
+- [ ] Delta sync (rolling hash for partial-chunk diffs)
 - [x] GTK4 desktop app
 - [x] Web GUI (browser-based, served from daemon)
 - [x] Bandwidth limiting
 - [ ] System tray integration
 - [ ] Auto-start on boot
-- [ ] Package for distros (deb, rpm, brew)
+- [ ] Debian package (deb)
+- [ ] Package for other distros (rpm, brew)
 - [ ] Multiple buddies per folder
 - [ ] Selective sync (ignore patterns)
 - [ ] Version history
+- [ ] Buddy-backed config fetch for recovery

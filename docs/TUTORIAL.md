@@ -10,7 +10,7 @@ This tutorial shows how to smoke-test BuddyDrive on a single machine with two is
 - **Buddy Name** - a human-readable name shared during handshake
 - **Pairing Code** - a shared secret used both for pairing confirmation and relay fallback
 
-Important: a full end-to-end sync does not currently work over loopback or private-only addresses. BuddyDrive will only dial buddies when it discovers a public TCP address, or when relay fallback is configured. The steps below validate initialization, folder setup, pairing, and daemon startup on one machine. For a real file transfer test, use two machines with public reachability or configure relay fallback.
+Important: a full end-to-end sync does not currently work over loopback or private-only addresses. BuddyDrive uses deterministic initiator selection: the side without a public address initiates, or the side with the lower buddy UUID if both are the same reachability. For a local smoke test, both instances will be in "direct-only mode" since neither has a public address. For a real file transfer test, use two machines with public reachability or configure relay fallback.
 
 ## Prerequisites
 
@@ -138,6 +138,7 @@ This confirms that:
 - folders and buddies are saved correctly
 - the daemon starts and publishes discovery records to the relay KV-store
 - both instances can run concurrently with different P2P and control ports
+- incoming connections from known buddies are always accepted
 
 It does not prove that file transfer works between the two instances on the same host.
 
@@ -202,7 +203,7 @@ On a replacement machine:
 
 Enter the same 12-word phrase. If relay recovery succeeds, BuddyDrive writes the restored config locally. Starting the daemon then lets normal sync recreate the missing files in your configured folders.
 
-Current limitation: `recover` first tries the relay and then prompts for buddy fallback details, but the buddy-backed config fetch path is not implemented yet.
+Current limitation: `recover` first tries the relay and then prompts for buddy fallback details, but the buddy-backed config fetch path is not implemented yet. Recovery works via the relay path only.
 
 ## Cleanup
 
@@ -222,8 +223,12 @@ That is expected right now. The CLI status command reads configured state and sy
 
 3. `buddydrive start --daemon` stays in the foreground
 
-That is expected too. Background daemon mode is not fully implemented yet.
+That is expected too. Background daemon mode is not fully implemented yet. Use Ctrl+C to stop the daemon.
 
 4. `buddydrive connect` does not help with local loopback testing
 
 Correct. The command currently prints guidance, but manual direct dialing is not implemented.
+
+5. Encrypted folder files appear as opaque blobs on the buddy's machine
+
+When `encrypted = true` (the default), filenames and content are encrypted before being stored on the buddy. The buddy sees base64-encoded encrypted paths and encrypted content, not your original filenames or file data.
