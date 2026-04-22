@@ -1,3 +1,4 @@
+import std/base64
 import std/os
 import std/times
 import std/strutils
@@ -54,6 +55,19 @@ proc escapeToml*(s: string): string =
   result = result.replace("\r", "\\r")
   result = result.replace("\t", "\\t")
 
+proc encodeFolderKey(folderKey: string): string =
+  if folderKey.len == 0:
+    return ""
+  encode(folderKey)
+
+proc decodeFolderKey(encoded: string): string =
+  if encoded.len == 0:
+    return ""
+  try:
+    decode(encoded)
+  except CatchableError:
+    encoded
+
 proc configToToml*(config: AppConfig, includeHeader = false): string =
   if includeHeader:
     result.add("# BuddyDrive Configuration\n")
@@ -89,7 +103,7 @@ proc configToToml*(config: AppConfig, includeHeader = false): string =
       result.add("encrypted = " & $folder.encrypted & "\n")
       result.add("append_only = " & $folder.appendOnly & "\n")
       if folder.folderKey.len > 0:
-        result.add("folder_key = \"" & escapeToml(folder.folderKey) & "\"\n")
+        result.add("folder_key = \"" & escapeToml(encodeFolderKey(folder.folderKey)) & "\"\n")
       if folder.buddies.len > 0:
         result.add("buddies = [")
         for j, buddy in folder.buddies:
@@ -145,7 +159,7 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
       folder.path = folderTbl["path"].getStr()
       folder.encrypted = folderTbl{"encrypted"}.getBool(true)
       folder.appendOnly = folderTbl{"append_only"}.getBool(false)
-      folder.folderKey = folderTbl{"folder_key"}.getStr("")
+      folder.folderKey = decodeFolderKey(folderTbl{"folder_key"}.getStr(""))
       folder.buddies = @[]
       if "buddies" in folderTbl:
         for buddy in folderTbl["buddies"].getElems():

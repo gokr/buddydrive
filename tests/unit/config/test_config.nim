@@ -2,6 +2,7 @@ import std/unittest
 import std/[os, times, strutils]
 import ../../../src/buddydrive/types
 import ../../../src/buddydrive/config as buddyconfig
+import ../../../src/buddydrive/crypto
 import ../../testutils
 
 suite "Config paths":
@@ -151,6 +152,23 @@ suite "Folder management":
       let reloaded = buddyconfig.loadConfig()
       check reloaded.folders[0].buddies.len == 1
       check reloaded.folders[0].buddies[0] == "uuid-buddy-1"
+
+  test "folderKey persists via text-safe encoding":
+    withTestDir("folderkeypersist"):
+      putEnv("BUDDYDRIVE_CONFIG_DIR", testDir)
+      putEnv("BUDDYDRIVE_DATA_DIR", testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      discard initCrypto()
+      var cfg = newAppConfig(newBuddyId("fk", "folder-key"))
+      buddyconfig.saveConfig(cfg)
+      var folder = newFolderConfig("secret", "/tmp/secret")
+      folder.folderKey = generateKey()
+      cfg.addFolder(folder)
+      let reloaded = buddyconfig.loadConfig()
+      check reloaded.folders.len == 1
+      check reloaded.folders[0].folderKey == folder.folderKey
 
   test "getFolder returns index":
     withTestDir("getfolder"):
