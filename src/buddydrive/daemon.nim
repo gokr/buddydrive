@@ -331,7 +331,7 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
 
     daemon.startupReachabilityDiagnostic()
     
-    daemon.discovery = newDiscovery(daemon.node, daemon.config.relayBaseUrl)
+    daemon.discovery = newDiscovery(daemon.node, daemon.config.apiBaseUrl)
     await daemon.discovery.start()
 
     if daemon.config.buddies.len > 0:
@@ -488,7 +488,7 @@ proc connectToBuddyViaRelay(daemon: Daemon, buddyId: string): Future[bool] {.asy
     echo "Attempting relay fallback for buddy ", buddyId.shortId(), " in region ", daemon.config.relayRegion
     let relayConn = await connectViaRegionalRelay(
       daemon.relayListCache,
-      daemon.config.relayBaseUrl,
+      daemon.config.apiBaseUrl,
       daemon.config.relayRegion,
       pairingCode
     )

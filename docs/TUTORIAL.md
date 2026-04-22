@@ -168,7 +168,7 @@ The same pairing code connects both buddies through the relay.
 For production, use the public relay list:
 
 ```bash
-buddydrive config set relay-base-url https://api.buddydrive.org
+buddydrive config set api-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 ```
 

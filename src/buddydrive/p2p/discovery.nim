@@ -23,7 +23,7 @@ type
 
   DiscoveryService* = ref object
     node*: BuddyNode
-    relayBaseUrl*: string
+    apiBaseUrl*: string
     started*: bool
 
   BuddyRecord* = object
@@ -57,10 +57,10 @@ proc computeHmac*(authKey: string, data: string): string =
   let mac = crypto_auth(data, authKey)
   toHex(mac)
 
-proc newDiscovery*(node: BuddyNode, relayBaseUrl: string): DiscoveryService =
+proc newDiscovery*(node: BuddyNode, apiBaseUrl: string): DiscoveryService =
   result = DiscoveryService()
   result.node = node
-  result.relayBaseUrl = relayBaseUrl
+  result.apiBaseUrl = apiBaseUrl
   result.started = false
 
 proc shouldInitiate*(myBuddyId: string, myPubliclyReachable: bool, buddyId: string, buddyRecord: BuddyRecord): bool =
@@ -103,7 +103,7 @@ proc publishBuddy*(discovery: DiscoveryService, buddy: BuddyInfo, relayRegion: s
   let recordJson = $j
   let hmacHex = try: computeHmac(authKey, recordJson) except: return false
 
-  let url = discovery.relayBaseUrl & "/discovery/" & discoveryKey
+  let url = discovery.apiBaseUrl & "/discovery/" & discoveryKey
 
   try:
     let curl = newCurly()
@@ -124,7 +124,7 @@ proc unpublishBuddy*(discovery: DiscoveryService, pairingCode: string): bool =
   let authKey = try: deriveAuthKey(pairingCode) except: return false
   let hmacHex = try: computeHmac(authKey, "") except: return false
 
-  let url = discovery.relayBaseUrl & "/discovery/" & discoveryKey
+  let url = discovery.apiBaseUrl & "/discovery/" & discoveryKey
 
   try:
     let curl = newCurly()
@@ -142,7 +142,7 @@ proc findBuddy*(discovery: DiscoveryService, pairingCode: string): Option[BuddyR
     return none(BuddyRecord)
 
   let discoveryKey = try: deriveDiscoveryKey(pairingCode) except: return none(BuddyRecord)
-  let url = discovery.relayBaseUrl & "/discovery/" & discoveryKey
+  let url = discovery.apiBaseUrl & "/discovery/" & discoveryKey
 
   try:
     let curl = newCurly()

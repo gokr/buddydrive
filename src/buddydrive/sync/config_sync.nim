@@ -113,24 +113,24 @@ proc deleteConfigFromRelay*(recovery: RecoveryConfig, relayUrl: string): Future[
     echo "Error deleting config from relay: ", e.msg
     return false
 
-proc syncConfigToBuddy*(config: AppConfig, buddyIndex: int, relayBaseUrl: string, relayRegion: string): Future[bool] {.async.} =
+proc syncConfigToBuddy*(config: AppConfig, buddyIndex: int, apiBaseUrl: string, relayRegion: string): Future[bool] {.async.} =
   if buddyIndex >= config.buddies.len:
     return false
   let buddy = config.buddies[buddyIndex]
   echo "Buddy config sync is not implemented yet for buddy: ", buddy.id.uuid
   return false
 
-proc syncConfigToAllBuddies*(config: AppConfig, relayBaseUrl: string, relayRegion: string): Future[int] {.async.} =
+proc syncConfigToAllBuddies*(config: AppConfig, apiBaseUrl: string, relayRegion: string): Future[int] {.async.} =
   result = 0
   for i in 0 ..< config.buddies.len:
-    if await syncConfigToBuddy(config, i, relayBaseUrl, relayRegion):
+    if await syncConfigToBuddy(config, i, apiBaseUrl, relayRegion):
       inc result
 
-proc fetchConfigFromBuddy*(buddyId: string, pairingCode: string, relayBaseUrl: string, relayRegion: string): Future[Option[string]] {.async.} =
+proc fetchConfigFromBuddy*(buddyId: string, pairingCode: string, apiBaseUrl: string, relayRegion: string): Future[Option[string]] {.async.} =
   echo "Buddy config recovery is not implemented yet for buddy: ", buddyId
   return none(string)
 
-proc attemptRecovery*(mnemonic: string, relayBaseUrl: string, relayRegion: string): Future[Option[AppConfig]] {.async.} =
+proc attemptRecovery*(mnemonic: string, apiBaseUrl: string, relayRegion: string): Future[Option[AppConfig]] {.async.} =
   var recovery: RecoveryConfig
   var masterKey: array[32, byte]
   try:
@@ -141,7 +141,7 @@ proc attemptRecovery*(mnemonic: string, relayBaseUrl: string, relayRegion: strin
     echo "Error deriving keys from mnemonic: ", e.msg
     return none(AppConfig)
   
-  let relayResult = await fetchConfigFromRelay(recovery.publicKeyB58, relayBaseUrl)
+  let relayResult = await fetchConfigFromRelay(recovery.publicKeyB58, apiBaseUrl)
   if relayResult.isSome:
     try:
       var config: AppConfig
@@ -153,7 +153,7 @@ proc attemptRecovery*(mnemonic: string, relayBaseUrl: string, relayRegion: strin
   
   return none(AppConfig)
 
-proc attemptRecoveryFromBuddy*(mnemonic: string, buddyId: string, pairingCode: string, relayBaseUrl: string, relayRegion: string): Future[Option[AppConfig]] {.async.} =
+proc attemptRecoveryFromBuddy*(mnemonic: string, buddyId: string, pairingCode: string, apiBaseUrl: string, relayRegion: string): Future[Option[AppConfig]] {.async.} =
   var recovery: RecoveryConfig
   var masterKey: array[32, byte]
   try:
@@ -164,7 +164,7 @@ proc attemptRecoveryFromBuddy*(mnemonic: string, buddyId: string, pairingCode: s
     echo "Error deriving keys from mnemonic: ", e.msg
     return none(AppConfig)
   
-  let buddyResult = await fetchConfigFromBuddy(buddyId, pairingCode, relayBaseUrl, relayRegion)
+  let buddyResult = await fetchConfigFromBuddy(buddyId, pairingCode, apiBaseUrl, relayRegion)
   if buddyResult.isSome:
     try:
       var config: AppConfig

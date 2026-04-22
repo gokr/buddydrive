@@ -58,7 +58,7 @@ suite "Config save and load":
       var cfg = newAppConfig(newBuddyId("aaaaaaaa-1111-1111-1111-111111111111", "alice"))
       cfg.listenPort = 9999
       cfg.announceAddr = "/ip4/1.2.3.4/tcp/9999"
-      cfg.relayBaseUrl = "https://relay.example.com"
+      cfg.apiBaseUrl = "https://relay.example.com"
       cfg.relayRegion = "eu"
       cfg.storageBasePath = testDir / "storage"
       buddyconfig.saveConfig(cfg)
@@ -67,7 +67,7 @@ suite "Config save and load":
       check loaded.buddy.name == "alice"
       check loaded.listenPort == 9999
       check loaded.announceAddr == "/ip4/1.2.3.4/tcp/9999"
-      check loaded.relayBaseUrl == "https://relay.example.com"
+      check loaded.apiBaseUrl == "https://relay.example.com"
       check loaded.relayRegion == "eu"
       check loaded.storageBasePath == testDir / "storage"
 

@@ -330,7 +330,7 @@ proc configJson(): JsonNode =
     "network": {
       "listen_port": cfg.listenPort,
       "announce_addr": cfg.announceAddr,
-      "relay_base_url": cfg.relayBaseUrl,
+      "api_base_url": cfg.apiBaseUrl,
       "relay_region": cfg.relayRegion,
       "storage_base_path": cfg.storageBasePath,
       "bandwidth_limit_kbps": cfg.bandwidthLimitKBps
@@ -408,8 +408,8 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
       cfg.listenPort = net["listen_port"].getInt(cfg.listenPort)
     if net.hasKey("announce_addr"):
       cfg.announceAddr = net["announce_addr"].getStr(cfg.announceAddr)
-    if net.hasKey("relay_base_url"):
-      cfg.relayBaseUrl = net["relay_base_url"].getStr(cfg.relayBaseUrl)
+    if net.hasKey("api_base_url"):
+      cfg.apiBaseUrl = net["api_base_url"].getStr(cfg.apiBaseUrl)
     if net.hasKey("relay_region"):
       cfg.relayRegion = net["relay_region"].getStr(cfg.relayRegion)
     if net.hasKey("storage_base_path"):
@@ -460,7 +460,7 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
     cfg.buddy.name != oldCfg.buddy.name or
     cfg.listenPort != oldCfg.listenPort or
     cfg.announceAddr != oldCfg.announceAddr or
-    cfg.relayBaseUrl != oldCfg.relayBaseUrl or
+    cfg.apiBaseUrl != oldCfg.apiBaseUrl or
     cfg.relayRegion != oldCfg.relayRegion or
     cfg.storageBasePath != oldCfg.storageBasePath or
     cfg.bandwidthLimitKBps != oldCfg.bandwidthLimitKBps
@@ -579,7 +579,7 @@ proc syncConfigHandler(): tuple[status: int, response: JsonNode] =
   if not cfg.recovery.enabled:
     return (400, %*{"error": "Recovery not set up", "code": "NOT_SETUP"})
   
-  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: DefaultKvApiUrl
+  let relayUrl = if cfg.apiBaseUrl.len > 0: cfg.apiBaseUrl else: DefaultKvApiUrl
   let synced = waitFor syncConfigToRelay(cfg, relayUrl)
   
   if synced:

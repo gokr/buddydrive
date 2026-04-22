@@ -122,7 +122,7 @@ buddydrive start</code></pre>
         <p>For direct connections, forward the configured <code>listen_port</code> on your router and set <code>[network].announce_addr</code> in <code>~/.buddydrive/config.toml</code> to a public multiaddr such as:</p>
         <pre><code>announce_addr = "/ip4/203.0.113.10/tcp/41721"</code></pre>
         <p>For relay fallback:</p>
-        <pre><code>buddydrive config set relay-base-url https://api.buddydrive.org
+        <pre><code>buddydrive config set api-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu</code></pre>
         <p>The public EU TCP relay is <code>relay-eu.buddydrive.org:19447</code>.</p>
 
@@ -160,7 +160,7 @@ buddydrive config set relay-region eu</code></pre>
         <pre><code>buddydrive init                        Initialize BuddyDrive
 buddydrive config                      Show configuration
 buddydrive config set &lt;key&gt; ...        Update configuration values
-  relay-base-url &lt;url&gt;                Set relay discovery URL
+  api-base-url &lt;url&gt;                Set relay discovery URL
   relay-region &lt;region&gt;               Set relay region (eu, us, local)
   storage-base-path &lt;path&gt;           Set incoming storage base path
   bandwidth-limit &lt;kbps&gt;             Set bandwidth limit (0 = unlimited)
@@ -204,7 +204,7 @@ buddydrive add-folder ~/Photos --name photos
 buddydrive add-folder ~/Documents --name docs --append-only
 
 # Configure relay fallback
-buddydrive config set relay-base-url https://api.buddydrive.org
+buddydrive config set api-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 buddydrive config set buddy-pairing-code abc123 ABCD-EFGH
 
@@ -242,7 +242,7 @@ master_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 [network]
 listen_port = 41721
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
-relay_base_url = "https://api.buddydrive.org"
+api_base_url = "https://api.buddydrive.org"
 relay_region = "eu"
 storage_base_path = ""
 bandwidth_limit_kbps = 0
@@ -292,7 +292,7 @@ buddydrive config</code></pre>
             <li>Both peers need <code>buddydrive start</code> running</li>
             <li>Check stored buddies with <code>buddydrive list-buddies</code></li>
             <li>For direct mode, verify port forwarding and <code>announce_addr</code></li>
-            <li>For relay mode, verify <code>relay-region</code>, <code>relay-base-url</code>, and matching pairing codes</li>
+            <li>For relay mode, verify <code>relay-region</code>, <code>api-base-url</code>, and matching pairing codes</li>
         </ol>
 
         <h3>Files not syncing</h3>

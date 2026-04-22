@@ -1,5 +1,6 @@
 import std/[json, strutils, tables, times]
 import chronos
+import chronos/transports/common as chronosTransport
 import curly
 import libsodium/sodium
 import libp2p/multiaddress
@@ -139,7 +140,7 @@ proc fetchRelayList(baseUrl: string, region: string): CachedRelayList {.raises: 
   if trimmedBase.len == 0:
     return
 
-  let url = trimmedBase.strip(chars = {'/'}) & "/" & normalizeRelayRegion(region)
+  let url = trimmedBase.strip(chars = {'/'}) & "/relays/" & normalizeRelayRegion(region)
 
   try:
     let response = relayHttp.get(url, timeout = 3)
@@ -157,19 +158,19 @@ proc fetchRelayList(baseUrl: string, region: string): CachedRelayList {.raises: 
 
 proc relayAddrsForRegion*(
     cache: RelayListCache,
-    relayBaseUrl: string,
+    apiBaseUrl: string,
     relayRegion: string,
 ): seq[string] {.raises: [].} =
   let region = normalizeRelayRegion(relayRegion)
   if region.len == 0:
     return @[]
 
-  let key = relayCacheKey(relayBaseUrl, region)
+  let key = relayCacheKey(apiBaseUrl, region)
   let cached = cache.entries.getOrDefault(key)
   if cached.relays.len > 0 and cached.expiresAt > getTime():
     return cached.relays
 
-  let fetched = fetchRelayList(relayBaseUrl, region)
+  let fetched = fetchRelayList(apiBaseUrl, region)
   if fetched.relays.len > 0:
     cache.entries[key] = fetched
     return fetched.relays
@@ -189,11 +190,11 @@ proc stableRelayIndex(relayToken: string, relayCount: int): int {.raises: [].} =
 
 proc orderedRelayAddrs*(
     cache: RelayListCache,
-    relayBaseUrl: string,
+    apiBaseUrl: string,
     relayRegion: string,
     relayToken: string,
 ): seq[string] {.raises: [].} =
-  let relays = relayAddrsForRegion(cache, relayBaseUrl, relayRegion)
+  let relays = relayAddrsForRegion(cache, apiBaseUrl, relayRegion)
   if relays.len == 0:
     return @[]
 
@@ -218,58 +219,102 @@ proc readRelayLine(transp: StreamTransport): Future[string] {.async.} =
 
   raise newException(RelayError, "relay handshake line too long")
 
-proc connectViaRelay*(relayAddr: string, relayToken: string): Future[Connection] {.async.} =
-  let maRes = MultiAddress.init(relayAddr)
-  if maRes.isErr:
-    raise newException(RelayError, "invalid relay address: " & relayAddr)
+proc resolveRelayAddr(relayAddr: string): seq[string] =
+  if not relayAddr.startsWith("/dns4/") and not relayAddr.startsWith("/dns6/"):
+    return @[relayAddr]
 
-  let transp = await connect(maRes.get())
+  let parts = relayAddr.split("/")
+  if parts.len < 5:
+    return @[relayAddr]
+
+  let hostname = parts[2]
+  let portStr = parts[4]
+  let port = try:
+    parseInt(portStr).Port
+  except ValueError:
+    return @[relayAddr]
+
+  let domain = if relayAddr.startsWith("/dns4/"): Domain.AF_INET else: Domain.AF_INET6
 
   try:
-    discard await transp.write(toBytes(relayToken & "\n"))
+    let resolved = resolveTAddress(hostname, port, domain)
+    result = @[]
+    for ta in resolved:
+      let maStr = case ta.family
+        of AddressFamily.IPv4:
+          let ip = $IpAddress(family: IpAddressFamily.IPv4, address_v4: ta.address_v4)
+          "/ip4/" & ip & "/tcp/" & portStr
+        of AddressFamily.IPv6:
+          let ip = $IpAddress(family: IpAddressFamily.IPv6, address_v6: ta.address_v6)
+          "/ip6/" & ip & "/tcp/" & portStr
+        else:
+          continue
+      result.add(maStr)
+    if result.len == 0:
+      result = @[relayAddr]
+  except CatchableError:
+    result = @[relayAddr]
 
-    while true:
-      let line = await readRelayLine(transp)
-      if line == "WAIT":
-        continue
-      elif line == "OK":
-        return Connection(
-          ChronosStream.init(
-            transp,
-            Direction.Out,
-            observedAddr = Opt.none(MultiAddress),
-            localAddr = Opt.none(MultiAddress)
+proc connectViaRelay*(relayAddr: string, relayToken: string): Future[Connection] {.async.} =
+  let candidates = resolveRelayAddr(relayAddr)
+
+  var lastErr: string = ""
+  for candidate in candidates:
+    let maRes = MultiAddress.init(candidate)
+    if maRes.isErr:
+      lastErr = "invalid relay address: " & candidate
+      continue
+
+    let transp = await connect(maRes.get())
+
+    try:
+      discard await transp.write(toBytes(relayToken & "\n"))
+
+      while true:
+        let line = await readRelayLine(transp)
+        if line == "WAIT":
+          continue
+        elif line == "OK":
+          return Connection(
+            ChronosStream.init(
+              transp,
+              Direction.Out,
+              observedAddr = Opt.none(MultiAddress),
+              localAddr = Opt.none(MultiAddress)
+            )
           )
-        )
-      elif line.startsWith("POW "):
-        let parts = line.splitWhitespace()
-        if parts.len != 3:
-          raise newException(RelayError, "invalid relay proof-of-work challenge")
+        elif line.startsWith("POW "):
+          let parts = line.splitWhitespace()
+          if parts.len != 3:
+            raise newException(RelayError, "invalid relay proof-of-work challenge")
 
-        let difficultyBits = try:
-          parseInt(parts[2])
-        except ValueError:
-          raise newException(RelayError, "invalid relay proof-of-work difficulty")
+          let difficultyBits = try:
+            parseInt(parts[2])
+          except ValueError:
+            raise newException(RelayError, "invalid relay proof-of-work difficulty")
 
-        let solution = solveRelayPow(relayToken, parts[1], difficultyBits)
-        if solution.len == 0:
-          raise newException(RelayError, "failed to solve relay proof-of-work")
-        discard await transp.write(toBytes("POW " & solution & "\n"))
-      else:
-        raise newException(RelayError, "unexpected relay response: " & line)
-  except CatchableError as exc:
-    await transp.closeWait()
-    raise exc
+          let solution = solveRelayPow(relayToken, parts[1], difficultyBits)
+          if solution.len == 0:
+            raise newException(RelayError, "failed to solve relay proof-of-work")
+          discard await transp.write(toBytes("POW " & solution & "\n"))
+        else:
+          raise newException(RelayError, "unexpected relay response: " & line)
+    except CatchableError as exc:
+      await transp.closeWait()
+      lastErr = candidate & ": " & exc.msg
+      continue
+
+  raise newException(RelayError, "all relay address candidates failed for " & relayAddr & ": " & lastErr)
 
 proc connectViaRegionalRelay*(
     cache: RelayListCache,
-    relayBaseUrl: string,
+    apiBaseUrl: string,
     relayRegion: string,
     relayToken: string,
 ): Future[tuple[conn: Connection, relayAddr: string]] {.async.} =
   var relayAddrs: seq[string]
   try:
-    relayAddrs = orderedRelayAddrs(cache, relayBaseUrl, relayRegion, relayToken)
+    relayAddrs = orderedRelayAddrs(cache, apiBaseUrl, relayRegion, relayToken)
   except CatchableError as exc:
     raise newException(RelayError, "failed to resolve relay list: " & exc.msg)
 

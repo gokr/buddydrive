@@ -86,7 +86,7 @@ proc configToToml*(config: AppConfig, includeHeader = false): string =
   result.add("[network]\n")
   result.add("listen_port = " & $config.listenPort & "\n")
   result.add("announce_addr = \"" & escapeToml(config.announceAddr) & "\"\n")
-  result.add("relay_base_url = \"" & escapeToml(config.relayBaseUrl) & "\"\n")
+  result.add("api_base_url = \"" & escapeToml(config.apiBaseUrl) & "\"\n")
   result.add("relay_region = \"" & escapeToml(config.relayRegion) & "\"\n")
   result.add("storage_base_path = \"" & escapeToml(config.storageBasePath) & "\"\n")
   result.add("bandwidth_limit_kbps = " & $config.bandwidthLimitKBps & "\n\n")
@@ -132,7 +132,7 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
   result.recovery.masterKey = ""
   result.listenPort = DefaultP2PPort
   result.announceAddr = ""
-  result.relayBaseUrl = "https://api.buddydrive.org"
+  result.apiBaseUrl = "https://api.buddydrive.org"
   result.relayRegion = "eu"
   result.storageBasePath = ""
   result.bandwidthLimitKBps = 0
@@ -145,7 +145,8 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
   if "network" in toml:
     result.listenPort = toml["network"]{"listen_port"}.getInt(DefaultP2PPort)
     result.announceAddr = toml["network"]{"announce_addr"}.getStr("")
-    result.relayBaseUrl = toml["network"]{"relay_base_url"}.getStr("")
+    let parsed = toml["network"]{"api_base_url"}.getStr("")
+    result.apiBaseUrl = if parsed.len > 0: parsed else: "https://api.buddydrive.org"
     result.relayRegion = toml["network"]{"relay_region"}.getStr("")
     result.storageBasePath = toml["network"]{"storage_base_path"}.getStr("")
     result.bandwidthLimitKBps = toml["network"]{"bandwidth_limit_kbps"}.getInt(0)

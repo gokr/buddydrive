@@ -177,7 +177,7 @@ Append-only folders still protect existing local files from being overwritten by
 - For relay fallback, configure relay region. The stored pairing code is reused as the relay shared secret:
 
 ```bash
-buddydrive config set relay-base-url https://api.buddydrive.org
+buddydrive config set api-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 ```
 

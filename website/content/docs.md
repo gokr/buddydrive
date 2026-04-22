@@ -137,7 +137,7 @@ announce_addr = "/ip4/203.0.113.10/tcp/41721"
 For relay fallback:
 
 ```bash
-buddydrive config set relay-base-url https://api.buddydrive.org
+buddydrive config set api-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 ```
 
@@ -182,7 +182,7 @@ buddydrive-gui
 buddydrive init                        Initialize BuddyDrive
 buddydrive config                      Show configuration
 buddydrive config set <key> ...        Update configuration values
-  relay-base-url <url>                  Set relay discovery URL
+  api-base-url <url>                  Set relay discovery URL
   relay-region <region>                 Set relay region (eu, us, local)
   storage-base-path <path>             Set incoming storage base path
   bandwidth-limit <kbps>               Set bandwidth limit (0 = unlimited)
@@ -229,7 +229,7 @@ buddydrive add-folder ~/Photos --name photos
 buddydrive add-folder ~/Documents --name docs --append-only
 
 # Configure relay fallback
-buddydrive config set relay-base-url https://api.buddydrive.org
+buddydrive config set api-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 buddydrive config set buddy-pairing-code abc123 ABCD-EFGH
 
@@ -262,7 +262,7 @@ master_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 [network]
 listen_port = 41721
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
-relay_base_url = "https://api.buddydrive.org"
+api_base_url = "https://api.buddydrive.org"
 relay_region = "eu"
 storage_base_path = ""
 bandwidth_limit_kbps = 0
@@ -309,7 +309,7 @@ buddydrive config
 2. Both peers need `buddydrive start` running
 3. Check stored buddies with `buddydrive list-buddies`
 4. For direct mode, verify port forwarding and `announce_addr`
-5. For relay mode, verify `relay-region`, `relay-base-url`, and matching pairing codes
+5. For relay mode, verify `relay-region`, `api-base-url`, and matching pairing codes
 
 ### Files not syncing
 

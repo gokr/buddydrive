@@ -224,7 +224,7 @@ proc localConfigJson(): JsonNode =
     "network": {
       "listen_port": cfg.listenPort,
       "announce_addr": cfg.announceAddr,
-      "relay_base_url": cfg.relayBaseUrl,
+      "api_base_url": cfg.apiBaseUrl,
       "relay_region": cfg.relayRegion,
       "storage_base_path": cfg.storageBasePath,
       "bandwidth_limit_kbps": cfg.bandwidthLimitKBps
@@ -703,7 +703,7 @@ proc onSettingsResponse(w: GtkWindow, responseId: cint, userData: pointer) {.cde
     cfg.announceAddr = announce
     
     let relayUrl = $gtkEditableGetText(data.relayUrlEntry)
-    cfg.relayBaseUrl = relayUrl
+    cfg.apiBaseUrl = relayUrl
     
     let relayRegion = $gtkEditableGetText(data.relayRegionEntry)
     cfg.relayRegion = relayRegion
@@ -949,7 +949,7 @@ proc showSettingsDialog() =
   
   let relayUrlEntry = gtkEntryNew()
   gtkEntrySetPlaceholderText(relayUrlEntry, "https://api.buddydrive.org")
-  let currentRelayUrl = configJson{"network"}{"relay_base_url"}.getStr("")
+  let currentRelayUrl = configJson{"network"}{"api_base_url"}.getStr("")
   if currentRelayUrl.len > 0:
     gtkEditableSetText(relayUrlEntry, currentRelayUrl.cstring)
   gtkWidgetSetMarginBottom(relayUrlEntry, 8)
@@ -1151,7 +1151,7 @@ proc showRecoverDialog() =
         words.add(word)
       
       let mnemonic = words.join(" ")
-      let relayUrl = if buddyconfig.configExists() and currentConfig().relayBaseUrl.len > 0: currentConfig().relayBaseUrl else: DefaultKvApiUrl
+      let relayUrl = if buddyconfig.configExists() and currentConfig().apiBaseUrl.len > 0: currentConfig().apiBaseUrl else: DefaultKvApiUrl
       let relayRegion = if buddyconfig.configExists() and currentConfig().relayRegion.len > 0: currentConfig().relayRegion else: "eu"
       let recovered = waitFor attemptRecovery(mnemonic, relayUrl, relayRegion)
 
@@ -1215,7 +1215,7 @@ proc syncConfigNow() =
     showMessageDialog("Sync Config", "Recovery is not enabled.")
     return
   let cfg = currentConfig()
-  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: DefaultKvApiUrl
+  let relayUrl = if cfg.apiBaseUrl.len > 0: cfg.apiBaseUrl else: DefaultKvApiUrl
   let synced = waitFor syncConfigToRelay(cfg, relayUrl)
   if synced:
     setMessage("Config synced to relay.")

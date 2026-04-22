@@ -213,7 +213,7 @@ const initEvents = () => {
       const net = data.network || {};
       document.getElementById("settings-port").value = net.listen_port || "";
       document.getElementById("settings-announce").value = net.announce_addr || "";
-      document.getElementById("settings-relay-url").value = net.relay_base_url || "";
+      document.getElementById("settings-relay-url").value = net.api_base_url || "";
       document.getElementById("settings-relay-region").value = net.relay_region || "";
       document.getElementById("settings-sync-start").value = net.sync_window_start || "";
       document.getElementById("settings-sync-end").value = net.sync_window_end || "";
@@ -339,7 +339,7 @@ const initEvents = () => {
     if (announce) body.network.announce_addr = announce;
 
     const relayUrl = document.getElementById("settings-relay-url").value.trim();
-    if (relayUrl) body.network.relay_base_url = relayUrl;
+    if (relayUrl) body.network.api_base_url = relayUrl;
 
     const relayRegion = document.getElementById("settings-relay-region").value.trim();
     if (relayRegion) body.network.relay_region = relayRegion;

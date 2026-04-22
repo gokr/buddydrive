@@ -208,7 +208,7 @@ proc parseCli*(): CommandLine =
         if args.len >= 4:
           result.configKey = args[2].toLowerAscii()
           case result.configKey
-          of "relay-base-url", "relay_base_url", "relay-region", "relay_region", "storage-base-path", "storage_base_path", "bandwidth-limit", "bandwidth_limit":
+          of "api-base-url", "api_base_url", "relay-region", "relay_region", "storage-base-path", "storage_base_path", "bandwidth-limit", "bandwidth_limit":
             result.configValue = args[3]
           of "buddy-pairing-code", "buddy_pairing_code", "buddy-name", "buddy_name", "buddy-sync-time", "buddy_sync_time", "sync-time", "sync_time", "folder-append-only", "folder_append_only":
             if args.len >= 5:
@@ -257,7 +257,7 @@ proc handleInit*() =
   echo "Network defaults:"
   echo "  Listen port: 41721"
   echo "  Announce addr: (set [network].announce_addr after forwarding this port on your router)"
-  echo "  Relay base URL: (set with 'buddydrive config set relay-base-url <url>')"
+  echo "  Relay base URL: (set with 'buddydrive config set api-base-url <url>')"
   echo "  Relay region: (set with 'buddydrive config set relay-region <region>')"
   echo "  Buddy sync time: always (set per buddy with 'buddydrive config set buddy-sync-time <buddy-id> HH:MM')"
   echo ""
@@ -275,10 +275,10 @@ proc handleConfig*(cmd: CommandLine) =
     var cfg = loadConfig()
 
     case cmd.configKey
-    of "relay-base-url", "relay_base_url":
-      cfg.relayBaseUrl = cmd.configValue
+    of "api-base-url", "api_base_url":
+      cfg.apiBaseUrl = cmd.configValue
       saveConfig(cfg)
-      echo "Relay base URL set to: ", cfg.relayBaseUrl
+      echo "Relay base URL set to: ", cfg.apiBaseUrl
       return
     of "relay-region", "relay_region":
       cfg.relayRegion = cmd.configValue.toLowerAscii()
@@ -354,7 +354,7 @@ proc handleConfig*(cmd: CommandLine) =
       return
     else:
       echo "Unknown config key: ", cmd.configKey
-      echo "Supported keys: relay-base-url, relay-region, storage-base-path, bandwidth-limit, buddy-pairing-code, buddy-name, buddy-sync-time, folder-append-only"
+      echo "Supported keys: api-base-url, relay-region, storage-base-path, bandwidth-limit, buddy-pairing-code, buddy-name, buddy-sync-time, folder-append-only"
       return
 
   let cfg = loadConfig()
@@ -367,8 +367,8 @@ proc handleConfig*(cmd: CommandLine) =
     echo "  Announce addr: ", cfg.announceAddr
   else:
     echo "  Announce addr: (not set)"
-  if cfg.relayBaseUrl.len > 0:
-    echo "  Relay base URL: ", cfg.relayBaseUrl
+  if cfg.apiBaseUrl.len > 0:
+    echo "  Relay base URL: ", cfg.apiBaseUrl
   else:
     echo "  Relay base URL: (not set)"
   if cfg.relayRegion.len > 0:
@@ -754,7 +754,7 @@ proc handleSetupRecovery*() =
   
   echo "Syncing config to relay..."
 
-  let relayUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: DefaultKvApiUrl
+  let relayUrl = if cfg.apiBaseUrl.len > 0: cfg.apiBaseUrl else: DefaultKvApiUrl
   let synced = waitFor syncConfigToRelay(cfg, relayUrl)
   if synced:
     echo "Config synced to relay."
@@ -780,8 +780,8 @@ proc handleRecover*() =
   var relayRegion = "eu"
   if config.configExists():
     let cfg = loadConfig()
-    if cfg.relayBaseUrl.len > 0:
-      relayUrl = cfg.relayBaseUrl
+    if cfg.apiBaseUrl.len > 0:
+      relayUrl = cfg.apiBaseUrl
     if cfg.relayRegion.len > 0:
       relayRegion = cfg.relayRegion
 
@@ -827,7 +827,7 @@ proc handleSyncConfig*() =
     echo "Recovery not enabled. Run 'buddydrive setup-recovery' first."
     return
   
-  let kvUrl = if cfg.relayBaseUrl.len > 0: cfg.relayBaseUrl else: DefaultKvApiUrl
+  let kvUrl = if cfg.apiBaseUrl.len > 0: cfg.apiBaseUrl else: DefaultKvApiUrl
   echo "Syncing config to relay: ", kvUrl
   
   let success = waitFor syncConfigToRelay(cfg, kvUrl)

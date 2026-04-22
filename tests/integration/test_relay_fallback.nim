@@ -24,7 +24,7 @@ proc connectAndPair(config: AppConfig): Future[string] {.async.} =
   var relayListCache = initRelayListCache()
   let relayConn = await connectViaRegionalRelay(
     relayListCache,
-    config.relayBaseUrl,
+    config.apiBaseUrl,
     config.relayRegion,
     config.buddies[0].pairingCode
   )

@@ -103,12 +103,12 @@ buddydrive config set buddy-pairing-code <buddy-id> <pairing-code>
 For hosted relay discovery, BuddyDrive expects an HTTP relay list service. Configure:
 
 ```bash
-buddydrive config set relay-base-url https://example.com/relays
+buddydrive config set api-base-url https://example.com
 buddydrive config set relay-region eu
 buddydrive config set buddy-pairing-code <buddy-id> <pairing-code>
 ```
 
-BuddyDrive fetches `<relay-base-url>/<relay-region>` and expects JSON like:
+BuddyDrive fetches `<api-base-url>/relays/<relay-region>` and expects JSON like:
 
 ```json
 {

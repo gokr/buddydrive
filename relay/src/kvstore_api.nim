@@ -412,6 +412,48 @@ proc handler(request: Request) {.gcsafe, raises: [].} =
       else:
         respondText(request, 405, "Method not allowed")
 
+    elif request.path.startsWith("/relays/"):
+      let clientIp = trustedClientIp(request)
+      if not allowGeoAccess(clientIp):
+        respondText(request, 403, "Region not allowed")
+        return
+
+      let region = request.path[8..^1].strip(chars = {'/'}).toLowerAscii()
+      if region.len == 0:
+        respondText(request, 400, "Missing region")
+        return
+
+      if request.httpMethod != "GET":
+        respondText(request, 405, "Method not allowed")
+        return
+
+      if not allowRequest(clientIp, false, "relays-" & region):
+        respondText(request, 429, "Rate limit exceeded")
+        return
+
+      var relays: seq[string] = @[]
+      case region
+      of "eu":
+        relays.add("/dns4/relay-eu.buddydrive.org/tcp/19447")
+      of "us":
+        relays.add("/dns4/relay-us.buddydrive.org/tcp/19447")
+      of "asia":
+        relays.add("/dns4/relay-asia.buddydrive.org/tcp/19447")
+      of "local":
+        relays.add("/ip4/127.0.0.1/tcp/41722")
+      else:
+        respondText(request, 404, "Unknown region")
+        return
+
+      var body = "{\"relays\":["
+      for i, relay in relays:
+        if i > 0:
+          body.add(",")
+        body.add("\"" & relay & "\"")
+      body.add("],\"ttl_seconds\":3600}")
+
+      respondJson(request, 200, body)
+
     elif request.path == "/health":
       respondJson(request, 200, "{\"status\":\"ok\"}")
 
@@ -443,6 +485,7 @@ proc runKvApi*(kv: KvStore, port: int = 8080) =
   echo "  GET    /kv/<pubkey>   - Fetch encrypted config"
   echo "  PUT    /kv/<pubkey>   - Store encrypted config"
   echo "  DELETE /kv/<pubkey>   - Delete config"
+  echo "  GET    /relays/<region> - List TCP relay addresses for a region"
   echo "  GET    /health        - Health check"
   if geoStatus.message.len > 0:
     echo geoStatus.message

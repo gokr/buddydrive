@@ -33,7 +33,7 @@ type
     recovery*: RecoveryConfig
     listenPort*: int
     announceAddr*: string
-    relayBaseUrl*: string
+    apiBaseUrl*: string
     relayRegion*: string
     storageBasePath*: string
     bandwidthLimitKBps*: int
@@ -122,7 +122,7 @@ proc newAppConfig*(buddy: BuddyId): AppConfig =
   result.recovery.masterKey = ""
   result.listenPort = DefaultP2PPort
   result.announceAddr = ""
-  result.relayBaseUrl = "https://api.buddydrive.org"
+  result.apiBaseUrl = "https://api.buddydrive.org"
   result.relayRegion = "eu"
   result.storageBasePath = ""
   result.bandwidthLimitKBps = 0
