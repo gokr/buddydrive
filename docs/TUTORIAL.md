@@ -136,7 +136,7 @@ This confirms that:
 - separate BuddyDrive homes work
 - config is written correctly
 - folders and buddies are saved correctly
-- the daemon starts and publishes discovery records to the relay KV-store
+- the daemon starts and publishes discovery records to the relay API
 - both instances can run concurrently with different P2P and control ports
 - incoming connections from known buddies are always accepted
 
@@ -168,7 +168,7 @@ The same pairing code connects both buddies through the relay.
 For production, use the public relay list:
 
 ```bash
-buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 ```
 

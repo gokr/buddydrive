@@ -252,7 +252,7 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **libsodium** — Encryption, key derivation
 - **parsetoml** — TOML parsing (not GC-safe, needs `{.cast(gcsafe).}` in async)
 - **chronos** — Async framework
-- **curly** — HTTP client (relay KV API, config sync)
+- **curly** — HTTP client (relay API, config sync)
 - **mummyx** (fork) — HTTP server (relay)
 - **debby** (fork) — MySQL ORM for relay KV store
 - **db_connector/db_sqlite** — SQLite (bundled with Nim 2.2.8+)
@@ -271,17 +271,17 @@ See `docs/PLAN.md` for full details. Key points:
 - BIP39 12-word mnemonic as single recovery secret
 - Master key stored plaintext in config.toml
 - Config encrypted before syncing to relay/buddies
-- Public key (Base58) used as relay KV store lookup key
-- TiDB Cloud for relay KV store
-- Default KV API URL: `https://buddydrive-tankfeud-ddaec82a.koyeb.app`
-- Default TCP relay: `01.proxy.koyeb.app:19447`
+- Public key (Base58) used as relay API config lookup key
+- TiDB Cloud for relay-backed API storage
+- Default API URL: `https://api.buddydrive.org`
+- Default TCP relay: `relay-eu.buddydrive.org:19447`
 
 ## Testing
 
 Tests use `std/unittest` and run via testament with `nimble test`:
 
 - **Unit tests**: `tests/unit/*/*.nim` — 17 test files covering config, crypto, recovery, messages, policy, scanner, transfer crash safety, control, control_web, rawrelay, index, pairing, types, config_sync, discovery, session, geoip_ranges
-- **Integration tests**: `tests/integration/*.nim` — 7 test files covering CLI flows, KV API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
+- **Integration tests**: `tests/integration/*.nim` — 7 test files covering CLI flows, API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
 
 Integration tests are environment-dependent:
 - Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to fail hard when services unavailable
@@ -289,7 +289,7 @@ Integration tests are environment-dependent:
 
 Test environment variables:
 - `BUDDYDRIVE_STRICT_INTEGRATION=1` — fail on unavailable services
-- `BUDDYDRIVE_KV_API_URL` — override KV API URL (default: `https://buddydrive-tankfeud-ddaec82a.koyeb.app`)
+- `BUDDYDRIVE_KV_API_URL` — override API URL (default: `https://api.buddydrive.org`)
 - `BUDDYDRIVE_LOCAL_KV_DSN` — local KV database connection string
 
 Test utilities (`tests/testutils.nim`):

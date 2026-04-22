@@ -1,6 +1,6 @@
 # BuddyDrive Relay
 
-A TCP relay server and KV store for BuddyDrive. The relay enables NAT traversal when direct connections are not possible. The KV store (optional, requires TiDB Cloud) stores encrypted config blobs for recovery.
+A TCP relay server and API backend for BuddyDrive. The relay enables NAT traversal when direct connections are not possible. The optional HTTP API (requires TiDB Cloud) stores encrypted config blobs for recovery and buddy discovery records.
 
 ## How It Works
 
@@ -15,11 +15,11 @@ A TCP relay server and KV store for BuddyDrive. The relay enables NAT traversal 
 
 On the BuddyDrive side, the buddy `pairing_code` is reused as this relay token. Any token is accepted — there is no whitelist.
 
-### KV Store (optional)
+### HTTP API (optional)
 
-When built with `-d:withKvStore`, the relay also runs an HTTP API for storing encrypted config blobs and buddy discovery records. BuddyDrive uses the KV store for recovery (encrypted config uploaded with public key as lookup key) and the discovery endpoint for peer discovery (address records published with keys derived from pairing codes).
+When built with `-d:withKvStore`, the relay also runs an HTTP API for storing encrypted config blobs and buddy discovery records. BuddyDrive uses this API for recovery (encrypted config uploaded with public key as lookup key) and for peer discovery (address records published with keys derived from pairing codes).
 
-**KV API Endpoints:**
+**Config Endpoints:**
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -47,11 +47,11 @@ Discovery records have a 6h TTL and are HMAC-authenticated. The key is a Base58-
 # Specify port
 ./buddydrive-relay 41722
 
-# With KV store (requires TIDB_CONNECTION_STRING)
+# With HTTP API support (requires TIDB_CONNECTION_STRING)
 export TIDB_CONNECTION_STRING="mysql://user:pass@host:4000/buddydrive"
 ./buddydrive-relay 41722 8080
 
-# Optional: restrict KV API to EU IP ranges packaged in the container
+# Optional: restrict API access to EU IP ranges packaged in the container
 export BUDDYDRIVE_KV_EU_ONLY=1
 export BUDDYDRIVE_KV_EU_RANGES_FILE=/app/geo/eu_cidrs.txt
 
@@ -69,7 +69,7 @@ docker build -t buddydrive-relay .
 # Run (TCP relay only)
 docker run -d -p 41722:41722 buddydrive-relay
 
-# Run with KV store
+# Run with HTTP API support
 docker run -d \
   -p 41722:41722 \
   -p 8080:8080 \
@@ -124,11 +124,11 @@ BuddyDrive fetches `<relay-base-url>/<relay-region>` and expects JSON like:
 1. Get a VPS with a public IP
 2. Install Docker
 3. Deploy the relay
-4. Optionally enable the KV store with a TiDB Cloud connection string
+4. Optionally enable the HTTP API with a TiDB Cloud connection string
 
 ## Koyeb Deployment
 
-The relay can be deployed on Koyeb's free tier with both TCP relay and KV store:
+The relay can be deployed on Koyeb's free tier with both the TCP relay and HTTP API:
 
 ```bash
 # Create app
@@ -150,11 +150,11 @@ koyeb services create relay \
   --regions fra
 ```
 
-The TCP relay is available at the proxy host/port. The KV API is available via the service's HTTP route.
+The TCP relay is available at the proxy host/port. The API is available via the service's HTTP route.
 
-## EU-only KV Access
+## EU-only API Access
 
-If you want KV API access or TCP relay access limited to EU IP ranges, place a generated `geo/eu_cidrs.txt` in the relay directory before building the Docker image.
+If you want API access or TCP relay access limited to EU IP ranges, place a generated `geo/eu_cidrs.txt` in the relay directory before building the Docker image.
 
 For local generation outside Docker, run:
 

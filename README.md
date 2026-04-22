@@ -14,7 +14,7 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 
 ## Features
 
-- **P2P Networking** - libp2p with relay-backed KV-store discovery, deterministic initiator selection, direct public TCP dialing, UPnP attempts, and relay fallback
+- **P2P Networking** - libp2p with relay-backed discovery, deterministic initiator selection, direct public TCP dialing, UPnP attempts, and relay fallback
 - **Encrypted Backup** - files stored encrypted on your buddy's machine (filenames and content); deterministic path encryption for move detection, random content nonces for safety
 - **Streaming Blake2b Hashing** - content-hashed sync with move and delete detection, no full-file-in-memory hashing
 - **Recovery And Restore** - 12-word recovery phrase, stored master key, encrypted config sync to relay, and config restore on a new machine
@@ -177,7 +177,7 @@ Append-only folders still protect existing local files from being overwritten by
 - For relay fallback, configure relay region. The stored pairing code is reused as the relay shared secret:
 
 ```bash
-buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 ```
 
@@ -187,7 +187,7 @@ buddydrive config set relay-region eu
 buddydrive config set buddy-sync-time <buddy-id> 03:00
 ```
 
-The public relay for TCP fallback is at `01.proxy.koyeb.app:19447`. The KV store for config recovery is at `https://buddydrive-tankfeud-ddaec82a.koyeb.app`. See [relay/README.md](relay/README.md) for relay details and self-hosting notes.
+The public TCP relay is at `relay-eu.buddydrive.org:19447`. The HTTP API (discovery, config sync, relay list) is at `https://api.buddydrive.org`. See [relay/README.md](relay/README.md) for relay details and self-hosting notes.
 
 ## Roadmap
 

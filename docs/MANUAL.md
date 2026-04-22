@@ -237,7 +237,7 @@ When sync time is empty (default), the daemon initiates connections whenever it 
 1. `buddydrive init` creates a local buddy identity and config file
 2. `buddydrive start` creates the libp2p node for the running session
 3. The daemon publishes your address to the relay at `/discovery/<derived-key>`, where the key is derived from the pairing code. The record includes peerId, addresses, `isPubliclyReachable`, sync time, and relay region
-4. The daemon looks up configured buddies using the same derived key via the relay KV-store (every 10 minutes)
+4. The daemon looks up configured buddies using the same derived key via the relay API (every 10 minutes)
 5. Deterministic initiator selection: the side without a public address initiates; if both are the same reachability, the lower buddy UUID initiates
 6. It connects directly when a public TCP address is available, or via relay fallback when configured
 7. Cached addresses in `state.db` are used for graceful degradation when the relay is unavailable
@@ -246,7 +246,7 @@ When sync time is empty (default), the daemon initiates connections whenever it 
 
 - Direct libp2p connections use Noise transport encryption
 - Recovery setup derives a 32-byte master key from the 12-word phrase
-- Config sync encrypts the serialized config blob with the master key before uploading it to the relay KV store
+- Config sync encrypts the serialized config blob with the master key before uploading it to the relay API
 - Normal sync restores missing files by comparing remote file lists with the local folder state
 
 ### Sync Protocol
@@ -273,7 +273,7 @@ For direct connections, forward the configured `listen_port` on your router and 
 For relay fallback, configure relay region. The stored pairing code is reused as the relay shared secret:
 
 ```bash
-buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 ```
 
@@ -294,7 +294,7 @@ master_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 [network]
 listen_port = 41721
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
-relay_base_url = "https://buddydrive.net/relays"
+relay_base_url = "https://api.buddydrive.org"
 relay_region = "eu"
 storage_base_path = ""
 bandwidth_limit_kbps = 0
@@ -370,7 +370,7 @@ REST API served by the daemon on `0.0.0.0:17521` by default. The actual port is 
 | POST | `/recovery/recover` | Restore config from 12-word mnemonic |
 | GET | `/recovery` | Show current recovery status |
 | POST | `/recovery/export` | Export recovery info |
-| POST | `/recovery/sync-config` | Manually push encrypted config to relay KV store |
+| POST | `/recovery/sync-config` | Manually push encrypted config to the relay API |
 
 ### Error Responses
 
@@ -438,8 +438,8 @@ The relay enables NAT traversal and encrypted config storage. See [relay/README.
 
 ### Public Relay
 
-- **TCP relay**: `01.proxy.koyeb.app:19447` (for NAT traversal)
-- **KV API**: `https://buddydrive-tankfeud-ddaec82a.koyeb.app` (for encrypted config storage)
+- **TCP relay**: `relay-eu.buddydrive.org:19447` (for NAT traversal)
+- **API**: `https://api.buddydrive.org` (for discovery, encrypted config storage, and relay lists)
 - **Region**: Frankfurt (fra)
 
 ### Self-Hosted Relay
@@ -448,7 +448,7 @@ The relay enables NAT traversal and encrypted config storage. See [relay/README.
 # TCP relay only (default port 41722)
 ./buddydrive-relay
 
-# With KV store (requires TIDB_CONNECTION_STRING)
+# With HTTP API support (requires TIDB_CONNECTION_STRING)
 export TIDB_CONNECTION_STRING="mysql://user:pass@host:4000/buddydrive"
 ./buddydrive-relay 41722 8080
 ```

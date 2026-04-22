@@ -137,9 +137,11 @@ announce_addr = "/ip4/203.0.113.10/tcp/41721"
 For relay fallback:
 
 ```bash
-buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 ```
+
+The public EU TCP relay is `relay-eu.buddydrive.org:19447`.
 
 ### Check Status
 
@@ -227,7 +229,7 @@ buddydrive add-folder ~/Photos --name photos
 buddydrive add-folder ~/Documents --name docs --append-only
 
 # Configure relay fallback
-buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 buddydrive config set buddy-pairing-code abc123 ABCD-EFGH
 
@@ -260,7 +262,7 @@ master_key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 [network]
 listen_port = 41721
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
-relay_base_url = "https://buddydrive.net/relays"
+relay_base_url = "https://api.buddydrive.org"
 relay_region = "eu"
 storage_base_path = ""
 bandwidth_limit_kbps = 0

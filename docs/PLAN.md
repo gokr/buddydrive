@@ -4,19 +4,19 @@ Project plan, architecture decisions, implementation history, and remaining work
 
 ## Project Goal
 
-Build BuddyDrive — a P2P encrypted folder sync tool in Nim that syncs folders with 1-2 buddies across the internet, bypassing NATs and firewalls. Also build BuddyDrive Relay — a TCP relay server and KV store for when direct P2P connections fail.
+Build BuddyDrive — a P2P encrypted folder sync tool in Nim that syncs folders with 1-2 buddies across the internet, bypassing NATs and firewalls. Also build BuddyDrive Relay — a TCP relay server and API for when direct P2P connections fail.
 
 ## Design Decisions
 
 - **CLI-first, GUI later** — direct GTK4 (not Owlkettle) for the desktop GUI
 - **libp2p** for P2P networking (direct transport, NAT traversal)
 - **libsodium** for encryption (XSalsa20-Poly1305)
-- **KV-store relay discovery** — replaced DHT-based discovery (DHT was unreliable)
+- **Relay API discovery** — replaced DHT-based discovery (DHT was unreliable)
 - **Pairing code reused as relay token** — auto-generated XXXX-XXXX format
 - **BIP39 12-word mnemonic** — the single recovery secret
 - **Asymmetric master key** from mnemonic — stored in plaintext in config.toml
 - **Config encrypted** with master key before syncing to relay and buddies
-- **Relay KV store** uses public key (Base58) as lookup key
+- **Relay API** uses public key (Base58) as config lookup key
 - **Recovery only needs the 12 words** — no need to remember a buddy ID + pairing code
 - **Direct-only connectivity preferred** — relay fallback is secondary
 - **Automatic UPnP** — users should not have to manually configure routers
@@ -52,7 +52,7 @@ Build BuddyDrive — a P2P encrypted folder sync tool in Nim that syncs folders 
 ### Phase 2: libp2p Networking — COMPLETE
 
 - libp2p node creation with TCP transport, Noise security, Yamux multiplexer
-- KV-store relay discovery with HMAC authentication (replaced DHT)
+- Relay API discovery with HMAC authentication (replaced DHT)
 - Direct peer connection tested
 
 ### Phase 3: Buddy Pairing — COMPLETE
@@ -511,7 +511,7 @@ config, config_sync, control, control_web, crypto, discovery, geoip_ranges, inde
 
 `tests/integration/*.nim` — run via `nimble test` or `nimble testIntegration`:
 
-CLI flows, KV API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
+CLI flows, API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
 
 ### Remaining Tests To Add
 
@@ -528,8 +528,8 @@ CLI flows, KV API, config sync e2e, relay fallback, relay file sync, relay serve
 
 ## Public Relay
 
-- **TCP relay**: `01.proxy.koyeb.app:19447`
-- **KV API**: `https://buddydrive-tankfeud-ddaec82a.koyeb.app`
+- **TCP relay**: `relay-eu.buddydrive.org:19447`
+- **API**: `https://api.buddydrive.org`
 - **Region**: Frankfurt (fra)
 
 To deploy your own relay, see [relay/README.md](../relay/README.md).

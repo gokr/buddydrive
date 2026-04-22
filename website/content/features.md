@@ -22,9 +22,9 @@ No central sync account. No cloud drive. No vendor lock-in.
 Your Machine <--direct or relay--> Buddy's Machine
 ```
 
-BuddyDrive uses a relay KV-store for peer discovery and libp2p for direct transport. Current connectivity options include direct public TCP connections and relay fallback. Features:
+BuddyDrive uses a relay-backed API for peer discovery and libp2p for direct transport. Current connectivity options include direct public TCP connections and relay fallback. Features:
 
-- **Relay KV-store discovery** - find your buddy via pairing-code-derived keys on the relay
+- **Relay API discovery** - find your buddy via pairing-code-derived keys on the relay
 - **Deterministic initiator selection** - the side without a public address initiates; if both same reachability, lower buddy UUID initiates
 - **Relay fallback** - available when both peers store the same pairing code for the relationship
 - **Always accept incoming** - incoming connections from known buddies are accepted regardless of sync time
@@ -107,7 +107,7 @@ Recovery stores:
 
 - A `public_key` lookup value in `[recovery]`
 - A locally stored `master_key`
-- An encrypted config blob in the relay KV store
+- An encrypted config blob in the relay API
 
 ## Sync Features
 

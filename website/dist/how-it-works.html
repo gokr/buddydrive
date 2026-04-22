@@ -61,7 +61,7 @@
         <p>The daemon runs in the foreground today and contains:</p>
         <ul>
             <li><strong>libp2p node</strong> - direct transport</li>
-            <li><strong>Discovery service</strong> - relay KV-store buddy lookup</li>
+            <li><strong>Discovery service</strong> - relay API buddy lookup</li>
             <li><strong>Sync manager</strong> - folder scan and sync orchestration</li>
             <li><strong>Control API</strong> - localhost HTTP API for the GUI</li>
             <li><strong>SQLite state</strong> - runtime status and file index tracking</li>
@@ -115,7 +115,7 @@
                 </tr>
                 <tr>
                     <td>Discovery</td>
-                    <td>Relay KV-store</td>
+                    <td>Relay API</td>
                     <td>Find buddy addresses via pairing-code-derived keys</td>
                 </tr>
             </tbody>
@@ -124,7 +124,7 @@
         <h3>Peer Discovery</h3>
         <p>How two buddies find each other:</p>
         <ol>
-            <li>Each daemon publishes its address record to the relay KV-store at <code>/discovery/&lt;derived-key&gt;</code>, where the key is derived from the pairing code (HMAC-authenticated)</li>
+            <li>Each daemon publishes its address record to the relay API at <code>/discovery/&lt;derived-key&gt;</code>, where the key is derived from the pairing code (HMAC-authenticated)</li>
             <li>The daemon looks up configured buddies using the same derived key (every 10 minutes)</li>
             <li>It reads the peer ID, advertised multiaddrs, reachability flag, and sync time from the record</li>
             <li>Deterministic initiator selection: the side without a public address initiates; if both same reachability, lower buddy UUID initiates</li>
