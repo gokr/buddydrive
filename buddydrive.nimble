@@ -80,9 +80,6 @@ task testTransfer, "Run transfer crash-safety tests":
 task testCli, "Run CLI integration tests":
   exec "testament pattern \"tests/integration/test_cli_flows.nim\""
 
-task testRelayServer, "Run relay server integration tests":
-  exec "testament pattern \"tests/integration/test_relay_server.nim\""
-
 task testIntegration, "Run integration tests":
   exec "testament pattern \"tests/integration/*.nim\""
 

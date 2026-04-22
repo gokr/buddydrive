@@ -55,7 +55,6 @@ nimble testRawRelay
 nimble testPairing
 nimble testTransfer
 nimble testCli
-nimble testRelayServer
 
 # Build Debian package
 make deb
@@ -116,14 +115,7 @@ src/
 
 ### Relay Server
 
-```
-relay/src/
-├── relay.nim                  # Main relay server (mummy HTTP + TCP relay)
-├── kvstore.nim                # TiDB Cloud MySQL KV store
-├── kvstore_api.nim            # HTTP API: /kv/<pubkey>, /discovery/<key>
-├── geoip_policy.nim           # EU-only KV access enforcement
-└── geoip_ranges.nim          # CIDR range matching
-```
+The relay server lives in a separate repository: https://github.com/gokr/buddydrive-relay
 
 ### Other Directories
 

@@ -643,4 +643,4 @@ CLI flows, API, config sync e2e, relay fallback, relay file sync, relay server, 
 - **API**: `https://api.buddydrive.org`
 - **Region**: Frankfurt (fra)
 
-To deploy your own relay, see [relay/README.md](../relay/README.md).
+To deploy your own relay, see the [buddydrive-relay repository](https://github.com/gokr/buddydrive-relay).
