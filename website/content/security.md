@@ -18,18 +18,29 @@ BuddyDrive currently has these security layers:
 | Chunk encryption | Random nonce per 64KB chunk | Prevents nonce reuse across file versions |
 | Recovery config backup | libsodium `crypto_secretbox` | Encrypt config synced to relay |
 | Pairing code | Shared secret | Match buddies, derive discovery keys, HMAC-authenticate relay records, and relay fallback sessions |
-| Recovery phrase | 12-word mnemonic | Re-derive recovery metadata on a new machine |
+| Recovery mnemonic | Standard BIP39 (128-bit entropy + SHA-256 checksum) | Re-derive recovery metadata on a new machine; checksum catches transcription errors |
+| Mnemonic-to-seed | Argon2i (moderate tier, 256 MB memory) | Key derivation from mnemonic (stronger than BIP39's PBKDF2) |
+| Master key | BLAKE2b-256 of seed | Deterministic 32-byte key from 64-byte Argon2i output |
+| Public key (lookup) | BLAKE2b-256 of master key + Base58 | Relay API lookup key (not an asymmetric public key) |
+| Relay API signing | Ed25519 (derived from master key) | Authenticate relay API mutations |
+| Content hashing | BLAKE2b-256 (streaming, 64KB chunks) | File change detection, move detection, restore verification |
 
 ## Recovery Phrase And Master Key
 
 When you run `buddydrive setup-recovery`:
 
-1. BuddyDrive generates a 12-word recovery phrase
-2. It derives a master key from that phrase
-3. It stores recovery metadata in `config.toml`
-4. It encrypts your serialized config before syncing it to the relay
+1. BuddyDrive generates 128 bits of random entropy
+2. A SHA-256 checksum (4 bits) is appended, and the 132 bits are encoded as a 12-word mnemonic using the BIP39 English wordlist — this follows the standard BIP39 specification
+3. The mnemonic is fed through Argon2i (moderate tier, 256 MB memory) to produce a 64-byte seed
+4. The seed is hashed with BLAKE2b to produce the 32-byte master key
+5. Recovery metadata is stored in `config.toml`
+6. The serialized config is encrypted with the master key before syncing it to the relay
 
 When you later run `buddydrive recover`, BuddyDrive uses the same 12 words to derive the same recovery material, fetches the encrypted config from the relay, decrypts it locally, and writes the restored config.
+
+The checksum in the mnemonic catches most single-word transcription errors — if you write down one word incorrectly, validation fails rather than silently producing the wrong key.
+
+**Key derivation divergence**: BuddyDrive uses Argon2i for mnemonic-to-seed instead of BIP39's standard PBKDF2-HMAC-SHA512. Argon2i is more resistant to GPU and ASIC attacks. The consequence is that other BIP39 tools cannot derive the same master key from a BuddyDrive mnemonic.
 
 ## Control API Access
 

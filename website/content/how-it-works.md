@@ -128,15 +128,16 @@ BuddyDrive keeps runtime and file state in SQLite under `~/.buddydrive/`.
 
 ### Setup Recovery
 
-1. `buddydrive setup-recovery` generates a 12-word phrase
-2. BuddyDrive derives a 32-byte master key from the phrase
-3. Recovery metadata is stored in `[recovery]` in `config.toml`
-4. The serialized config is encrypted with the master key and uploaded to the relay
+1. `buddydrive setup-recovery` generates 128 bits of random entropy
+2. A SHA-256 checksum is computed and the entropy + checksum is encoded as a 12-word BIP39 mnemonic
+3. The mnemonic is fed through Argon2i (256 MB memory) to produce a 64-byte seed, then BLAKE2b to produce the 32-byte master key
+4. Recovery metadata is stored in `[recovery]` in `config.toml`
+5. The serialized config is encrypted with the master key and uploaded to the relay
 
 ### Recover On A New Machine
 
 1. `buddydrive recover` asks for the 12-word phrase
-2. BuddyDrive derives the same master key again
+2. BuddyDrive derives the same master key (Argon2i + BLAKE2b)
 3. It fetches the encrypted config blob from the relay
 4. The config is decrypted and saved locally
 5. Starting the daemon lets normal sync restore missing files

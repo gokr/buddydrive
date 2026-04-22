@@ -13,7 +13,7 @@ Build BuddyDrive — a P2P encrypted folder sync tool in Nim that syncs folders 
 - **libsodium** for encryption (XSalsa20-Poly1305)
 - **Relay API discovery** — replaced DHT-based discovery (DHT was unreliable)
 - **Pairing code reused as relay token** — auto-generated XXXX-XXXX format
-- **BIP39 12-word mnemonic** — the single recovery secret
+- **BIP39 wordlist 12-word mnemonic** — standard BIP39 generation (128-bit entropy + SHA-256 checksum) with Argon2i key derivation instead of PBKDF2
 - **Asymmetric master key** from mnemonic — stored in plaintext in config.toml
 - **Config encrypted** with master key before syncing to relay and buddies
 - **Relay API** uses public key (Base58) as config lookup key
@@ -406,6 +406,117 @@ This is a secondary use case for active collaboration. The primary use case is a
 
 - **Large folder listings**: the file list exchange uses a single framed message (10MB max). A folder with ~100K files at ~100 bytes per entry approaches this limit. Pagination or streaming of file lists is deferred to a future iteration.
 - **Reachability signal**: `isPubliclyReachable` is a best-effort hint. Stale UPnP or bad `announce_addr` can make it wrong. The initiator falls back to relay on direct-dial failure and logs diagnostics.
+
+---
+
+## Cryptography Details
+
+This section documents every cryptographic algorithm, its parameters, and the reasoning behind each choice.
+
+### Algorithm Inventory
+
+| Component | Algorithm | Library Call | Parameters |
+|-----------|-----------|-------------|------------|
+| Symmetric encryption | XSalsa20-Poly1305 | `crypto_secretbox_easy` / `crypto_secretbox_open_easy` | Key: 32 bytes, Nonce: 24 bytes, MAC: 16 bytes |
+| Content hashing | BLAKE2b-256 | `crypto_generichash` | Output: 32 bytes, streaming via init/update/final |
+| Key derivation (recovery) | Argon2i | `crypto_pwhash` | Salt: 16 bytes, Output: 64 bytes, `opslimit_moderate`, `memlimit_moderate` |
+| Key derivation (password) | Argon2i | `crypto_pwhash` | Salt: 16 bytes, Output: 32 bytes |
+| Password hashing | Argon2i | `crypto_pwhash_str` / `crypto_pwhash_str_verify` | libsodium defaults (auto-upgrade) |
+| Master key derivation | BLAKE2b-256 | `crypto_generichash` | Input: 64-byte seed, Output: 32 bytes |
+| Folder key derivation | BLAKE2b-256 | `crypto_generichash` | Input: `masterKey + "/folder/" + folderId`, Output: 32 bytes |
+| Path nonce derivation | BLAKE2b | `crypto_generichash` | Input: `folderKey + "/path/" + plaintextPath`, Output: 24 bytes (NonceSize) |
+| Public key derivation | BLAKE2b-256 + Base58 | `crypto_generichash` + `base58Encode` | Input: 32-byte masterKey, Output: Base58 string (lookup key, not an asymmetric public key) |
+| Signing keypair | Ed25519 | `crypto_sign_seed_keypair` | Seed: 32-byte masterKey |
+| API signatures | Ed25519 | `crypto_sign_detached` | Canonical message: method + lookupKey + verifyKeyHex + version + timestamp + body |
+| Key generation | XSalsa20-Poly1305 keygen | `crypto_secretbox_keygen` | Output: 32-byte random key |
+| Asymmetric keypair | Curve25519 | `crypto_box_keypair` | Used for future extensions |
+| Nonce generation | `randombytes` | `randombytes(24)` | 24 bytes of cryptographically secure randomness |
+
+### Recovery Key Derivation Chain
+
+The full derivation from mnemonic to all derived keys:
+
+```
+12-word mnemonic (standard BIP39: 128-bit entropy + SHA-256 checksum)
+  │
+  ▼  crypto_pwhash (Argon2i)
+  │  salt = "mnemonic" (UTF-8, padded to 16 bytes with byte indices)
+  │  opslimit = crypto_pwhash_opslimit_moderate()
+  │  memlimit = crypto_pwhash_memlimit_moderate()
+  │  output = 64 bytes
+  ▼
+seed (64 bytes)
+  │
+  ▼  crypto_generichash (BLAKE2b-256)
+  │  input = seed (64 bytes)
+  │  output = 32 bytes
+  ▼
+master key (32 bytes, stored as hex in config.toml [recovery].master_key)
+  │
+  ├──► crypto_generichash(masterKey, 32) + base58Encode
+  │    → publicKeyB58 (lookup key for relay API, NOT an asymmetric public key)
+  │
+  ├──► crypto_sign_seed_keypair(masterKey)
+  │    → Ed25519 signing keypair (for relay API authentication)
+  │    → verify key hex used in signed headers (X-BD-Verify-Key, X-BD-Signature)
+  │
+  └──► crypto_generichash(masterKey + "/folder/" + folderId, 32)
+       → folder key (32 bytes, per-folder encryption key)
+```
+
+### Mnemonic Generation — Standard BIP39
+
+BuddyDrive generates mnemonics following the **standard BIP39 specification**:
+
+1. Generate 128 bits of cryptographically random entropy
+2. Compute SHA-256 checksum of the entropy
+3. Append the first 4 bits of the checksum to the entropy (132 bits total)
+4. Encode the 132 bits as 12 words using the BIP39 English wordlist (11 bits per word)
+5. Validation verifies word count, word membership, **and checksum** — a single wrong word is detected
+
+This matches the BIP39 reference implementation (tested against official test vectors from the python-mnemonic repository).
+
+**Key derivation divergence from BIP39**: While mnemonic generation and validation follow the BIP39 spec, the mnemonic-to-seed step uses **Argon2i** (via libsodium's `crypto_pwhash`) instead of BIP39's standard PBKDF2-HMAC-SHA512. Argon2i is more resistant to GPU and ASIC attacks than PBKDF2. This means BIP39-compatible tools cannot derive the same master key from the same mnemonic — only BuddyDrive can recover keys from its mnemonics.
+
+### Argon2i Parameters for Recovery
+
+The recovery key derivation uses `opslimit_moderate` and `memlimit_moderate`, which is the middle tier in libsodium. libsodium defines three tiers:
+
+| Tier | Opslimit | Memlimit | Approximate cost |
+|------|----------|----------|-------------------|
+| Interactive | 2 | 67108864 (64 MB) | ~100ms on modern hardware |
+| Moderate | 3 | 268435456 (256 MB) | ~500ms on modern hardware |
+| Sensitive | 4 | 1073741824 (1 GB) | ~3s on modern hardware |
+
+**Current choice**: Moderate tier. This provides a meaningful defense against GPU-based brute force while keeping recovery time under ~500ms — acceptable for a one-time operation on the user's machine. The interactive tier (the previous default) was too weak for a key that protects all synced data.
+
+**Salt construction**: The salt is the UTF-8 string `"mnemonic"` padded to 16 bytes (the `crypto_pwhash_saltbytes()` length) by filling remaining bytes with their index value (`salt[i] = byte(i)` for `i >= 8`). This is a fixed salt, which means the same mnemonic always produces the same seed. This is necessary for deterministic recovery but means the salt is not a defense against precomputation — it is the same for all BuddyDrive users.
+
+### Deterministic vs. Random Nonces
+
+**Path encryption** uses deterministic nonces derived from `BLAKE2b(folderKey + "/path/" + plaintextPath)` truncated to 24 bytes. This is safe because:
+- The plaintext (the path string) does not change between versions of a file at that path
+- Same path always encrypts to the same ciphertext, enabling move detection
+- The folder key provides domain separation — different folders produce different nonces even for the same path
+
+**Chunk encryption** uses random 24-byte nonces, prepended to the ciphertext. This is required because:
+- The same (file, offset) pair may contain different plaintext across file versions
+- A deterministic nonce would reuse the same nonce with different plaintext under the same key — catastrophic for XSalsa20-Poly1305
+- The 24-byte nonce space (2^192) makes collision probability negligible
+
+### Ed25519 Signing for Relay API
+
+The relay API mutations (PUT, DELETE) are authenticated with Ed25519 signatures derived from the master key:
+
+1. `deriveSigningKeyPair(masterKey)` → `crypto_sign_seed_keypair(masterKey)` produces an Ed25519 keypair
+2. The canonical message is: `METHOD\nlookupKey\nverifyKeyHex\nversion\ntimestamp\nbody`
+3. Headers: `X-BD-Verify-Key` (hex verify key), `X-BD-Version`, `X-BD-Timestamp`, `X-BD-Signature` (hex detached signature)
+
+The relay verifies signatures using the verify key previously stored alongside the encrypted config. This ensures only the key owner can mutate or delete their config blob.
+
+### Password Hashing
+
+`hashPassword` and `verifyPassword` use `crypto_pwhash_str` / `crypto_pwhash_str_verify`, which implement Argon2i with libsodium's default auto-upgrading parameters. Each hash includes its own random salt and parameter set, so hashes generated at different times may use different parameter levels.
 
 ---
 

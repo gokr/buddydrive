@@ -2,6 +2,27 @@ import std/unittest
 import std/strutils
 import ../../../src/buddydrive/recovery
 
+proc hexToEntropy(hex: string): seq[byte] =
+  doAssert hex.len mod 2 == 0
+  result = newSeq[byte](hex.len div 2)
+  for i in 0 ..< result.len:
+    let hi = hex[i * 2]
+    let lo = hex[i * 2 + 1]
+    var b = 0
+    if hi >= 'a' and hi <= 'f':
+      b = (int(hi) - int('a') + 10) shl 4
+    elif hi >= 'A' and hi <= 'F':
+      b = (int(hi) - int('A') + 10) shl 4
+    else:
+      b = (int(hi) - int('0')) shl 4
+    if lo >= 'a' and lo <= 'f':
+      b = b or (int(lo) - int('a') + 10)
+    elif lo >= 'A' and lo <= 'F':
+      b = b or (int(lo) - int('A') + 10)
+    else:
+      b = b or (int(lo) - int('0'))
+    result[i] = byte(b)
+
 suite "Mnemonic generation":
   test "generateMnemonic returns 12 words":
     let mnemonic = generateMnemonic()
@@ -36,6 +57,66 @@ suite "Mnemonic validation":
   test "case insensitive validation":
     check validateMnemonic("Abandon Abandon Abandon Abandon Abandon Abandon Abandon Abandon Abandon Abandon Abandon About")
 
+  test "wrong last word fails checksum":
+    check not validateMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon")
+
+  test "single word swap fails checksum":
+    let original = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    let modified = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon ability about"
+    check validateMnemonic(original)
+    check not validateMnemonic(modified)
+
+suite "BIP39 entropy encoding":
+  test "official test vector: all-zero entropy":
+    let entropy = hexToEntropy("00000000000000000000000000000000")
+    let mnemonic = entropyToMnemonic(entropy)
+    check mnemonic == "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+
+  test "official test vector: 7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f":
+    let entropy = hexToEntropy("7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f")
+    let mnemonic = entropyToMnemonic(entropy)
+    check mnemonic == "legal winner thank year wave sausage worth useful legal winner thank yellow"
+
+  test "official test vector: 80808080808080808080808080808080":
+    let entropy = hexToEntropy("80808080808080808080808080808080")
+    let mnemonic = entropyToMnemonic(entropy)
+    check mnemonic == "letter advice cage absurd amount doctor acoustic avoid letter advice cage above"
+
+  test "official test vector: ffffffffffffffffffffffffffffffff":
+    let entropy = hexToEntropy("ffffffffffffffffffffffffffffffff")
+    let mnemonic = entropyToMnemonic(entropy)
+    check mnemonic == "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong"
+
+suite "BIP39 entropy decoding":
+  test "mnemonicToEntropy round-trip: all-zero entropy":
+    let originalEntropy = hexToEntropy("00000000000000000000000000000000")
+    let mnemonic = entropyToMnemonic(originalEntropy)
+    let (recovered, valid) = mnemonicToEntropy(mnemonic)
+    check valid
+    check recovered == originalEntropy
+
+  test "mnemonicToEntropy round-trip: random entropy":
+    let mnemonic = generateMnemonic()
+    let (entropy1, valid1) = mnemonicToEntropy(mnemonic)
+    check valid1
+    let mnemonic2 = entropyToMnemonic(entropy1)
+    let (entropy2, valid2) = mnemonicToEntropy(mnemonic2)
+    check valid2
+    check entropy2 == entropy1
+
+  test "mnemonicToEntropy with invalid checksum returns false":
+    let badMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon"
+    let (_, valid) = mnemonicToEntropy(badMnemonic)
+    check not valid
+
+  test "mnemonicToEntropy with wrong word count returns false":
+    let (_, valid) = mnemonicToEntropy("abandon abandon abandon")
+    check not valid
+
+  test "mnemonicToEntropy with unknown word returns false":
+    let (_, valid) = mnemonicToEntropy("notaword notaword notaword notaword notaword notaword notaword notaword notaword notaword notaword notaword")
+    check not valid
+
 suite "Key derivation":
   test "mnemonicToSeed is deterministic":
     let mnemonic = generateMnemonic()
@@ -64,6 +145,16 @@ suite "Key derivation":
   test "invalid mnemonic raises on mnemonicToSeed":
     expect ValueError:
       discard mnemonicToSeed("invalid mnemonic words here")
+
+  test "Argon2i seed derivation differs from BIP39 PBKDF2":
+    let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    let seed = mnemonicToSeed(mnemonic)
+    var seedHex = ""
+    const hexChars = "0123456789abcdef"
+    for b in seed:
+      seedHex.add(hexChars[int(b shr 4)])
+      seedHex.add(hexChars[int(b and 0x0f)])
+    check seedHex[0..7] != "5eb11bb8"
 
 suite "Hex round-trip":
   test "bytesToHex/hexToBytes round-trip":

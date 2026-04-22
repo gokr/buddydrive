@@ -402,7 +402,14 @@ Common error codes: `FOLDER_NOT_FOUND`, `BUDDY_NOT_FOUND`, `INVALID_REQUEST`, `N
 | Chunk encryption | Random nonce per 64KB chunk | Prevents nonce reuse across file versions |
 | Recovery config backup | libsodium `crypto_secretbox` | Encrypt config synced to relay |
 | Pairing code | Shared secret | Match buddies, derive discovery keys, HMAC-authenticate relay records, relay fallback |
-| Recovery phrase | 12-word mnemonic | Re-derive recovery metadata on a new machine |
+| Recovery mnemonic | Standard BIP39 (128-bit entropy + SHA-256 checksum) | Re-derive recovery metadata on a new machine; checksum catches transcription errors |
+| Mnemonic-to-seed | Argon2i (`crypto_pwhash`, moderate tier) | Key derivation from mnemonic (stronger than BIP39's PBKDF2) |
+| Seed-to-master key | BLAKE2b-256 | Deterministic master key from 64-byte seed |
+| Public key (lookup) | BLAKE2b-256 of master key + Base58 | Relay API lookup key (not an asymmetric public key) |
+| Relay API signing | Ed25519 (derived from master key) | Authenticate relay API mutations (PUT/DELETE) |
+| Content hashing | BLAKE2b-256 (streaming) | File change detection, move detection, restore verification |
+| Folder key derivation | BLAKE2b-256 (masterKey + folder ID) | Per-folder encryption key, stable across renames |
+| Password hashing | Argon2i (`crypto_pwhash_str`) | Password storage with auto-upgrading parameters |
 
 ### Threat Model
 
@@ -431,6 +438,33 @@ When `encrypted = true` on a folder:
 When `encrypted = false`:
 - Files are stored plaintext on the buddy's machine for collaboration.
 - Content hashes (blake2b-256) are still used for change detection and move detection.
+
+### Recovery Key Derivation
+
+The full derivation chain from the 12-word mnemonic to all derived keys:
+
+```
+12-word mnemonic (standard BIP39: 128-bit entropy + SHA-256 checksum)
+  │
+  ▼  Argon2i (crypto_pwhash, moderate tier, 256 MB memory)
+  │  salt = "mnemonic" (padded to 16 bytes)
+  │  output = 64 bytes
+  ▼
+seed (64 bytes)
+  │
+  ▼  BLAKE2b-256 (crypto_generichash)
+  ▼
+master key (32 bytes, hex in config.toml [recovery].master_key)
+  │
+  ├──► BLAKE2b-256 + Base58 → publicKeyB58 (relay lookup key, not an asymmetric public key)
+  │
+  ├──► Ed25519 (crypto_sign_seed_keypair) → signing keypair for relay API authentication
+  │    Headers: X-BD-Verify-Key, X-BD-Version, X-BD-Timestamp, X-BD-Signature
+  │
+  └──► BLAKE2b-256 (masterKey + "/folder/" + folderId) → folder key (per-folder encryption key)
+```
+
+BuddyDrive follows the standard BIP39 specification for mnemonic generation and validation (128-bit entropy + SHA-256 checksum), tested against official BIP39 test vectors. The key derivation step diverges from BIP39 by using Argon2i instead of PBKDF2-HMAC-SHA512 — this provides stronger resistance to GPU and ASIC attacks. The consequence is that other BIP39-compatible tools cannot derive the same master key from a BuddyDrive mnemonic.
 
 ## Relay Server
 

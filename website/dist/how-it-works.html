@@ -175,8 +175,9 @@
 
         <h3>Setup Recovery</h3>
         <ol>
-            <li><code>buddydrive setup-recovery</code> generates a 12-word phrase</li>
-            <li>BuddyDrive derives a 32-byte master key from the phrase</li>
+            <li><code>buddydrive setup-recovery</code> generates 128 bits of random entropy</li>
+            <li>A SHA-256 checksum is computed and the entropy + checksum is encoded as a 12-word BIP39 mnemonic</li>
+            <li>The mnemonic is fed through Argon2i (256 MB memory) to produce a 64-byte seed, then BLAKE2b to produce the 32-byte master key</li>
             <li>Recovery metadata is stored in <code>[recovery]</code> in <code>config.toml</code></li>
             <li>The serialized config is encrypted with the master key and uploaded to the relay</li>
         </ol>
@@ -184,7 +185,7 @@
         <h3>Recover On A New Machine</h3>
         <ol>
             <li><code>buddydrive recover</code> asks for the 12-word phrase</li>
-            <li>BuddyDrive derives the same master key again</li>
+            <li>BuddyDrive derives the same master key (Argon2i + BLAKE2b)</li>
             <li>It fetches the encrypted config blob from the relay</li>
             <li>The config is decrypted and saved locally</li>
             <li>Starting the daemon lets normal sync restore missing files</li>

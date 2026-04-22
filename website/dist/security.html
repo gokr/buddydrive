@@ -56,18 +56,27 @@
                 <tr><td>Chunk encryption</td><td>Random nonce per 64KB chunk</td><td>Prevents nonce reuse across file versions</td></tr>
                 <tr><td>Recovery config backup</td><td>libsodium <code>crypto_secretbox</code></td><td>Encrypt config synced to relay</td></tr>
                 <tr><td>Pairing code</td><td>Shared secret</td><td>Match buddies, derive discovery keys, HMAC-authenticate relay records, and relay fallback sessions</td></tr>
-                <tr><td>Recovery phrase</td><td>12-word mnemonic</td><td>Re-derive recovery metadata on a new machine</td></tr>
+                <tr><td>Recovery mnemonic</td><td>Standard BIP39 (128-bit entropy + SHA-256 checksum)</td><td>Re-derive recovery metadata on a new machine; checksum catches transcription errors</td></tr>
+                <tr><td>Mnemonic-to-seed</td><td>Argon2i (moderate tier, 256 MB memory)</td><td>Key derivation from mnemonic (stronger than BIP39's PBKDF2)</td></tr>
+                <tr><td>Master key</td><td>BLAKE2b-256 of seed</td><td>Deterministic 32-byte key from 64-byte Argon2i output</td></tr>
+                <tr><td>Public key (lookup)</td><td>BLAKE2b-256 of master key + Base58</td><td>Relay API lookup key (not an asymmetric public key)</td></tr>
+                <tr><td>Relay API signing</td><td>Ed25519 (derived from master key)</td><td>Authenticate relay API mutations</td></tr>
+                <tr><td>Content hashing</td><td>BLAKE2b-256 (streaming, 64KB chunks)</td><td>File change detection, move detection, restore verification</td></tr>
             </tbody>
         </table>
 
         <h2>Recovery Phrase And Master Key</h2>
         <ol>
-            <li>BuddyDrive generates a 12-word recovery phrase</li>
-            <li>It derives a master key from that phrase</li>
-            <li>It stores recovery metadata in <code>config.toml</code></li>
-            <li>It encrypts your serialized config before syncing it to the relay</li>
+            <li>BuddyDrive generates 128 bits of random entropy</li>
+            <li>A SHA-256 checksum (4 bits) is appended, and the 132 bits are encoded as a 12-word mnemonic using the BIP39 English wordlist &mdash; this follows the standard BIP39 specification</li>
+            <li>The mnemonic is fed through Argon2i (moderate tier, 256 MB memory) to produce a 64-byte seed</li>
+            <li>The seed is hashed with BLAKE2b to produce the 32-byte master key</li>
+            <li>Recovery metadata is stored in <code>config.toml</code></li>
+            <li>The serialized config is encrypted with the master key before syncing it to the relay</li>
         </ol>
         <p>When you later run <code>buddydrive recover</code>, BuddyDrive uses the same 12 words to derive the same recovery material, fetches the encrypted config from the relay, decrypts it locally, and writes the restored config.</p>
+        <p>The checksum in the mnemonic catches most single-word transcription errors &mdash; if you write down one word incorrectly, validation fails rather than silently producing the wrong key.</p>
+        <p><strong>Key derivation divergence:</strong> BuddyDrive uses Argon2i for mnemonic-to-seed instead of BIP39's standard PBKDF2-HMAC-SHA512. Argon2i is more resistant to GPU and ASIC attacks. The consequence is that other BIP39 tools cannot derive the same master key from a BuddyDrive mnemonic.</p>
 
         <h2>Control API Access</h2>
         <p>The control API binds to all interfaces (default port 17521):</p>

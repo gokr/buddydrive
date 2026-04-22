@@ -1,9 +1,10 @@
-import std/[os, strutils, sequtils, random]
+import std/[os, strutils, sequtils]
 import libsodium/sodium
 import libsodium/sodium_sizes
 import ./types
 
 const BIP39_WORD_COUNT = 12
+const ENTROPY_BYTES = 16
 
 proc toBytes*(s: string): seq[byte] =
   result = newSeq[byte](s.len)
@@ -58,13 +59,116 @@ proc loadBip39Wordlist(): seq[string] =
 
 let BIP39_WORDS = loadBip39Wordlist()
 
-proc generateMnemonic*(): string =
-  randomize()
+proc getWordForIndex*(index: int): string =
+  if index < 0 or index >= BIP39_WORDS.len:
+    raise newException(ValueError, "Invalid word index")
+  result = BIP39_WORDS[index]
+
+proc findWordIndex*(word: string): int =
+  let lower = word.toLowerAscii()
+  for i, w in BIP39_WORDS:
+    if w == lower:
+      return i
+  return -1
+
+proc suggestWords*(partial: string): seq[string] =
+  let lower = partial.toLowerAscii()
+  result = @[]
+  for word in BIP39_WORDS:
+    if word.startsWith(lower):
+      result.add(word)
+      if result.len >= 5:
+        break
+
+proc sodium_hash_sha256(
+  out_hash: ptr char,
+  data: ptr char,
+  datalen: culonglong,
+): cint {.importc: "crypto_hash_sha256", dynlib: "libsodium.so.23".}
+
+proc sha256(data: string): seq[byte] =
+  var hashBuf = newString(32)
+  var dataBuf = data
+  let rc = sodium_hash_sha256(
+    cast[ptr char](addr hashBuf[0]),
+    if dataBuf.len > 0: cast[ptr char](addr dataBuf[0]) else: nil,
+    culonglong(dataBuf.len)
+  )
+  if rc != 0:
+    raise newException(ValueError, "SHA-256 hash failed")
+  result = newSeq[byte](32)
+  for i in 0 ..< 32:
+    result[i] = byte(hashBuf[i])
+
+proc getBits(data: seq[byte], bitOffset: int, numBits: int): int =
+  result = 0
+  for i in 0 ..< numBits:
+    let idx = bitOffset + i
+    let byteIdx = idx div 8
+    let bitPos = 7 - (idx mod 8)
+    let bit = int((data[byteIdx] shr bitPos) and 1)
+    result = (result shl 1) or bit
+
+proc writeBits(data: var seq[byte], bitOffset: int, value: int, numBits: int) =
+  for i in 0 ..< numBits:
+    let bit = (value shr (numBits - 1 - i)) and 1
+    if bit == 1:
+      let idx = bitOffset + i
+      let byteIdx = idx div 8
+      let bitPos = 7 - (idx mod 8)
+      data[byteIdx] = data[byteIdx] or byte(1 shl bitPos)
+
+proc entropyToMnemonic*(entropy: seq[byte]): string =
+  doAssert entropy.len == ENTROPY_BYTES, "BuddyDrive uses 128-bit (16-byte) entropy for 12-word mnemonics"
+  let checksumBits = entropy.len * 8 div 32
+  let hash = sha256(bytesToString(entropy))
+  let checksumValue = int(hash[0]) shr (8 - checksumBits)
+  let totalBits = entropy.len * 8 + checksumBits
+  let totalBytes = (totalBits + 7) div 8
+  var combined = newSeq[byte](totalBytes)
+  for i in 0 ..< entropy.len:
+    combined[i] = entropy[i]
+  writeBits(combined, entropy.len * 8, checksumValue, checksumBits)
   var words: seq[string] = @[]
-  for _ in 0 ..< BIP39_WORD_COUNT:
-    let idx = rand(BIP39_WORDS.len - 1)
+  let wordCount = totalBits div 11
+  for i in 0 ..< wordCount:
+    let idx = getBits(combined, i * 11, 11)
     words.add(BIP39_WORDS[idx])
   result = words.join(" ")
+
+proc mnemonicToEntropy*(mnemonic: string): tuple[entropy: seq[byte], valid: bool] =
+  let words = mnemonic.strip().splitWhitespace()
+  if words.len != BIP39_WORD_COUNT:
+    return (entropy: newSeq[byte](0), valid: false)
+  var indices: seq[int] = @[]
+  for word in words:
+    let idx = findWordIndex(word)
+    if idx < 0:
+      return (entropy: newSeq[byte](0), valid: false)
+    indices.add(idx)
+  let checksumBits = words.len * 11 div 33
+  let entropyBits = words.len * 11 - checksumBits
+  let entropyBytes = entropyBits div 8
+  let totalBits = words.len * 11
+  let totalBytes = (totalBits + 7) div 8
+  var combined = newSeq[byte](totalBytes)
+  for i, idx in indices:
+    writeBits(combined, i * 11, idx, 11)
+  var entropy = newSeq[byte](entropyBytes)
+  for i in 0 ..< entropyBytes:
+    entropy[i] = combined[i]
+  let checksum = getBits(combined, entropyBytes * 8, checksumBits)
+  let hash = sha256(bytesToString(entropy))
+  let expectedChecksum = int(hash[0]) shr (8 - checksumBits)
+  result.entropy = entropy
+  result.valid = checksum == expectedChecksum
+
+proc generateMnemonic*(): string =
+  let entropyStr = randombytes(ENTROPY_BYTES)
+  var entropy = newSeq[byte](ENTROPY_BYTES)
+  for i in 0 ..< ENTROPY_BYTES:
+    entropy[i] = byte(entropyStr[i])
+  result = entropyToMnemonic(entropy)
 
 proc validateMnemonic*(mnemonic: string): bool =
   let words = mnemonic.strip().splitWhitespace()
@@ -73,7 +177,8 @@ proc validateMnemonic*(mnemonic: string): bool =
   for word in words:
     if word.toLowerAscii() notin BIP39_WORDS:
       return false
-  result = true
+  let (_, valid) = mnemonicToEntropy(mnemonic)
+  result = valid
 
 proc mnemonicToSeed*(mnemonic: string): array[64, byte] =
   if not validateMnemonic(mnemonic):
@@ -95,8 +200,8 @@ proc mnemonicToSeed*(mnemonic: string): array[64, byte] =
     salt,
     64,
     phaDefault,
-    crypto_pwhash_opslimit_interactive(),
-    crypto_pwhash_memlimit_interactive()
+    crypto_pwhash_opslimit_moderate(),
+    crypto_pwhash_memlimit_moderate()
   )
   
   for i in 0 ..< min(64, entropy.len):
@@ -219,24 +324,3 @@ proc verifyMnemonic*(mnemonic: string, storedMasterKey: string): bool =
   let masterKey = deriveMasterKey(seed)
   let derivedHex = bytesToHex(masterKey)
   result = derivedHex == storedMasterKey
-
-proc getWordForIndex*(index: int): string =
-  if index < 0 or index >= BIP39_WORDS.len:
-    raise newException(ValueError, "Invalid word index")
-  result = BIP39_WORDS[index]
-
-proc findWordIndex*(word: string): int =
-  let lower = word.toLowerAscii()
-  for i, w in BIP39_WORDS:
-    if w == lower:
-      return i
-  return -1
-
-proc suggestWords*(partial: string): seq[string] =
-  let lower = partial.toLowerAscii()
-  result = @[]
-  for word in BIP39_WORDS:
-    if word.startsWith(lower):
-      result.add(word)
-      if result.len >= 5:
-        break

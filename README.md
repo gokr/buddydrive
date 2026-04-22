@@ -17,7 +17,7 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 - **P2P Networking** - libp2p with relay-backed discovery, deterministic initiator selection, direct public TCP dialing, UPnP attempts, and relay fallback
 - **Encrypted Backup** - files stored encrypted on your buddy's machine (filenames and content); deterministic path encryption for move detection, random content nonces for safety
 - **Streaming Blake2b Hashing** - content-hashed sync with move and delete detection, no full-file-in-memory hashing
-- **Recovery And Restore** - 12-word recovery phrase, stored master key, encrypted config sync to relay, and config restore on a new machine
+- **Recovery And Restore** - 12-word BIP39 recovery phrase (with checksum), Argon2i key derivation, encrypted config sync to relay, and config restore on a new machine
 - **Restore Missing Files** - normal sync recreates files that exist on your buddy but are missing locally, with hash verification
 - **Per-Buddy Sync Scheduling** - each buddy can have its own sync time; incoming connections always accepted
 - **Folder Policies** - append-only mode prevents remote overwrites of existing local files; per-folder encryption flag

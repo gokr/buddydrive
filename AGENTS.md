@@ -90,7 +90,7 @@ src/
     ├── types.nim               # Core types (AppConfig, BuddyId, FolderConfig, RecoveryConfig)
     ├── config.nim              # TOML config read/write (~/.buddydrive/config.toml)
     ├── crypto.nim              # libsodium encryption (XSalsa20-Poly1305)
-    ├── recovery.nim            # BIP39 mnemonic, key derivation, config encrypt/decrypt
+    ├── recovery.nim            # BIP39 mnemonic (standard generation + SHA-256 checksum), Argon2i key derivation, config encrypt/decrypt
     ├── cli.nim                 # CLI subcommand handlers
     ├── daemon.nim              # Background sync daemon, discovery loop
     ├── control.nim             # REST API on localhost:17521, state.db management
@@ -189,7 +189,7 @@ tests/
 
 - libsodium via `libsodium/sodium` and `libsodium/sodium_sizes` imports
 - `crypto_secretbox_easy` / `crypto_secretbox_open_easy` for config and file encryption (XSalsa20-Poly1305)
-- `crypto_pwhash` for key derivation from passwords/mnemonics
+- `crypto_pwhash` for key derivation from passwords/mnemonics (Argon2i; moderate tier for recovery: `opslimit_moderate`, `memlimit_moderate`)
 - `crypto_generichash` for key derivation and content hashing (returns `seq[byte]`, not `string`)
 - `crypto_generichash` signature: `crypto_generichash(data: string, hashlen: int, key: string = ""): seq[byte]`
 - `crypto_pwhash` signature: `crypto_pwhash(passwd: string, salt: openArray[byte], outlen: Natural, alg, opslimit, memlimit): seq[byte]`
@@ -268,10 +268,11 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 
 See `docs/PLAN.md` for full details. Key points:
 
-- BIP39 12-word mnemonic as single recovery secret
-- Master key stored plaintext in config.toml
+- BIP39 12-word mnemonic (standard generation: 128-bit entropy + SHA-256 checksum; Argon2i key derivation instead of PBKDF2)
+- Master key derived via Argon2i (moderate tier, 256 MB) then BLAKE2b; stored plaintext in config.toml
 - Config encrypted before syncing to relay/buddies
-- Public key (Base58) used as relay API config lookup key
+- Public key (Base58, derived via BLAKE2b from master key — not an asymmetric public key) used as relay API config lookup key
+- Ed25519 signing keypair derived from master key for relay API authentication (X-BD-Verify-Key, X-BD-Signature headers)
 - TiDB Cloud for relay-backed API storage
 - Default API URL: `https://api.buddydrive.org`
 - Default TCP relay: `relay-eu.buddydrive.org:19447`
