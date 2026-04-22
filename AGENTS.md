@@ -89,7 +89,7 @@ src/
 └── buddydrive/
     ├── types.nim               # Core types (AppConfig, BuddyId, FolderConfig, RecoveryConfig)
     ├── config.nim              # TOML config read/write (~/.buddydrive/config.toml)
-    ├── crypto.nim              # libsodium encryption (XChaCha20-Poly1305)
+    ├── crypto.nim              # libsodium encryption (XSalsa20-Poly1305)
     ├── recovery.nim            # BIP39 mnemonic, key derivation, config encrypt/decrypt
     ├── cli.nim                 # CLI subcommand handlers
     ├── daemon.nim              # Background sync daemon, discovery loop
@@ -188,7 +188,7 @@ tests/
 ### Encryption
 
 - libsodium via `libsodium/sodium` and `libsodium/sodium_sizes` imports
-- `crypto_secretbox_easy` / `crypto_secretbox_open_easy` for config and file encryption
+- `crypto_secretbox_easy` / `crypto_secretbox_open_easy` for config and file encryption (XSalsa20-Poly1305)
 - `crypto_pwhash` for key derivation from passwords/mnemonics
 - `crypto_generichash` for key derivation and content hashing (returns `seq[byte]`, not `string`)
 - `crypto_generichash` signature: `crypto_generichash(data: string, hashlen: int, key: string = ""): seq[byte]`

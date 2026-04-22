@@ -10,7 +10,7 @@ Build BuddyDrive — a P2P encrypted folder sync tool in Nim that syncs folders 
 
 - **CLI-first, GUI later** — direct GTK4 (not Owlkettle) for the desktop GUI
 - **libp2p** for P2P networking (direct transport, NAT traversal)
-- **libsodium** for encryption (XChaCha20-Poly1305)
+- **libsodium** for encryption (XSalsa20-Poly1305)
 - **KV-store relay discovery** — replaced DHT-based discovery (DHT was unreliable)
 - **Pairing code reused as relay token** — auto-generated XXXX-XXXX format
 - **BIP39 12-word mnemonic** — the single recovery secret
@@ -38,7 +38,7 @@ Build BuddyDrive — a P2P encrypted folder sync tool in Nim that syncs folders 
 - **Chronos async enforces exception tracking** — calls that can raise `SodiumError` must be wrapped in `try/except`
 - **`curly` requires `--mm:arc/orc` and `--threads:on`** — timeout is per-request, not on client
 - **Nim's `std/hashes.hash` is 64-bit non-cryptographic** — not suitable for cross-machine comparison; replaced with crypto_generichash streaming
-- **Deterministic content nonces are unsafe** — reusing a nonce with different plaintext under the same key breaks XChaCha20-Poly1305. Content nonces must be random. Only path encryption can use deterministic nonces (same path always encrypts the same way, and path content doesn't change between versions).
+- **Deterministic content nonces are unsafe** — reusing a nonce with different plaintext under the same key breaks XSalsa20-Poly1305. Content nonces must be random. Only path encryption can use deterministic nonces (same path always encrypts the same way, and path content doesn't change between versions).
 
 ## Implementation History
 
@@ -194,7 +194,7 @@ nonce = randombytes(NonceSize)                # 24 bytes, random per chunk
 encryptedChunk = nonce || crypto_secretbox_easy(folderKey, chunkData, nonce)
 ```
 
-Random nonces are required because the same (file, offset) pair may contain different plaintext across versions. If a file at `/photos/vacation.jpg` is edited, the chunk at offset 0 now has different content. A deterministic nonce would reuse the same nonce with different plaintext under the same key — a catastrophic break for XChaCha20-Poly1305.
+Random nonces are required because the same (file, offset) pair may contain different plaintext across versions. If a file at `/photos/vacation.jpg` is edited, the chunk at offset 0 now has different content. A deterministic nonce would reuse the same nonce with different plaintext under the same key — a catastrophic break for XSalsa20-Poly1305.
 
 The overhead is 24 bytes (nonce) per 64KB chunk — negligible. B stores `nonce || ciphertext` as the on-disk blob. B does not need to understand the nonce; it's just opaque bytes.
 

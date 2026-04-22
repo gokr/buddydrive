@@ -69,11 +69,12 @@ BuddyDrive uses libp2p for direct peer communication:
 
 How two buddies find each other:
 
-1. Each daemon publishes its address record to the relay at `/discovery/<derived-key>`, where the key is derived from the pairing code
-2. The daemon looks up configured buddies using the same derived key via the relay KV-store (every 10 minutes)
-3. It reads the peer ID and advertised multiaddrs from the record
-4. It dials a public TCP address directly, or falls back to a relay when configured
-5. Cached addresses in `state.db` allow reconnection when the relay is temporarily unavailable
+1. Each daemon publishes its address record to the relay KV-store at `/discovery/<derived-key>`, where the key is derived from the pairing code (HMAC-authenticated)
+2. The daemon looks up configured buddies using the same derived key (every 10 minutes)
+3. It reads the peer ID, advertised multiaddrs, reachability flag, and sync time from the record
+4. Deterministic initiator selection: the side without a public address initiates; if both same reachability, lower buddy UUID initiates
+5. It dials a public TCP address directly, or falls back to a relay when configured
+6. Cached addresses in `state.db` allow reconnection when the relay is temporarily unavailable
 
 ### NAT Traversal
 
@@ -104,7 +105,7 @@ File transfer uses a chunked protocol with encryption:
 File list exchange → Delta computation (moves, deletes, missing) → Chunked transfer → Hash verification
 ```
 
-Chunks are sent in 64KB blocks. LZ4 compression is used when it helps. When folder encryption is enabled, chunks are encrypted with random nonces (XChaCha20-Poly1305). Paths are encrypted with deterministic nonces so the same filename always encrypts the same way.
+Chunks are sent in 64KB blocks. LZ4 compression is used when it helps. When folder encryption is enabled, chunks are encrypted with random nonces (XSalsa20-Poly1305). Paths are encrypted with deterministic nonces so the same filename always encrypts the same way.
 
 Restored files are hash-verified after write.
 
@@ -142,7 +143,7 @@ BuddyDrive keeps runtime and file state in SQLite under `~/.buddydrive/`.
 
 ## Control API
 
-Local HTTP server (default port 17521) for GUI communication:
+Local HTTP server (default port 17521) for GUI communication. Localhost connections require no authentication; LAN connections must use a secret path prefix `/w/<secret>/`.
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -150,13 +151,22 @@ Local HTTP server (default port 17521) for GUI communication:
 | GET /buddies | Buddy list with connection state |
 | GET /folders | Folder list with sync status |
 | GET /config | Current saved configuration |
+| GET /logs | Recent log entries |
+| GET /recovery | Export recovery metadata |
 | POST /folders | Add folder |
 | DELETE /folders/:name | Remove folder |
 | POST /buddies/pair | Pair buddy through the local API |
 | POST /buddies/pairing-code | Generate pairing code |
+| DELETE /buddies/:id | Remove buddy |
 | POST /sync/:folder | Trigger sync |
 | POST /config | Update selected config fields |
 | POST /config/reload | Reload config from disk |
+| POST /recovery/setup | Generate recovery phrase |
+| POST /recovery/verify-word | Verify recovery word |
+| POST /recovery/recover | Recover from mnemonic |
+| POST /recovery/export | Export recovery metadata |
+| POST /recovery/sync-config | Sync config to relay |
+| POST /daemon/stop | Request daemon stop |
 
 ## Limitations
 

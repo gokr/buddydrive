@@ -48,7 +48,7 @@ Pair with a friend, family member, or trusted colleague. Keep an offsite copy on
 
 ### Direct Transport Encryption
 
-Direct libp2p peer connections use Noise transport encryption. Folder contents are encrypted with XChaCha20-Poly1305 before being stored on your buddy's machine — they see only opaque encrypted blobs, not your filenames or file data. Relay-backed config backups are encrypted with your recovery master key before upload.
+Direct libp2p peer connections use Noise transport encryption. Folder contents are encrypted with XSalsa20-Poly1305 before being stored on your buddy's machine — they see only opaque encrypted blobs, not your filenames or file data. Relay-backed config backups are encrypted with your recovery master key before upload.
 
 ### Recovery Phrase
 

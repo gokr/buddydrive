@@ -397,7 +397,7 @@ Common error codes: `FOLDER_NOT_FOUND`, `BUDDY_NOT_FOUND`, `INVALID_REQUEST`, `N
 | Component | Algorithm | Purpose |
 |-----------|-----------|---------|
 | Direct peer transport | libp2p Noise | Encrypt direct libp2p connections |
-| Folder content encryption | libsodium `crypto_secretbox` (XChaCha20-Poly1305) | Encrypt filenames and file contents stored on buddy's machine |
+| Folder content encryption | libsodium `crypto_secretbox` (XSalsa20-Poly1305) | Encrypt filenames and file contents stored on buddy's machine |
 | Path encryption | Deterministic nonce from folderKey + path | Same path always encrypts to same ciphertext (enables move detection) |
 | Chunk encryption | Random nonce per 64KB chunk | Prevents nonce reuse across file versions |
 | Recovery config backup | libsodium `crypto_secretbox` | Encrypt config synced to relay |

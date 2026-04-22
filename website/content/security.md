@@ -13,7 +13,7 @@ BuddyDrive currently has these security layers:
 | Component | Algorithm | Purpose |
 |-----------|-----------|---------|
 | Direct peer transport | libp2p Noise | Encrypt direct libp2p connections |
-| Folder content encryption | libsodium `crypto_secretbox` (XChaCha20-Poly1305) | Encrypt filenames and file contents stored on buddy's machine |
+| Folder content encryption | libsodium `crypto_secretbox` (XSalsa20-Poly1305) | Encrypt filenames and file contents stored on buddy's machine |
 | Path encryption | Deterministic nonce from folderKey + path | Same path always encrypts to same ciphertext (enables move detection) |
 | Chunk encryption | Random nonce per 64KB chunk | Prevents nonce reuse across file versions |
 | Recovery config backup | libsodium `crypto_secretbox` | Encrypt config synced to relay |
@@ -31,6 +31,15 @@ When you run `buddydrive setup-recovery`:
 
 When you later run `buddydrive recover`, BuddyDrive uses the same 12 words to derive the same recovery material, fetches the encrypted config from the relay, decrypts it locally, and writes the restored config.
 
+## Control API Access
+
+The control API binds to all interfaces (default port 17521):
+
+- **Localhost** (`127.0.0.1`, `::1`): No authentication required
+- **LAN**: Requests must use a secret path prefix `/w/<secret>/` derived from your buddy UUID (first 8 hex characters). Requests without the correct secret receive 403 Forbidden
+
+The secret provides basic protection but is low-entropy (32 bits). Only access the web GUI on trusted networks or over localhost.
+
 ## Pairing And Direct Connections
 
 The pairing code is a shared secret between buddies:
@@ -43,7 +52,7 @@ The pairing code is a shared secret between buddies:
 ## Current Scope And Limits
 
 - Direct libp2p transport is encrypted by Noise
-- Folder contents (filenames and file data) are encrypted with XChaCha20-Poly1305 before being stored on the buddy's machine when `encrypted = true` (the default)
+- Folder contents (filenames and file data) are encrypted with XSalsa20-Poly1305 before being stored on the buddy's machine when `encrypted = true` (the default)
 - Recovery config blobs synced to the relay are encrypted with the recovery master key
 - Restore works by recovering config first and then letting normal sync recreate missing files
 - Restored files are hash-verified after write
@@ -107,4 +116,4 @@ Only pair with people you trust:
 
 ## Bottom Line
 
-BuddyDrive protects direct libp2p transport with Noise, encrypts relay-backed recovery config with your master key, and encrypts folder filenames and contents with XChaCha20-Poly1305 before storing them on your buddy's machine. Your buddy sees only opaque encrypted blobs. Set `encrypted = false` only for active collaboration with buddies you trust.
+BuddyDrive protects direct libp2p transport with Noise, encrypts relay-backed recovery config with your master key, and encrypts folder filenames and contents with XSalsa20-Poly1305 before storing them on your buddy's machine. Your buddy sees only opaque encrypted blobs. Set `encrypted = false` only for active collaboration with buddies you trust.

@@ -35,8 +35,10 @@ BuddyDrive uses a relay KV-store for peer discovery and libp2p for direct transp
 Once paired and configured, BuddyDrive runs in the background:
 
 - **File change detection** - notices new, modified, and deleted files
+- **Move detection** - renamed files detected via content hash, no re-upload needed
 - **Incremental sync** - only transfers what changed
 - **Chunked transfer** - handles large files efficiently
+- **Symlink support** - symlink targets are preserved across sync
 - **Resume-friendly flow** - interrupted transfers can continue
 
 ### Encrypted Backup
@@ -97,7 +99,7 @@ Pairing uses a short code that you share with your buddy out-of-band:
 
 ### Direct Transport Encryption
 
-Direct libp2p peer connections use Noise transport encryption. Recovery config blobs synced to the relay are encrypted with the recovery master key before upload. Folder contents are encrypted with XChaCha20-Poly1305 before being stored on the buddy's machine.
+Direct libp2p peer connections use Noise transport encryption. Recovery config blobs synced to the relay are encrypted with the recovery master key before upload. Folder contents are encrypted with XSalsa20-Poly1305 before being stored on the buddy's machine.
 
 ### Recovery Metadata
 
@@ -113,7 +115,7 @@ Recovery stores:
 
 When both you and your buddy edit the same file:
 
-- **Last-write-wins** by default
+- **Owner-authoritative by default** — the file owner's current version always replaces the storage copy
 - **Append-only mode** avoids remote overwrites of existing local files
 - **Missing files can still be restored** even in append-only mode
 - **Move detection** avoids full re-upload when a file is renamed
@@ -166,7 +168,7 @@ Run on servers, NAS boxes, or Raspberry Pi with the CLI only.
 - One buddy per folder today
 - `recover` restores config from the relay path today; buddy-backed config fetch is not implemented yet
 - `export-recovery` shows stored recovery metadata, not the original phrase
-- `init --with-recovery` is shown in help but not implemented; use `init` then `setup-recovery`
+- `init --with-recovery` is shown in help but returns an error if used; use `init` then `setup-recovery`
 - No mobile apps yet
 - No file versioning yet
 

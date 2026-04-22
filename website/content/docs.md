@@ -154,7 +154,7 @@ buddydrive status
 - `buddydrive status` shows configured state, not live daemon connectivity
 - `buddydrive connect` does not perform a manual direct dial yet
 - `buddydrive export-recovery` shows stored recovery metadata, not the original 12-word phrase
-- `buddydrive init --with-recovery` is shown in help but not implemented; use `init` then `setup-recovery`
+- `buddydrive init --with-recovery` is shown in help but returns an error if used; use `init` then `setup-recovery`
 
 ## GUI
 
@@ -180,6 +180,14 @@ buddydrive-gui
 buddydrive init                        Initialize BuddyDrive
 buddydrive config                      Show configuration
 buddydrive config set <key> ...        Update configuration values
+  relay-base-url <url>                  Set relay discovery URL
+  relay-region <region>                 Set relay region (eu, us, local)
+  storage-base-path <path>             Set incoming storage base path
+  bandwidth-limit <kbps>               Set bandwidth limit (0 = unlimited)
+  buddy-pairing-code <id> <code>       Set buddy pairing code
+  buddy-name <name>                    Set buddy display name
+  buddy-sync-time <id> <HH:MM>         Set buddy sync time (empty = always)
+  folder-append-only <name> on|off     Toggle folder append-only mode
 buddydrive add-folder <path>           Add folder to sync
   --name <name>                        Folder name
   --no-encrypt                         Disable folder encryption flag
