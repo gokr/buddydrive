@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Documentation - BuddyDrive</title>
-    <meta name="description" content="Get started with BuddyDrive, set up recovery, and restore config on a new machine.">
+    <meta name="description" content="Get started with BuddyDrive, set up recovery, configure encrypted backup, and restore config on a new machine.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -41,66 +41,194 @@
     <main class="content-page">
         <h2>Quick Start</h2>
 
+        <h3>Prerequisites</h3>
+        <ul>
+            <li>Linux, macOS, or Windows</li>
+            <li>Internet connection</li>
+            <li>A friend with BuddyDrive installed</li>
+        </ul>
+
         <h3>Install</h3>
+        <p><strong>Linux:</strong></p>
+        <pre><code>git clone https://github.com/gokr/buddydrive
+cd buddydrive
+nimble build</code></pre>
+        <p><strong>macOS:</strong></p>
+        <pre><code>git clone https://github.com/gokr/buddydrive
+cd buddydrive
+nimble build</code></pre>
+        <p><strong>Windows:</strong></p>
         <pre><code>git clone https://github.com/gokr/buddydrive
 cd buddydrive
 nimble build</code></pre>
 
         <h3>Initialize</h3>
         <pre><code>buddydrive init</code></pre>
-        <p>This creates your Buddy ID, buddy name, and <code>~/.buddydrive/config.toml</code>.</p>
+        <p>This creates:</p>
+        <ul>
+            <li><strong>Buddy ID</strong> - a UUID that uniquely identifies your instance</li>
+            <li><strong>Buddy Name</strong> - a human-readable name</li>
+            <li>Configuration file at <code>~/.buddydrive/config.toml</code></li>
+        </ul>
 
         <h3>Pair With a Buddy</h3>
-        <pre><code>buddydrive add-buddy --generate-code
-buddydrive add-buddy --id &lt;your-buddy-id&gt; --code ABCD-EFGH</code></pre>
+        <p><strong>On your machine:</strong></p>
+        <pre><code>buddydrive add-buddy --generate-code</code></pre>
+        <p><strong>On your buddy's machine:</strong></p>
+        <pre><code>buddydrive add-buddy --id &lt;your-buddy-id&gt; --code ABCD-EFGH</code></pre>
         <p>The pairing code is used for both pairing confirmation and relay fallback.</p>
 
         <h3>Add a Folder</h3>
         <pre><code>buddydrive add-folder ~/Documents --name docs</code></pre>
+        <p>Options:</p>
         <ul>
-            <li><code>--append-only</code> only accepts new incoming files for that folder</li>
-            <li><code>--buddy &lt;id&gt;</code> restricts the folder to a specific buddy</li>
+            <li><code>--name</code> - friendly name for the folder</li>
+            <li><code>--no-encrypt</code> - disable the folder's encryption flag in config</li>
+            <li><code>--append-only</code> - only accept new incoming files for that folder</li>
+            <li><code>--buddy &lt;id&gt;</code> - restrict the folder to a specific buddy</li>
         </ul>
 
         <h3>Set Up Recovery</h3>
+        <p>Enable recovery on the machine you want to protect:</p>
         <pre><code>buddydrive setup-recovery</code></pre>
         <p>BuddyDrive shows a 12-word recovery phrase, asks you to verify part of it, stores recovery metadata in <code>config.toml</code>, and syncs an encrypted config blob to the relay.</p>
 
         <h3>Restore On a New Machine</h3>
+        <p>On a replacement machine:</p>
         <pre><code>buddydrive recover
 buddydrive start</code></pre>
         <p>Enter the same 12-word recovery phrase. If relay recovery succeeds, BuddyDrive restores your config locally. Starting the daemon then lets normal sync recreate missing files.</p>
-        <p>Current limitation: the CLI prompts for buddy fallback details if relay recovery fails, but that buddy-backed fetch path is not implemented yet.</p>
+        <p>Current limitation: the CLI prompts for buddy fallback details if relay recovery fails, but that buddy-backed fetch path is not implemented yet. Recovery works via the relay path only.</p>
+
+        <h3>Start the Daemon</h3>
+        <pre><code>buddydrive start</code></pre>
+        <p>Optional:</p>
+        <ul>
+            <li><code>--port &lt;control-port&gt;</code> - change the local control API port</li>
+            <li><code>--daemon</code> - accepted, but currently continues in the foreground</li>
+        </ul>
+
+        <h3>Per-Buddy Sync Time</h3>
+        <p>Each buddy can have an optional sync time that controls when to initiate connections. Incoming connections are always accepted:</p>
+        <pre><code>buddydrive config set buddy-sync-time &lt;buddy-id&gt; 03:00</code></pre>
+        <p>When empty (default), the daemon initiates whenever it discovers a buddy address.</p>
 
         <h3>Connectivity Notes</h3>
+        <p>BuddyDrive connects peers using deterministic initiator selection: the side without a public address initiates (it dials the public side directly), or the side with the lower buddy UUID if both are the same reachability. Incoming connections from known buddies are always accepted. Connectivity options:</p>
         <ol>
             <li>Direct connection with a public TCP address</li>
             <li>Relay fallback using the stored pairing code</li>
         </ol>
+        <p>For direct connections, forward the configured <code>listen_port</code> on your router and set <code>[network].announce_addr</code> in <code>~/.buddydrive/config.toml</code> to a public multiaddr such as:</p>
+        <pre><code>announce_addr = "/ip4/203.0.113.10/tcp/41721"</code></pre>
+        <p>For relay fallback:</p>
         <pre><code>buddydrive config set relay-base-url https://buddydrive.net/relays
 buddydrive config set relay-region eu</code></pre>
 
-        <h2>CLI Reference</h2>
-        <pre><code>buddydrive init
-buddydrive config
-buddydrive config set &lt;key&gt; ...
-buddydrive add-folder &lt;path&gt;
-buddydrive remove-folder &lt;name&gt;
-buddydrive list-folders
-buddydrive add-buddy
-buddydrive remove-buddy &lt;id&gt;
-buddydrive list-buddies
-buddydrive connect &lt;address&gt;
-buddydrive start
-buddydrive stop
-buddydrive status
-buddydrive logs
-buddydrive setup-recovery
-buddydrive recover
-buddydrive sync-config
-buddydrive export-recovery</code></pre>
+        <h3>Check Status</h3>
+        <pre><code>buddydrive status</code></pre>
 
-        <h2>Config Example</h2>
+        <h3>Current CLI Limitations</h3>
+        <ul>
+            <li><code>buddydrive start --daemon</code> is not fully implemented yet</li>
+            <li><code>buddydrive stop</code> is a placeholder command today</li>
+            <li><code>buddydrive status</code> shows configured state, not live daemon connectivity</li>
+            <li><code>buddydrive connect</code> does not perform a manual direct dial yet</li>
+            <li><code>buddydrive export-recovery</code> shows stored recovery metadata, not the original 12-word phrase</li>
+            <li><code>buddydrive init --with-recovery</code> is shown in help but returns an error if used; use <code>init</code> then <code>setup-recovery</code></li>
+        </ul>
+
+        <h2>GUI</h2>
+
+        <h3>Launch</h3>
+        <pre><code>buddydrive-gui</code></pre>
+
+        <h3>Features</h3>
+        <ul>
+            <li><strong>Status panel</strong> - daemon running, identity, uptime</li>
+            <li><strong>Folders list</strong> - configured folders and sync status</li>
+            <li><strong>Buddies list</strong> - paired buddies and their stored configuration</li>
+            <li><strong>Add folder dialog</strong> - select path, name, encryption flag, and append-only mode</li>
+            <li><strong>Pair dialog</strong> - generate or enter pairing details</li>
+            <li><strong>Recovery section</strong> - setup, recover, export, and sync config</li>
+        </ul>
+
+        <h2>CLI Reference</h2>
+
+        <h3>Commands</h3>
+        <pre><code>buddydrive init                        Initialize BuddyDrive
+buddydrive config                      Show configuration
+buddydrive config set &lt;key&gt; ...        Update configuration values
+  relay-base-url &lt;url&gt;                Set relay discovery URL
+  relay-region &lt;region&gt;               Set relay region (eu, us, local)
+  storage-base-path &lt;path&gt;           Set incoming storage base path
+  bandwidth-limit &lt;kbps&gt;             Set bandwidth limit (0 = unlimited)
+  buddy-pairing-code &lt;id&gt; &lt;code&gt;     Set buddy pairing code
+  buddy-name &lt;name&gt;                  Set buddy display name
+  buddy-sync-time &lt;id&gt; &lt;HH:MM&gt;       Set buddy sync time (empty = always)
+  folder-append-only &lt;name&gt; on|off   Toggle folder append-only mode
+buddydrive add-folder &lt;path&gt;           Add folder to sync
+  --name &lt;name&gt;                        Folder name
+  --no-encrypt                         Disable folder encryption flag
+  --append-only                        Only sync new files into that folder
+  --buddy &lt;id&gt;                         Restrict folder to buddy
+buddydrive remove-folder &lt;name&gt;        Remove folder
+buddydrive list-folders                List configured folders
+buddydrive add-buddy                   Pair with a buddy
+  --generate-code                      Generate pairing code
+  --id &lt;buddy-id&gt;                      Buddy ID to pair with
+  --code &lt;code&gt;                        Pairing code from buddy
+buddydrive remove-buddy &lt;id&gt;           Remove buddy
+buddydrive list-buddies                List paired buddies
+buddydrive connect &lt;address&gt;           Manual connect placeholder
+buddydrive start                       Start sync daemon
+  --port &lt;control-port&gt;                Override control API port
+  --daemon                             Accepted but stays foreground
+buddydrive stop                        Stop placeholder command
+buddydrive status                      Show configured status
+buddydrive logs                        Show recent logs
+buddydrive setup-recovery              Generate recovery phrase and sync encrypted config
+buddydrive recover                     Restore config from recovery phrase
+buddydrive sync-config                 Manually sync encrypted config to relay/buddies
+buddydrive export-recovery             Show stored recovery metadata
+buddydrive help                        Show help</code></pre>
+
+        <h3>Examples</h3>
+        <pre><code># Pair with a buddy
+buddydrive add-buddy --generate-code
+buddydrive add-buddy --id abc123 --code XYZ-789
+
+# Add folders
+buddydrive add-folder ~/Photos --name photos
+buddydrive add-folder ~/Documents --name docs --append-only
+
+# Configure relay fallback
+buddydrive config set relay-base-url https://buddydrive.net/relays
+buddydrive config set relay-region eu
+buddydrive config set buddy-pairing-code abc123 ABCD-EFGH
+
+# Set per-buddy sync time
+buddydrive config set buddy-sync-time abc123 03:00
+
+# Set bandwidth limit
+buddydrive config set bandwidth-limit 500
+
+# Toggle append-only on a folder
+buddydrive config set folder-append-only docs on
+
+# Set up recovery
+buddydrive setup-recovery
+
+# Restore on a new machine
+buddydrive recover
+
+# Check what's configured
+buddydrive list-folders
+buddydrive list-buddies
+buddydrive config</code></pre>
+
+        <h2>Configuration</h2>
+        <p>Config stored at <code>~/.buddydrive/config.toml</code>:</p>
         <pre><code>[buddy]
 name = "Alice"
 id = "fcd6295c-a912-44d4-a27b-ad898795207d"
@@ -115,30 +243,71 @@ listen_port = 41721
 announce_addr = "/ip4/203.0.113.10/tcp/41721"
 relay_base_url = "https://buddydrive.net/relays"
 relay_region = "eu"
-sync_window_start = ""
-sync_window_end = ""
+storage_base_path = ""
 bandwidth_limit_kbps = 0
 
 [[folders]]
+id = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
 name = "docs"
 path = "/home/alice/Documents"
 encrypted = true
 append_only = false
+folder_key = "a1b2c3d4e5f6..."
 buddies = ["bob-uuid"]
 
 [[buddies]]
 id = "bob-uuid"
 name = "Bob"
-pairing_code = "swift-eagle"
+pairing_code = "ABCD-EFGH"
+sync_time = "03:00"
 added_at = "2026-04-10T12:00:00Z"</code></pre>
 
+        <h2>Files</h2>
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Location</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td><code>~/.buddydrive/config.toml</code></td><td>Configuration</td></tr>
+                <tr><td><code>~/.buddydrive/state.db</code></td><td>Runtime state</td></tr>
+                <tr><td><code>~/.buddydrive/index.db</code></td><td>File index</td></tr>
+                <tr><td><code>~/.buddydrive/buddydrive.log</code></td><td>Logs</td></tr>
+                <tr><td><code>~/.buddydrive/port</code></td><td>Control API port</td></tr>
+            </tbody>
+        </table>
+
         <h2>Troubleshooting</h2>
+
+        <h3>Daemon won't start</h3>
+        <pre><code>buddydrive logs
+buddydrive config</code></pre>
+
+        <h3>Can't connect to buddy</h3>
         <ol>
-            <li>Check <code>buddydrive logs</code> and <code>buddydrive config</code> if the daemon will not start</li>
-            <li>Verify matching pairing codes for relay fallback</li>
-            <li>Remember <code>buddydrive status</code> does not show live daemon connectivity yet</li>
+            <li>Both peers need internet access</li>
+            <li>Both peers need <code>buddydrive start</code> running</li>
+            <li>Check stored buddies with <code>buddydrive list-buddies</code></li>
+            <li>For direct mode, verify port forwarding and <code>announce_addr</code></li>
+            <li>For relay mode, verify <code>relay-region</code>, <code>relay-base-url</code>, and matching pairing codes</li>
+        </ol>
+
+        <h3>Files not syncing</h3>
+        <ol>
+            <li>Check daemon logs with <code>buddydrive logs</code></li>
+            <li>Check folder configuration with <code>buddydrive list-folders</code></li>
+            <li>Remember <code>buddydrive status</code> does not show live connection state yet</li>
             <li>Missing files are restored through normal sync after connectivity returns</li>
         </ol>
+
+        <h2>Next Steps</h2>
+        <ul>
+            <li>Read <a href="features.html">Features</a> for capabilities</li>
+            <li>Read <a href="security.html">Security</a> for current security scope</li>
+            <li>Read <a href="how-it-works.html">How It Works</a> for architecture</li>
+        </ul>
     </main>
 
     <footer class="footer">

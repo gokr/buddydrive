@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>How It Works - BuddyDrive</title>
-    <meta name="description" content="Technical architecture of BuddyDrive: peer-to-peer networking, relay-backed recovery, and file restore through normal sync.">
+    <meta name="description" content="Technical architecture of BuddyDrive: peer-to-peer networking, encrypted backup, relay-backed recovery, and file restore through normal sync.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -34,24 +34,61 @@
     <header class="page-header">
         <div class="container">
             <h1>How It Works</h1>
-            <p>Peer discovery, relay fallback, and relay-backed recovery.</p>
+            <p>Encrypted backup, peer discovery, relay fallback, and relay-backed recovery.</p>
         </div>
     </header>
 
     <main class="content-page">
         <h2>Architecture</h2>
-        <p>BuddyDrive uses peer-to-peer networking, relay fallback, and relay-backed config recovery.</p>
-        <pre><code>Your Machine &lt;--direct or relay--&gt; Buddy's Machine</code></pre>
+        <p>BuddyDrive uses peer-to-peer networking with encrypted backup, relay fallback, and relay-backed config recovery.</p>
+        <pre><code>┌─────────────────┐                    ┌─────────────────┐
+│  Your Machine   │                    │ Buddy's Machine │
+│                 │                    │                 │
+│  ┌───────────┐  │   direct/relay     │  ┌───────────┐  │
+│  │ BuddyDrive│◄─┼───────────────────┼──►│ BuddyDrive│  │
+│  └───────────┘  │                    │  └───────────┘  │
+│       │         │                    │       │         │
+│       ▼         │                    │       ▼         │
+│  ┌───────────┐  │                    │  ┌───────────┐  │
+│  │  Files    │  │                    │  │ Encrypted │  │
+│  │ (plain)   │  │                    │  │  Blobs    │  │
+│  └───────────┘  │                    │  └───────────┘  │
+└─────────────────┘                    └─────────────────┘</code></pre>
 
         <h2>Components</h2>
+
+        <h3>Daemon</h3>
+        <p>The daemon runs in the foreground today and contains:</p>
         <ul>
-            <li><strong>Daemon</strong> for libp2p networking, sync orchestration, and local status tracking</li>
-            <li><strong>GUI</strong> for desktop monitoring and configuration</li>
-            <li><strong>CLI</strong> for setup, recovery, and headless operation</li>
-            <li><strong>SQLite state</strong> for runtime and file index data</li>
+            <li><strong>libp2p node</strong> - direct transport</li>
+            <li><strong>Discovery service</strong> - relay KV-store buddy lookup</li>
+            <li><strong>Sync manager</strong> - folder scan and sync orchestration</li>
+            <li><strong>Control API</strong> - localhost HTTP API for the GUI</li>
+            <li><strong>SQLite state</strong> - runtime status and file index tracking</li>
+        </ul>
+
+        <h3>GUI</h3>
+        <p>The GTK4 app shows:</p>
+        <ul>
+            <li>Buddy connection state</li>
+            <li>Folder sync status</li>
+            <li>Folder and buddy configuration</li>
+            <li>Pairing and control actions</li>
+        </ul>
+
+        <h3>CLI</h3>
+        <p>The CLI handles:</p>
+        <ul>
+            <li>Initial setup</li>
+            <li>Pairing</li>
+            <li>Relay configuration</li>
+            <li>Recovery setup and restore</li>
+            <li>Manual inspection of config, folders, buddies, and logs</li>
         </ul>
 
         <h2>Networking</h2>
+
+        <h3>libp2p Stack</h3>
         <table class="comparison-table">
             <thead>
                 <tr>
@@ -78,46 +115,64 @@
                 </tr>
                 <tr>
                     <td>Discovery</td>
-                    <td>Kademlia DHT</td>
-                    <td>Find peers</td>
+                    <td>Relay KV-store</td>
+                    <td>Find buddy addresses via pairing-code-derived keys</td>
                 </tr>
             </tbody>
         </table>
 
         <h3>Peer Discovery</h3>
+        <p>How two buddies find each other:</p>
         <ol>
-            <li>Each daemon publishes your buddy ID to the DHT</li>
-            <li>The daemon looks up configured buddies by buddy ID</li>
-            <li>It reads the advertised multiaddrs</li>
+            <li>Each daemon publishes its address record to the relay KV-store at <code>/discovery/&lt;derived-key&gt;</code>, where the key is derived from the pairing code (HMAC-authenticated)</li>
+            <li>The daemon looks up configured buddies using the same derived key (every 10 minutes)</li>
+            <li>It reads the peer ID, advertised multiaddrs, reachability flag, and sync time from the record</li>
+            <li>Deterministic initiator selection: the side without a public address initiates; if both same reachability, lower buddy UUID initiates</li>
             <li>It dials a public TCP address directly, or falls back to a relay when configured</li>
+            <li>Cached addresses in <code>state.db</code> allow reconnection when the relay is temporarily unavailable</li>
         </ol>
 
         <h3>NAT Traversal</h3>
         <ul>
-            <li><strong>Public TCP address</strong> when <code>announce_addr</code> points to a reachable address</li>
-            <li><strong>Relay fallback</strong> when <code>relay_region</code> is set and both sides store the same <code>pairing_code</code></li>
-            <li><strong>UPnP</strong> attempt when no explicit <code>announce_addr</code> is set</li>
+            <li><strong>Public TCP address</strong> - direct connection when <code>announce_addr</code> points to a reachable public address</li>
+            <li><strong>UPnP</strong> - automatic port forwarding attempt when no explicit <code>announce_addr</code> is set</li>
+            <li><strong>Relay fallback</strong> - used when <code>relay_region</code> is set and both sides store the same <code>pairing_code</code></li>
+            <li><strong>Deterministic initiator</strong> - the side without a public address initiates; if both same reachability, lower buddy UUID initiates</li>
+            <li><strong>Always accept incoming</strong> - incoming connections from known buddies are accepted regardless of sync time</li>
         </ul>
 
         <h2>File Sync</h2>
+
+        <h3>Change Detection</h3>
+        <p>The sync manager monitors configured folders:</p>
         <ol>
-            <li>Scan files in the folder</li>
-            <li>Capture path, size, mtime, and local hash state</li>
+            <li>Scan files in the folder using streaming blake2b hash (64KB chunks, never full file in memory)</li>
+            <li>Capture path, encrypted path, size, mtime, content hash, mode, and symlink target</li>
             <li>Compare against the previous index</li>
-            <li>Queue added, modified, and deleted files</li>
-            <li>Transfer changed files in 64KB chunks</li>
+            <li>Detect added, modified, deleted, and moved files (move detection via content hash matching)</li>
         </ol>
 
+        <h3>Transfer Protocol</h3>
+        <p>File transfer uses a chunked protocol with encryption:</p>
+        <pre><code>File list exchange → Delta computation (moves, deletes, missing) → Chunked transfer → Hash verification</code></pre>
+        <p>Chunks are sent in 64KB blocks. LZ4 compression is used when it helps. When folder encryption is enabled, chunks are encrypted with random nonces (XSalsa20-Poly1305). Paths are encrypted with deterministic nonces so the same filename always encrypts the same way.</p>
+        <p>Restored files are hash-verified after write.</p>
+
         <h3>Restore Behavior</h3>
+        <p>Restore is just sync in the opposite direction:</p>
         <ol>
             <li>One side advertises a file in its folder list</li>
             <li>The other side sees the file is missing locally</li>
             <li>The sync session requests the missing file</li>
-            <li>The file is recreated locally</li>
+            <li>The file is recreated locally and hash-verified</li>
         </ol>
         <p>If the destination folder is append-only and already has a file with that name, the local file is kept.</p>
 
+        <h3>SQLite State</h3>
+        <p>BuddyDrive keeps runtime and file state in SQLite under <code>~/.buddydrive/</code>.</p>
+
         <h2>Recovery Flow</h2>
+
         <h3>Setup Recovery</h3>
         <ol>
             <li><code>buddydrive setup-recovery</code> generates a 12-word phrase</li>
@@ -136,6 +191,7 @@
         </ol>
 
         <h2>Control API</h2>
+        <p>Local HTTP server (default port 17521) for GUI communication. Localhost connections require no authentication; LAN connections must use a secret path prefix <code>/w/&lt;secret&gt;/</code>.</p>
         <table class="comparison-table">
             <thead>
                 <tr>
@@ -148,24 +204,47 @@
                 <tr><td><code>GET /buddies</code></td><td>Buddy list with connection state</td></tr>
                 <tr><td><code>GET /folders</code></td><td>Folder list with sync status</td></tr>
                 <tr><td><code>GET /config</code></td><td>Current saved configuration</td></tr>
+                <tr><td><code>GET /logs</code></td><td>Recent log entries</td></tr>
+                <tr><td><code>GET /recovery</code></td><td>Export recovery metadata</td></tr>
                 <tr><td><code>POST /folders</code></td><td>Add folder</td></tr>
                 <tr><td><code>DELETE /folders/:name</code></td><td>Remove folder</td></tr>
                 <tr><td><code>POST /buddies/pair</code></td><td>Pair buddy through the local API</td></tr>
                 <tr><td><code>POST /buddies/pairing-code</code></td><td>Generate pairing code</td></tr>
+                <tr><td><code>DELETE /buddies/:id</code></td><td>Remove buddy</td></tr>
                 <tr><td><code>POST /sync/:folder</code></td><td>Trigger sync</td></tr>
                 <tr><td><code>POST /config</code></td><td>Update selected config fields</td></tr>
                 <tr><td><code>POST /config/reload</code></td><td>Reload config from disk</td></tr>
+                <tr><td><code>POST /recovery/setup</code></td><td>Generate recovery phrase</td></tr>
+                <tr><td><code>POST /recovery/verify-word</code></td><td>Verify recovery word</td></tr>
+                <tr><td><code>POST /recovery/recover</code></td><td>Recover from mnemonic</td></tr>
+                <tr><td><code>POST /recovery/export</code></td><td>Export recovery metadata</td></tr>
+                <tr><td><code>POST /recovery/sync-config</code></td><td>Sync config to relay</td></tr>
+                <tr><td><code>POST /daemon/stop</code></td><td>Request daemon stop</td></tr>
             </tbody>
         </table>
 
         <h2>Limitations</h2>
+
+        <h3>Current</h3>
         <ul>
-            <li>Sync is triggered when buddies connect</li>
+            <li>Sync uses deterministic initiator selection (CGNAT-correct)</li>
             <li>One buddy per folder today</li>
-            <li>Buddy-backed config fetch for <code>recover</code> is not implemented yet</li>
-            <li>No delta sync for large files</li>
+            <li>Buddy-backed config fetch for <code>recover</code> is not implemented yet (relay path works)</li>
+            <li>No delta sync for large files (partial-chunk diffs)</li>
             <li>No selective download</li>
         </ul>
+
+        <h3>Planned</h3>
+        <ul>
+            <li>Better background daemon management</li>
+            <li>Multiple buddies per folder</li>
+            <li>Delta sync (rolling hash for partial-chunk diffs)</li>
+            <li>Connection upgrade (replace relay with direct when possible)</li>
+            <li>Long-lived CGNAT connections (keepalive)</li>
+            <li>Buddy-backed config fetch for recovery</li>
+        </ul>
+
+        <p>See <a href="features.html">Features</a> for user-facing capabilities or <a href="security.html">Security</a> for current security scope.</p>
     </main>
 
     <footer class="footer">

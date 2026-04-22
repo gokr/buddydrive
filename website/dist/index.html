@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BuddyDrive - Backup your life, with a friend</title>
-    <meta name="description" content="Peer-to-peer folder sync with relay-backed restore, a 12-word recovery phrase, and missing-file restore through normal sync.">
+    <meta name="description" content="Peer-to-peer encrypted folder sync with relay-backed restore, a 12-word recovery phrase, and missing-file restore through normal sync.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -41,11 +41,11 @@
             <div class="hero-content">
                 <div class="hero-badge">
                     <span class="badge-dot"></span>
-                    Recovery And Restore Included
+                    Encrypted Backup &amp; Restore
                 </div>
                 <h1 class="hero-title"><span class="gradient-text">Backup your life, with a friend</span></h1>
                 <p class="hero-subtitle">
-                    Peer-to-peer folder sync with relay-backed restore. Keep your documents, photos, and other important folders on a trusted buddy machine, then rebuild a lost machine with a 12-word recovery phrase and resync missing files.
+                    Peer-to-peer encrypted folder sync with relay-backed restore. Keep your documents, photos, and other important folders encrypted on a trusted buddy machine, then rebuild a lost machine with a 12-word recovery phrase and resync missing files.
                 </p>
                 <div class="hero-cta">
                     <a href="docs.html" class="btn btn-primary">Get Started</a>
@@ -75,14 +75,14 @@
                     <p>Set up a 12-word recovery phrase once and restore config on a replacement machine later.</p>
                 </div>
                 <div class="feature-card">
+                    <div class="feature-icon">Lock</div>
+                    <h3>Encrypted Backup</h3>
+                    <p>Filenames and file contents are encrypted before storage. Your buddy sees only opaque blobs.</p>
+                </div>
+                <div class="feature-card">
                     <div class="feature-icon">Sync</div>
                     <h3>Restore Missing Files</h3>
                     <p>After config recovery, normal sync can recreate files that are missing locally but still exist on your buddy.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">Pair</div>
-                    <h3>Simple Pairing</h3>
-                    <p>A single pairing code identifies the relationship and is reused for relay fallback.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">Rule</div>
@@ -147,7 +147,7 @@
                     </tr>
                     <tr>
                         <td>Data on company servers</td>
-                        <td><strong>Data with your buddy</strong></td>
+                        <td><strong>Encrypted data with your buddy</strong></td>
                     </tr>
                     <tr>
                         <td>Account required</td>
