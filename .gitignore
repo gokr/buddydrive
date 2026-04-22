@@ -5,11 +5,6 @@ nimble.paths
 # Build artifacts
 bin/*
 !bin/.gitkeep
-relay/bin/*
-!relay/bin/.gitkeep
-relay/geo/*
-!relay/geo/README.md
-relay/src/relay
 *.out
 *.o
 

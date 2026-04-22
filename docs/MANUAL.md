@@ -468,7 +468,7 @@ BuddyDrive follows the standard BIP39 specification for mnemonic generation and 
 
 ## Relay Server
 
-The relay enables NAT traversal and encrypted config storage. See [relay/README.md](../relay/README.md) for full details.
+The relay enables NAT traversal and encrypted config storage. See the [buddydrive-relay repository](https://github.com/gokr/buddydrive-relay) for full details.
 
 ### Public Relay
 
@@ -478,16 +478,7 @@ The relay enables NAT traversal and encrypted config storage. See [relay/README.
 
 ### Self-Hosted Relay
 
-```bash
-# TCP relay only (default port 41722)
-./buddydrive-relay
-
-# With HTTP API support (requires TIDB_CONNECTION_STRING)
-export TIDB_CONNECTION_STRING="mysql://user:pass@host:4000/buddydrive"
-./buddydrive-relay 41722 8080
-```
-
-Docker and Koyeb deployment options are documented in [relay/README.md](../relay/README.md).
+See the [buddydrive-relay repository](https://github.com/gokr/buddydrive-relay) for build instructions, configuration, Docker, and Koyeb deployment options.
 
 ## Troubleshooting
 

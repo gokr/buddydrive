@@ -26,11 +26,6 @@ nimble install_gui
 # Install icons
 nimble icons
 
-# Build relay server
-nim c src/relay.nim
-# With KV store support:
-nim c -d:withKvStore src/relay.nim
-
 # Run all tests
 nimble test
 
@@ -70,7 +65,6 @@ There is no separate lint or typecheck command. The Nim compiler performs full t
 - `--threads:on` — required by `curly`
 - `-d:ssl` — enabled in config.nims
 - `-d:gtk4` — enable GTK4 GUI build
-- `-d:withKvStore` — enable TiDB KV store in relay
 - `-d:chronicles_log_level=ERROR` — set in config.nims
 
 ## Architecture
@@ -245,10 +239,7 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **parsetoml** — TOML parsing (not GC-safe, needs `{.cast(gcsafe).}` in async)
 - **chronos** — Async framework
 - **curly** — HTTP client (relay API, config sync)
-- **mummyx** (fork) — HTTP server (relay)
-- **debby** (fork) — MySQL ORM for relay KV store
 - **db_connector/db_sqlite** — SQLite (bundled with Nim 2.2.8+)
-- **db_mysql** — MySQL for relay KV store (TiDB Cloud)
 - **results** — Result type for error handling
 - **stew** — Utility types used by libp2p
 - **uuids** — UUID generation for buddy/folder IDs
@@ -273,8 +264,8 @@ See `docs/PLAN.md` for full details. Key points:
 
 Tests use `std/unittest` and run via testament with `nimble test`:
 
-- **Unit tests**: `tests/unit/*/*.nim` — 17 test files covering config, crypto, recovery, messages, policy, scanner, transfer crash safety, control, control_web, rawrelay, index, pairing, types, config_sync, discovery, session, geoip_ranges
-- **Integration tests**: `tests/integration/*.nim` — 7 test files covering CLI flows, API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
+- **Unit tests**: `tests/unit/*/*.nim` — 16 test files covering config, crypto, recovery, messages, policy, scanner, transfer crash safety, control, control_web, rawrelay, index, pairing, types, config_sync, discovery, session
+- **Integration tests**: `tests/integration/*.nim` — 4 test files covering CLI flows, config sync e2e, relay fallback, relay file sync
 
 Integration tests are environment-dependent:
 - Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to fail hard when services unavailable

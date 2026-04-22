@@ -187,7 +187,7 @@ buddydrive config set relay-region eu
 buddydrive config set buddy-sync-time <buddy-id> 03:00
 ```
 
-The public TCP relay is at `relay-eu.buddydrive.org:19447`. The HTTP API (discovery, config sync, relay list) is at `https://api.buddydrive.org`. See [relay/README.md](relay/README.md) for relay details and self-hosting notes.
+The public TCP relay is at `relay-eu.buddydrive.org:19447`. The HTTP API (discovery, config sync, relay list) is at `https://api.buddydrive.org`. See the [buddydrive-relay repository](https://github.com/gokr/buddydrive-relay) for relay details and self-hosting notes.
 
 ## Roadmap
 

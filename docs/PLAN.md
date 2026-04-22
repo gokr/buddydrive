@@ -616,7 +616,7 @@ A → B → C → D → E → F → G (Phases A-D and most of E-F are complete; 
 
 `tests/unit/*/*.nim` — run via `nimble test` or `nimble testUnit`:
 
-config, config_sync, control, control_web, crypto, discovery, geoip_ranges, index, messages, pairing, policy, rawrelay, recovery, scanner, session, transfer crash safety, types
+config, config_sync, control, control_web, crypto, discovery, index, messages, pairing, policy, rawrelay, recovery, scanner, session, transfer crash safety, types
 
 ### Integration Tests (7 files)
 
