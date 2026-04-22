@@ -948,7 +948,7 @@ proc showSettingsDialog() =
   gtkBoxAppend(content, relayUrlLabel)
   
   let relayUrlEntry = gtkEntryNew()
-  gtkEntrySetPlaceholderText(relayUrlEntry, "https://buddydrive.net/relays")
+  gtkEntrySetPlaceholderText(relayUrlEntry, "https://api.buddydrive.org")
   let currentRelayUrl = configJson{"network"}{"relay_base_url"}.getStr("")
   if currentRelayUrl.len > 0:
     gtkEditableSetText(relayUrlEntry, currentRelayUrl.cstring)

@@ -11,7 +11,7 @@ type
   ConfigSyncError* = object of CatchableError
 
 const CONFIG_SYNC_TIMEOUT = 10
-const DefaultKvApiUrl* = "https://buddydrive-tankfeud-ddaec82a.koyeb.app"
+const DefaultKvApiUrl* = "https://api.buddydrive.org"
 
 var lastKvMutationVersion = 0'i64
 

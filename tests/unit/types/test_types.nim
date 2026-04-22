@@ -51,8 +51,8 @@ suite "AppConfig":
     check cfg.recovery.masterKey == ""
     check cfg.listenPort == DefaultP2PPort
     check cfg.announceAddr == ""
-    check cfg.relayBaseUrl == ""
-    check cfg.relayRegion == ""
+    check cfg.relayBaseUrl == "https://api.buddydrive.org"
+    check cfg.relayRegion == "eu"
     check cfg.storageBasePath == ""
     check cfg.bandwidthLimitKBps == 0
     check cfg.folders.len == 0

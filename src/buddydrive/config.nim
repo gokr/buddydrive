@@ -132,8 +132,8 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
   result.recovery.masterKey = ""
   result.listenPort = DefaultP2PPort
   result.announceAddr = ""
-  result.relayBaseUrl = ""
-  result.relayRegion = ""
+  result.relayBaseUrl = "https://api.buddydrive.org"
+  result.relayRegion = "eu"
   result.storageBasePath = ""
   result.bandwidthLimitKBps = 0
 

@@ -14,8 +14,8 @@ suite "rawrelay helpers":
   test "relayAddrsForRegion normalizes region":
     let cache = initRelayListCache()
     let relays = relayAddrsForRegion(cache, "", " EU ")
-    check relays.len == 3
-    check relays[0].contains("relay-eu-")
+    check relays.len == 1
+    check relays[0].contains("relay-eu.buddydrive.org")
 
   test "relayAddrsForRegion returns empty for unknown region":
     let cache = initRelayListCache()
