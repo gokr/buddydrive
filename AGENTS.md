@@ -258,7 +258,7 @@ See `docs/PLAN.md` for full details. Key points:
 - Ed25519 signing keypair derived from master key for relay API authentication (X-BD-Verify-Key, X-BD-Signature headers)
 - TiDB Cloud for relay-backed API storage
 - Default API URL: `https://api.buddydrive.org`
-- Default TCP relay: `relay-eu.buddydrive.org:19447`
+- Default TCP relay: `relay-eu.buddydrive.org:41722`
 
 ## Testing
 

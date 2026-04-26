@@ -99,15 +99,15 @@ proc builtinRelayAddrs(region: string): seq[string] {.raises: [].} =
     ]
   of "eu":
     @[
-      "/dns4/relay-eu.buddydrive.org/tcp/19447"
+      "/dns4/relay-eu.buddydrive.org/tcp/41722"
     ]
   of "us":
     @[
-      "/dns4/relay-us.buddydrive.org/tcp/19447"
+      "/dns4/relay-us.buddydrive.org/tcp/41722"
     ]
   of "asia":
     @[
-      "/dns4/relay-asia.buddydrive.org/tcp/19447"
+      "/dns4/relay-asia.buddydrive.org/tcp/41722"
     ]
   else:
     @[]

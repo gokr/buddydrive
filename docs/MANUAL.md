@@ -472,7 +472,7 @@ The relay enables NAT traversal and encrypted config storage. See the [buddydriv
 
 ### Public Relay
 
-- **TCP relay**: `relay-eu.buddydrive.org:19447` (for NAT traversal)
+- **TCP relay**: `relay-eu.buddydrive.org:41722` (for NAT traversal)
 - **API**: `https://api.buddydrive.org` (for discovery, encrypted config storage, and relay lists)
 - **Region**: Frankfurt (fra)
 

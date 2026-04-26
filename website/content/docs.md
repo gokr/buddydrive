@@ -141,7 +141,7 @@ buddydrive config set api-base-url https://api.buddydrive.org
 buddydrive config set relay-region eu
 ```
 
-The public EU TCP relay is `relay-eu.buddydrive.org:19447`.
+The public EU TCP relay is `relay-eu.buddydrive.org:41722`.
 
 ### Check Status
 

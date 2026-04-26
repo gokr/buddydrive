@@ -639,7 +639,7 @@ CLI flows, API, config sync e2e, relay fallback, relay file sync, relay server, 
 
 ## Public Relay
 
-- **TCP relay**: `relay-eu.buddydrive.org:19447`
+- **TCP relay**: `relay-eu.buddydrive.org:41722`
 - **API**: `https://api.buddydrive.org`
 - **Region**: Frankfurt (fra)
 
