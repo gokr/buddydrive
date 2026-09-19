@@ -5,6 +5,8 @@ import ../../../src/buddydrive/sync/index
 import ../../../src/buddydrive/config as buddyconfig
 import ../../testutils
 
+useIsolatedDataDir("index")
+
 suite "FileIndex construction":
   test "newIndex creates index with table":
     withTestDir("idxcreate"):

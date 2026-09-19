@@ -1,4 +1,4 @@
-import std/[os, random, times]
+import std/[exitprocs, os, random, times]
 
 proc setupTestDir*(baseName: string): string =
   randomize()
@@ -35,23 +35,16 @@ proc makeFileInfo*(path: string, size: int64 = 0, mtime: int64 = 0): tuple[path:
   result.mtime = mtime
   result.hash = default(array[32, byte])
 
-template runWithStrictFallback*(body: untyped) =
-  try:
-    body
-  except CatchableError as e:
-    if strictIntegration():
-      raise
-    echo "  skipping: ", e.msg
-  except:
-    if strictIntegration():
-      raise
-    echo "  skipping: uncaught defect"
-
-proc strictIntegration*(): bool =
-  getEnv("BUDDYDRIVE_STRICT_INTEGRATION", "") == "1"
+proc useIsolatedDataDir*(name: string) =
+  ## Points config and index storage at a fresh directory for this test
+  ## process, so runs never inherit index rows (which drive move and delete
+  ## detection) from an earlier run or from the developer's own ~/.buddydrive.
+  let dir = setupTestDir("datadir_" & name)
+  putEnv("BUDDYDRIVE_DATA_DIR", dir)
+  putEnv("BUDDYDRIVE_CONFIG_DIR", dir)
+  addExitProc(proc() = cleanupTestDir(dir))
 
 proc getKvApiUrl*(): string =
-  getEnv("BUDDYDRIVE_KV_API_URL", "https://api.buddydrive.org")
-
-proc getLocalKvConnectionString*(): string =
-  getEnv("BUDDYDRIVE_LOCAL_KV_DSN", "")
+  ## Empty means "use the in-process KV stub"; set it to test against a real
+  ## deployment instead.
+  getEnv("BUDDYDRIVE_KV_API_URL", "")

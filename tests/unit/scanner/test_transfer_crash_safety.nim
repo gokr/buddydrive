@@ -10,6 +10,8 @@ import ../../../src/buddydrive/sync/transfer
 import ../../../src/buddydrive/sync/scanner
 import ../../testutils
 
+useIsolatedDataDir("transfer_crash_safety")
+
 proc feedMessages(
     sender: BridgeStream,
     protocol: SyncProtocol,

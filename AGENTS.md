@@ -122,7 +122,8 @@ wordlists/                      # BIP39 English wordlist + name generation lists
 debian/                         # Debian packaging (control, rules, service, manpages)
 website/                        # Static website content (docs, features, security, how-it-works)
 tests/
-  ├── testutils.nim            # Shared test helpers (withTestDir, strictIntegration, etc.)
+  ├── testutils.nim            # Shared test helpers (withTestDir, useIsolatedDataDir, etc.)
+  ├── support/*.nim            # Test harness, in-process relay and KV API stubs
   ├── unit/*/*.nim             # Unit tests
   └── integration/*.nim        # Integration tests
 ```
@@ -265,22 +266,28 @@ See `docs/PLAN.md` for full details. Key points:
 Tests use `std/unittest` and run via testament with `nimble test`:
 
 - **Unit tests**: `tests/unit/*/*.nim` — 16 test files covering config, crypto, recovery, messages, policy, scanner, transfer crash safety, control, control_web, rawrelay, index, pairing, types, config_sync, discovery, session
-- **Integration tests**: `tests/integration/*.nim` — 4 test files covering CLI flows, config sync e2e, relay fallback, relay file sync
+- **Integration tests**: `tests/integration/*.nim` — 5 test files covering CLI flows, config sync e2e, relay fallback, relay file sync, pairing
 
-Integration tests are environment-dependent:
-- Set `BUDDYDRIVE_STRICT_INTEGRATION=1` to fail hard when services unavailable
-- Without it, tests skip gracefully
+Integration tests are self-contained: they start their own services in-process
+and fail rather than skip. Never reintroduce a "skip on error" wrapper — it hid
+a data-loss bug in the sync delta for months.
+
+- `tests/support/test_relay.nim` — TCP relay stand-in; region `local` resolves
+  to it. The production relay lives in the buddydrive-relay repository.
+- `tests/support/kv_stub.nim` — KV API stand-in (PUT/GET/DELETE `/kv/<key>`),
+  including real Ed25519 signature verification. Runs on its own thread because
+  curly blocks the caller.
 
 Test environment variables:
-- `BUDDYDRIVE_STRICT_INTEGRATION=1` — fail on unavailable services
-- `BUDDYDRIVE_KV_API_URL` — override API URL (default: `https://api.buddydrive.org`)
-- `BUDDYDRIVE_LOCAL_KV_DSN` — local KV database connection string
+- `BUDDYDRIVE_KV_API_URL` — test against a real API instead of the stub
+- `BUDDYDRIVE_DATA_DIR` / `BUDDYDRIVE_CONFIG_DIR` — set per test process by
+  `useIsolatedDataDir`
 
 Test utilities (`tests/testutils.nim`):
 - `withTestDir(baseName)` — create/cleanup temp directory
 - `withTestFile(baseName, content)` — create/cleanup temp file
-- `runWithStrictFallback` — run block, skip on failure unless strict mode
-- `strictIntegration()` — check env var
+- `useIsolatedDataDir(name)` — fresh config/index dir, so stale index rows never
+  leak between runs (they drive move/delete detection)
 - `makeFileInfo()` — create test FileInfo
 
 ## Debian Packaging

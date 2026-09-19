@@ -9,6 +9,8 @@ import ../../../src/buddydrive/p2p/protocol
 import ../../../src/buddydrive/crypto
 import ../../testutils
 
+useIsolatedDataDir("scanner")
+
 suite "FileScanner construction":
   test "newFileScanner creates scanner with folder config":
     let folder = newFolderConfig("docs", "/tmp/test-docs")

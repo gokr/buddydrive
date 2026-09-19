@@ -1,6 +1,7 @@
 import std/os except FileInfo
 import std/options
 import std/tables
+import std/sets
 import std/sequtils
 import std/times
 import results
@@ -86,14 +87,27 @@ proc hasExpectedHash(fileInfo: FileInfo): bool =
   false
 
 proc rebuildIndexFromDisk*(transfer: FileTransfer) =
-  var onDisk: Table[string, FileInfo]
+  ## Records every file currently on disk. Index rows for files that have
+  ## disappeared are deliberately kept: they are the only evidence that we
+  ## once held a path, which is what lets the delta tell a local deletion
+  ## apart from a file we have simply never seen. Call
+  ## pruneIndexOfMissingFiles once those deletions have been propagated.
   for fileInfo in transfer.scanner.scanDirectory():
-    onDisk[fileInfo.path] = fileInfo
     transfer.index.addFile(fileInfo, synced = true)
+
+proc pruneIndexOfMissingFiles*(transfer: FileTransfer) =
+  var onDisk: HashSet[string]
+  for fileInfo in transfer.scanner.scanDirectory():
+    onDisk.incl(fileInfo.path)
 
   for existing in transfer.index.getAllFiles():
     if existing.path notin onDisk:
       transfer.index.removeFile(existing.path)
+
+proc knownIndexPaths*(transfer: FileTransfer): HashSet[string] =
+  ## Paths this folder has held at some point, according to the index.
+  for existing in transfer.index.getAllFiles():
+    result.incl(existing.path)
 
 proc verifyRestoredFile(transfer: FileTransfer, path: string, expected: FileInfo): bool =
   if not fileExists(path) and not symlinkExists(path):
@@ -446,6 +460,11 @@ proc syncFile*(transfer: FileTransfer, conn: Connection, fileInfo: FileInfo): Fu
   return await transfer.receiveFileData(conn, fileInfo)
 
 proc deleteLocalFile*(transfer: FileTransfer, path: string): bool {.raises: [].} =
+  if transfer.scanner.folder.appendOnly:
+    # Append-only folders never lose an existing local file to a remote
+    # instruction. Report success so the session continues.
+    return true
+
   let fullPath = transfer.scanner.rootPath / path
 
   try:

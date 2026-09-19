@@ -3,7 +3,7 @@ switch("define", "chronicles_log_level=ERROR")
 
 when defined(macosx):
   switch("dynlibOverride", "libsodium")
-  switch("passL", "-L/usr/local/lib -lsodium")
+  switch("passL", "-L/usr/local/lib -L/opt/homebrew/lib -lsodium")
 
 # begin Nimble config (version 2)
 when withDir(thisDir(), system.fileExists("nimble.paths")):

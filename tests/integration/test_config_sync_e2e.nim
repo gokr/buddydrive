@@ -1,10 +1,14 @@
 import std/unittest
-import std/[os, options]
+import std/options
 import chronos
 import ../../src/buddydrive/types
 import ../../src/buddydrive/recovery
 import ../../src/buddydrive/sync/config_sync
+import ../support/kv_stub
+import ../support/integration_harness
 import ../testutils
+
+useIsolatedDataDir("config_sync_e2e")
 
 proc safeSetupRecovery(): tuple[mnemonic: string, recovery: RecoveryConfig] {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -21,72 +25,72 @@ proc safeGenerateMnemonic(): string {.gcsafe.} =
       doAssert false, "generateMnemonic failed"
 
 suite "Config sync e2e":
+  var stub: KvStub
+  var kvUrl: string
+
+  setup:
+    let configured = getKvApiUrl()
+    if configured.len > 0:
+      # Point BUDDYDRIVE_KV_API_URL at a real deployment to test against it.
+      stub = nil
+      kvUrl = configured
+    else:
+      stub = startKvStub(freePort())
+      kvUrl = stub.url()
+
+  teardown:
+    if stub != nil:
+      stub.stop()
+
   test "sync config to relay then recover":
-    runWithStrictFallback:
-      block testBlock:
-        let kvUrl = getKvApiUrl()
-        let (mnemonic, recovery) = safeSetupRecovery()
+    let (mnemonic, recovery) = safeSetupRecovery()
 
-        var config = newAppConfig(newBuddyId("aaaaaaaa-1111-1111-1111-111111111111", "sync-test-buddy"))
-        config.recovery = recovery
-        config.listenPort = 12345
-        config.relayRegion = "eu"
-        config.folders = @[newFolderConfig("photos", "/tmp/photos")]
-        config.folders[0].encrypted = true
-        config.folders[0].appendOnly = true
-        config.folders[0].buddies = @["bbbbbbbb-2222-2222-2222-222222222222"]
+    var config = newAppConfig(newBuddyId("aaaaaaaa-1111-1111-1111-111111111111", "sync-test-buddy"))
+    config.recovery = recovery
+    config.listenPort = 12345
+    config.relayRegion = "eu"
+    config.folders = @[newFolderConfig("photos", "/tmp/photos")]
+    config.folders[0].encrypted = true
+    config.folders[0].appendOnly = true
+    config.folders[0].buddies = @["bbbbbbbb-2222-2222-2222-222222222222"]
 
-        var buddy: BuddyInfo
-        buddy.id = newBuddyId("bbbbbbbb-2222-2222-2222-222222222222", "test-friend")
-        buddy.pairingCode = "test-code"
-        config.buddies = @[buddy]
+    var buddy: BuddyInfo
+    buddy.id = newBuddyId("bbbbbbbb-2222-2222-2222-222222222222", "test-friend")
+    buddy.pairingCode = "test-code"
+    config.buddies = @[buddy]
 
-        let synced = waitFor syncConfigToRelay(config, kvUrl)
-        if not synced:
-          if strictIntegration(): check synced
-          else: echo "  skipping: sync failed"; break testBlock
+    check waitFor syncConfigToRelay(config, kvUrl)
+    # A second push must be accepted: the version header increases.
+    check waitFor syncConfigToRelay(config, kvUrl)
 
-        let syncedAgain = waitFor syncConfigToRelay(config, kvUrl)
-        if not syncedAgain:
-          if strictIntegration(): check syncedAgain
-          else: echo "  skipping: sync retry failed"; break testBlock
+    let recoveredOpt = waitFor attemptRecovery(mnemonic, kvUrl, "")
+    check recoveredOpt.isSome
 
-        let recoveredOpt = waitFor attemptRecovery(mnemonic, kvUrl, "")
-        if recoveredOpt.isNone:
-          if strictIntegration(): check recoveredOpt.isSome
-          else: echo "  skipping: recovery failed"; break testBlock
+    let recovered = recoveredOpt.get()
+    check recovered.buddy.uuid == config.buddy.uuid
+    check recovered.buddy.name == config.buddy.name
+    check recovered.listenPort == 12345
+    check recovered.relayRegion == "eu"
+    check recovered.folders.len == 1
+    check recovered.folders[0].name == "photos"
+    check recovered.folders[0].encrypted == true
+    check recovered.folders[0].appendOnly == true
+    check recovered.buddies.len == 1
+    check recovered.recovery.masterKey == config.recovery.masterKey
 
-        let recovered = recoveredOpt.get()
+    check waitFor deleteConfigFromRelay(recovery, kvUrl)
 
-        check recovered.buddy.uuid == config.buddy.uuid
-        check recovered.buddy.name == config.buddy.name
-        check recovered.listenPort == 12345
-        check recovered.relayRegion == "eu"
-        check recovered.folders.len == 1
-        check recovered.folders[0].name == "photos"
-        check recovered.folders[0].encrypted == true
-        check recovered.folders[0].appendOnly == true
-        check recovered.buddies.len == 1
-        check recovered.recovery.masterKey == config.recovery.masterKey
-
-        let deleted = waitFor deleteConfigFromRelay(recovery, kvUrl)
-        check deleted
+    # Once deleted there is nothing left to recover.
+    check (waitFor attemptRecovery(mnemonic, kvUrl, "")).isNone
 
   test "wrong mnemonic fails to recover":
-    runWithStrictFallback:
-      block testBlock:
-        let kvUrl = getKvApiUrl()
-        let (_, recovery) = safeSetupRecovery()
-        var config = newAppConfig(newBuddyId("dddddddd-4444-4444-4444-444444444444", "wrong-mnemonic-test"))
-        config.recovery = recovery
+    let (_, recovery) = safeSetupRecovery()
+    var config = newAppConfig(newBuddyId("dddddddd-4444-4444-4444-444444444444", "wrong-mnemonic-test"))
+    config.recovery = recovery
 
-        let synced = waitFor syncConfigToRelay(config, kvUrl)
-        if not synced:
-          if strictIntegration(): check synced
-          else: echo "  skipping: sync failed"; break testBlock
+    check waitFor syncConfigToRelay(config, kvUrl)
 
-        let wrongMnemonic = safeGenerateMnemonic()
-        let recoveredOpt = waitFor attemptRecovery(wrongMnemonic, kvUrl, "")
-        check recoveredOpt.isNone
+    let wrongMnemonic = safeGenerateMnemonic()
+    check (waitFor attemptRecovery(wrongMnemonic, kvUrl, "")).isNone
 
-        discard waitFor deleteConfigFromRelay(recovery, kvUrl)
+    discard waitFor deleteConfigFromRelay(recovery, kvUrl)
