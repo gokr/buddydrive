@@ -20,7 +20,7 @@ BuddyDrive lets you sync folders with 1-2 friends across the internet, bypassing
 - **Recovery And Restore** - 12-word BIP39 recovery phrase (with checksum), Argon2i key derivation, encrypted config sync to relay, and config restore on a new machine
 - **Restore Missing Files** - normal sync recreates files that exist on your buddy but are missing locally, with hash verification
 - **Per-Buddy Sync Scheduling** - each buddy can have its own sync time; incoming connections always accepted
-- **Folder Policies** - append-only mode prevents remote overwrites of existing local files; per-folder encryption flag
+- **Folder Policies** - append-only mode prevents remote overwrites and remote deletions of existing local files; per-folder encryption flag
 - **Simple CLI** - easy to use command-line interface
 - **Web GUI** - browser-based UI served from the daemon, works on any device
 - **GTK4 GUI** - native desktop application for monitoring and configuration (Linux)
@@ -167,7 +167,7 @@ Restore happens in two layers:
 - **Config restore** - `buddydrive recover` fetches your encrypted config from the relay and writes `~/.buddydrive/config.toml`
 - **File restore** - once the daemon is running again, normal sync recreates missing local files from your buddy
 
-Append-only folders still protect existing local files from being overwritten by the remote copy.
+Append-only folders still protect existing local files from being overwritten or deleted by the remote side.
 
 ### Connectivity Notes
 

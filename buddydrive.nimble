@@ -22,12 +22,13 @@ requires "https://github.com/gokr/lz4wrapper" # LZ4 compression (used by libp2p)
 requires "https://github.com/status-im/nim-zlib#daa8723" # zlib for libp2p; pinned because libp2p declares underspecified version
 
 task test, "Run all tests (automatic discovery via testament)":
+  # No "|| true" here: a failing suite must fail the task.
   exec """
     echo "Running BuddyDrive test suite..."
     echo "=== Unit tests ==="
-    testament pattern "tests/unit/*/*.nim" || true
+    testament pattern "tests/unit/*/*.nim"
     echo "=== Integration tests ==="
-    testament pattern "tests/integration/*.nim" || true
+    testament pattern "tests/integration/*.nim"
   """
 
 task testUnit, "Run unit tests":

@@ -1,4 +1,4 @@
-import std/[algorithm, options, tables]
+import std/[algorithm, options, sets, tables]
 import std/os except FileInfo
 import chronos
 import libp2p/stream/connection
@@ -82,7 +82,12 @@ proc computeOutboundDelta(
     transfer: FileTransfer,
     remoteFiles: seq[FileInfo],
 ): tuple[moves: seq[MoveInstruction], deletes: seq[string], projectedRemote: seq[FileInfo]] =
+  ## Works out what the remote should change to match us, and what is left for
+  ## us to pull. A remote path we do not have is only deleted when the index
+  ## shows we used to hold it; otherwise it is a file we have never seen and
+  ## belongs in projectedRemote so it gets fetched.
   let localFiles = transfer.scanner.scanDirectory()
+  let knownPaths = transfer.knownIndexPaths()
 
   var localByPath = initTable[string, FileInfo]()
   var remoteByPath = initTable[string, FileInfo]()
@@ -110,21 +115,22 @@ proc computeOutboundDelta(
       continue
 
     let key = hashToString(remoteFile.hash)
-    if key in localByHash:
+    let wasHeldLocally = remotePath in knownPaths
+
+    if key in localByHash and not (localByHash[key].path in remoteByPath) and
+        sameMoveCandidate(remoteFile, localByHash[key]):
+      # Same content sits at a different path here and the remote does not have
+      # that path yet: a rename, not a deletion.
       let localFile = localByHash[key]
-      if localFile.path in remoteByPath:
-        result.deletes.add(remotePath)
-        projectedByPath.del(remotePath)
-      elif sameMoveCandidate(remoteFile, localFile):
-        result.moves.add((remotePath, localFile.path, key))
-        projectedByPath.del(remotePath)
-        projectedByPath[localFile.path] = localFile
-      else:
-        result.deletes.add(remotePath)
-        projectedByPath.del(remotePath)
-    else:
+      result.moves.add((remotePath, localFile.path, key))
+      projectedByPath.del(remotePath)
+      projectedByPath[localFile.path] = localFile
+    elif wasHeldLocally:
       result.deletes.add(remotePath)
       projectedByPath.del(remotePath)
+    else:
+      # Never seen here — leave it in the projection so we pull it.
+      discard
 
   for path in projectedByPath.keys:
     result.projectedRemote.add(projectedByPath[path])
@@ -229,6 +235,12 @@ proc syncFolder(
       return false
     if not await sendDeltaPhase(sendTransfer, receiveTransfer, conn, remoteFiles):
       return false
+
+  # Deletions have been propagated by now, so stale index rows can go. On a
+  # failed session they are kept, which at worst resurrects a deleted file
+  # next time instead of losing a live one.
+  sendTransfer.pruneIndexOfMissingFiles()
+  receiveTransfer.pruneIndexOfMissingFiles()
 
   true
 

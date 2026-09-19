@@ -6,6 +6,8 @@ import ../../../src/buddydrive/p2p/protocol
 import ../../../src/buddydrive/sync/session
 import ../../testutils
 
+useIsolatedDataDir("session")
+
 proc makeConfig(
     selfId: string,
     selfName: string,

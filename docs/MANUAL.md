@@ -212,12 +212,12 @@ Restore happens in two layers:
 - **Config restore** — `buddydrive recover` fetches your encrypted config from the relay and writes `~/.buddydrive/config.toml`
 - **File restore** — once the daemon is running again, normal sync recreates missing local files from your buddy
 
-Append-only folders still protect existing local files from being overwritten by the remote copy.
+Append-only folders still protect existing local files from being overwritten or deleted by the remote side.
 
 ### Folder Policies
 
 - **Encrypted** — folder encryption flag (default true). When enabled, filenames and content are encrypted before being stored on the buddy's machine. Path encryption uses deterministic nonces (same path always encrypts the same way, enabling move detection). Content encryption uses random nonces per chunk (prevents nonce reuse across versions).
-- **Append-only** — prevents remote overwrites of existing local files. Missing files are still created
+- **Append-only** — prevents remote overwrites and remote deletions of existing local files. Missing files are still created. Because the folder never drops a file, a file deleted on the other side is restored back to it from the append-only copy on a later sync
 - **Buddy-specific** — restrict a folder to sync with a specific buddy
 
 ### Per-Buddy Sync Time
@@ -254,7 +254,10 @@ When sync time is empty (default), the daemon initiates connections whenever it 
 1. Scans folder for changes (polling-based) using streaming blake2b hash
 2. Detects added, modified, deleted, and moved files (move detection via content hash matching)
 3. Exchanges file lists with buddy (includes encrypted paths and content hashes)
-4. Computes deltas: missing files, modified files, moves, and deletes
+4. Computes deltas: missing files, modified files, moves, and deletes. A file the
+   buddy has and you do not is only deleted when your index shows you held that
+   path before; otherwise it is fetched. That is what makes restore onto an empty
+   machine pull files down instead of wiping the buddy's copy
 5. Transfers chunks (64KB, LZ4 compressed when beneficial, encrypted with random nonces)
 6. Both sides update SQLite index
 7. Restored files are hash-verified after write

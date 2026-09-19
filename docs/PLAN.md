@@ -564,6 +564,8 @@ The relay verifies signatures using the verify key previously stored alongside t
 7. **Session flow** — `syncBuddyFolders` handles both push (backup) and pull (restore) with move/delete support — DONE
 8. **Unencrypted shortcut** — when `folder.encrypted == false`, skip encrypt/decrypt steps — DONE
 9. **Hash verification** — `verifyRestoredFile` re-scans and checks hash after write — DONE
+10. **Delete vs never-had** — `computeOutboundDelta` only tells the buddy to delete a path when the local index shows we held it; a path we have never seen stays in the projection and is pulled instead. Index rows for vanished files survive until the session completes (`pruneIndexOfMissingFiles`), because they are the only record that a local deletion happened. Before this, any file the buddy had and we lacked was deleted on their side and never fetched, so a one-sided file was destroyed rather than replicated — DONE
+11. **Append-only honours deletes** — `deleteLocalFile` refuses to remove files in an append-only folder — DONE
 
 ### Phase E: Connection & Scheduling — PARTIALLY COMPLETE
 
@@ -598,11 +600,13 @@ Existing test coverage:
 4. **Integration test** — pairing protocol — DONE
 5. **Integration test** — CLI flows — DONE
 
+6. **Integration test** — mixed encrypted/unencrypted: two folders, one encrypted one shared — DONE
+7. **Unit test** — nonce reuse safety: `encryptChunk produces different ciphertext each time` — DONE
+8. **Unit test** — path determinism: `encryptPath is deterministic` — DONE
+9. **Integration test** — bidirectional sync, deletion propagation, and append-only delete protection over the relay — DONE
+
 Still to add:
-6. **Integration test** — CGNAT simulation: one side with no public address, verify correct initiator selection and direct connection — NOT YET
-7. **Integration test** — mixed encrypted/unencrypted: two folders, one encrypted one shared — NOT YET
-8. **Unit test** — nonce reuse safety: encrypt the same file twice, verify ciphertexts differ — NOT YET
-9. **Unit test** — path determinism: encrypt the same path twice, verify encrypted_paths are identical — NOT YET
+10. **Integration test** — CGNAT simulation: one side with no public address, verify correct initiator selection and direct connection — NOT YET
 
 ### Implementation Order
 
@@ -624,18 +628,18 @@ config, config_sync, control, control_web, crypto, discovery, index, messages, p
 
 CLI flows, API, config sync e2e, relay fallback, relay file sync, relay server, pairing protocol
 
+Integration tests are self-contained: `tests/support/test_relay.nim` provides an
+in-process stand-in for the TCP relay (region `local`) and
+`tests/support/kv_stub.nim` one for the KV API, signature verification included.
+They fail rather than skip — the previous "skip on error" wrapper reported a
+green suite while file sync was deleting data.
+
 ### Remaining Tests To Add
 
-- Streaming hash vs full-file hash comparison
-- Deterministic path encryption roundtrip
-- Chunk encryption roundtrip (random nonces, different ciphertext each time)
-- Folder key derivation from folder ID + master key
-- Move detection in scanner
-- Initiator selection (various reachability combinations)
-- Full encrypted backup + restore
-- Mixed encrypted/unencrypted folders
-- Nonce reuse safety (same content → different ciphertext)
-- Path determinism (same path → same encrypted path)
+- CGNAT simulation (initiator selection with one non-public side)
+- daemon.nim: connection pool, discovery loop, relay fallback, scheduling
+- p2p/protocol.nim framing: truncated and oversized frames
+- nat.nim UPnP mapping and CGNAT detection (needs an injectable interface)
 
 ## Public Relay
 
@@ -644,3 +648,42 @@ CLI flows, API, config sync e2e, relay fallback, relay file sync, relay server, 
 - **Region**: Frankfurt (fra)
 
 To deploy your own relay, see the [buddydrive-relay repository](https://github.com/gokr/buddydrive-relay).
+
+## What I Could Not Fix
+
+Found while fixing the sync delta and the integration tests; all three are
+outside this repository.
+
+### HTTPS is broken on api and relay hostnames — blocks every real user
+
+`https://api.buddydrive.org` does not complete a TLS handshake, so discovery,
+config sync, and relay-list lookup all fail in the field. The plain TCP relay on
+port 41722 is fine, and so is `www.buddydrive.org` — that one is fronted by
+Cloudflare (188.114.96.1), which is why the website looks healthy while the API
+does not.
+
+Observed on `159.195.108.207` (`wowbagger.krampe.se`, both `api.` and
+`relay-eu.` are CNAMEs to it):
+
+- Port 443 accepts TCP connections, and plain HTTP answers `308` redirecting to
+  HTTPS with `Server: Caddy`
+- The handshake then either aborts with `tlsv1 alert internal error` and no
+  certificate presented, or hangs until the client times out
+
+That is Caddy answering for hostnames it holds no certificate for: either the
+names are missing from the site blocks, or ACME issuance for them failed. Check
+`caddy validate` and the ACME errors in `journalctl -u caddy` on that host.
+
+### buddydrive-relay repository is not publicly reachable
+
+`https://github.com/gokr/buddydrive-relay`, linked from README.md and from this
+document, returns 404 to an unauthenticated clone, so it is private or was never
+pushed. The integration tests no longer depend on it (see
+`tests/support/test_relay.nim`), but the links are dead for everyone else.
+
+### Relay source does not build on macOS
+
+At the extraction commit (`65ea115^`), `relay/src/relay.nim` sets
+`addrInfo.sin_family = AF_INET.uint16`, but `sin_family` is `uint8` on BSD and
+macOS, so the build fails with a type mismatch. Fix belongs in the relay
+repository; `typeof(addrInfo.sin_family)(AF_INET)` works on both.

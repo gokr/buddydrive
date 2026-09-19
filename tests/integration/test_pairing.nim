@@ -10,9 +10,9 @@ import ../../src/buddydrive/types
 import ../../src/buddydrive/config as buddyconfig
 import ../../src/buddydrive/p2p/node
 import ../../src/buddydrive/p2p/pairing
-import ../testutils
+import ../support/integration_harness
 
-proc runPairingTest(): Future[bool] {.async.} =
+proc runPairingTest(port1, port2: int): Future[bool] {.async.} =
   let uuid1 = $genUuid()
   let uuid2 = $genUuid()
 
@@ -31,10 +31,10 @@ proc runPairingTest(): Future[bool] {.async.} =
     addedAt: getTime()
   ))
 
-  let node1 = newBuddyNode()
+  let node1 = newBuddyNode(port1)
   await node1.start()
 
-  let node2 = newBuddyNode()
+  let node2 = newBuddyNode(port2)
   await node2.start()
 
   var node2Addrs: seq[MultiAddress] = @[]
@@ -83,5 +83,6 @@ proc runPairingTest(): Future[bool] {.async.} =
 
 suite "Full pairing protocol over libp2p":
   test "two nodes pair via direct libp2p connection":
-    runWithStrictFallback:
-      check waitFor runPairingTest()
+    # Distinct ports: sharing the default listen port makes both nodes
+    # advertise the same address, and the dial then lands on the wrong peer.
+    check waitFor runPairingTest(freePort(), freePort())
