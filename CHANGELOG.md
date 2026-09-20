@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Folder policies: append-only mode that prevents remote overwrites of
   existing local files (including re-sync when the local hash differs from
   the remote, catching corrupt or partial files), and a per-folder encryption
-  flag.
+  flag. Append-only folders also ignore remote deletion instructions.
 - Per-buddy sync scheduling; incoming connections are always accepted.
 - Web-based admin GUI served from the daemon's control server, with
   LAN secret-path authentication and runtime config reload.
@@ -65,6 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation was consolidated under `docs/`, the website is deployed via
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script.
+- Documentation updated for the corrected delete and append-only sync
+  semantics (`docs/MANUAL.md`, `README.md`, `docs/architecture.md`), and
+  `docs/PLAN.md` records open problems outside this repository: HTTPS is
+  broken on the api and relay hostnames, the
+  [buddydrive-relay](https://github.com/gokr/buddydrive-relay) repository is
+  not publicly reachable, and its relay source does not build on macOS.
 
 ### Fixed
 
@@ -79,4 +85,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to IP addresses before dialing, as the raw TCP transport requires wire
   addresses.
 - macOS build and runtime: `libsodium.dylib` loading and the missing
-  `liblz4-dev` dependency.
+  `liblz4-dev` dependency. `/opt/homebrew/lib` is now included in the link
+  path so Homebrew-installed libraries are found.
+- Sync no longer deletes files that exist on only one side. The outbound
+  delta treated "the buddy has a path I don't" as a deletion and dropped the
+  path from the projection, so a one-sided file was destroyed instead of
+  replicated and the session reported success; restoring onto an empty
+  machine would have wiped the buddy's copy rather than fetching it. A
+  remote path is now deleted only when the index shows we previously held
+  it; anything never seen locally is left in the projection and pulled.
+  `rebuildIndexFromDisk` no longer prunes rows for vanished files — pruning
+  moved to `pruneIndexOfMissingFiles`, called once deletions have been
+  propagated — so a failed session keeps its index rows and at worst
+  resurrects a deleted file rather than losing a live one.
+- Network-touching integration tests no longer swallow failures:
+  `runWithStrictFallback` and the except/skip blocks had been turning real
+  failures into unittest skips (which testament counts as passes), and the
+  `test` task appended `|| true`. The relay tests had also been dead since
+  the relay server moved out of this repository. Tests are now
+  self-contained: an in-process TCP relay stand-in (`tests/support/test_relay.nim`)
+  that region "local" resolves to, a KV API stand-in (`tests/support/kv_stub.nim`)
+  that verifies Ed25519 signatures, and `useIsolatedDataDir` giving each
+  test process a fresh config and index directory. New coverage: bidirectional
+  sync in one session, deletion propagation, append-only ignoring a remote
+  delete, and mismatched pairing codes not meeting on the relay.
+  `test_pairing` now gives the two nodes distinct free ports instead of both
+  using the default listen port.
