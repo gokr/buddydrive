@@ -94,3 +94,26 @@ suite "Config sync e2e":
     check (waitFor attemptRecovery(wrongMnemonic, kvUrl, "")).isNone
 
     discard waitFor deleteConfigFromRelay(recovery, kvUrl)
+
+  test "an unreachable service is not reported as a missing config":
+    # Recovery must distinguish "nothing stored" from "could not ask". The
+    # relay answered 404 for both until a database outage made someone
+    # rebuilding a machine believe their backup was gone.
+    let (_, recovery) = safeSetupRecovery()
+
+    let missing = waitFor fetchConfigFromRelayChecked(recovery.publicKeyB58, kvUrl)
+    check missing.outcome == fcMissing
+
+    # Nothing is listening on this port.
+    let deadUrl = "http://127.0.0.1:" & $freePort()
+    let unreachable = waitFor fetchConfigFromRelayChecked(recovery.publicKeyB58, deadUrl)
+    check unreachable.outcome == fcUnavailable
+
+    var config = newAppConfig(newBuddyId("eeeeeeee-5555-5555-5555-555555555555", "outcome-test"))
+    config.recovery = recovery
+    check waitFor syncConfigToRelay(config, kvUrl)
+
+    let found = waitFor fetchConfigFromRelayChecked(recovery.publicKeyB58, kvUrl)
+    check found.outcome == fcFound
+
+    discard waitFor deleteConfigFromRelay(recovery, kvUrl)

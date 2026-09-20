@@ -10,6 +10,13 @@ import ../recovery
 type
   ConfigSyncError* = object of CatchableError
 
+  FetchConfigOutcome* = enum
+    ## "Nothing stored" and "could not ask" must stay distinct: a client
+    ## rebuilding a lost machine treats the first as final.
+    fcFound,
+    fcMissing,
+    fcUnavailable
+
 const CONFIG_SYNC_TIMEOUT = 10
 const DefaultKvApiUrl* = "https://api.buddydrive.org"
 
@@ -84,19 +91,30 @@ proc syncConfigToRelay*(config: AppConfig, relayUrl: string): Future[bool] {.asy
     echo "Error syncing config to relay: ", e.msg
     return false
 
-proc fetchConfigFromRelay*(publicKeyB58: string, relayUrl: string): Future[Option[string]] {.async.} =
+proc fetchConfigFromRelayChecked*(
+    publicKeyB58: string,
+    relayUrl: string
+): Future[tuple[outcome: FetchConfigOutcome, data: string]] {.async.} =
   var client = newCurly()
   let url = relayUrl.strip(chars = {'/'}) & "/kv/" & publicKeyB58
-  
+
   try:
     let response = client.get(url, emptyHttpHeaders(), CONFIG_SYNC_TIMEOUT)
     if response.code == 200:
-      return some(decode(response.body))
-    else:
-      return none(string)
+      return (fcFound, decode(response.body))
+    if response.code == 404:
+      return (fcMissing, "")
+    echo "Config service returned HTTP ", response.code
+    return (fcUnavailable, "")
   except Exception as e:
     echo "Error fetching config from relay: ", e.msg
-    return none(string)
+    return (fcUnavailable, "")
+
+proc fetchConfigFromRelay*(publicKeyB58: string, relayUrl: string): Future[Option[string]] {.async.} =
+  let fetched = await fetchConfigFromRelayChecked(publicKeyB58, relayUrl)
+  if fetched.outcome == fcFound:
+    return some(fetched.data)
+  none(string)
 
 proc deleteConfigFromRelay*(recovery: RecoveryConfig, relayUrl: string): Future[bool] {.async.} =
   if not recovery.enabled or recovery.masterKey.len == 0 or recovery.publicKeyB58.len == 0:
@@ -141,16 +159,22 @@ proc attemptRecovery*(mnemonic: string, apiBaseUrl: string, relayRegion: string)
     echo "Error deriving keys from mnemonic: ", e.msg
     return none(AppConfig)
   
-  let relayResult = await fetchConfigFromRelay(recovery.publicKeyB58, apiBaseUrl)
-  if relayResult.isSome:
+  let fetched = await fetchConfigFromRelayChecked(recovery.publicKeyB58, apiBaseUrl)
+  case fetched.outcome
+  of fcFound:
     try:
       var config: AppConfig
       {.cast(gcsafe).}:
-        config = deserializeConfigFromSync(relayResult.get(), masterKey)
+        config = deserializeConfigFromSync(fetched.data, masterKey)
       return some(config)
     except Exception as e:
       echo "Failed to decrypt config from relay: ", e.msg
-  
+  of fcMissing:
+    echo "No config is stored for this recovery phrase."
+  of fcUnavailable:
+    # Do not let this read as "you have no backup".
+    echo "The config service could not be reached. Your config may still be stored; try again later."
+
   return none(AppConfig)
 
 proc attemptRecoveryFromBuddy*(mnemonic: string, buddyId: string, pairingCode: string, apiBaseUrl: string, relayRegion: string): Future[Option[AppConfig]] {.async.} =
