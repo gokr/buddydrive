@@ -19,6 +19,7 @@ type
     msgPing
     msgPong
     msgSyncDone
+    msgSessionEnd
 
   CompressionKind* = enum
     ckNone = 0
@@ -60,6 +61,8 @@ type
       pingTimestamp*: int64
     of msgSyncDone:
       syncFolderName*: string
+    of msgSessionEnd:
+      discard
   
   FileEntry* = object
     path*: string
@@ -202,12 +205,15 @@ proc encode*(msg: ProtocolMessage): seq[byte] =
   of msgSyncDone:
     discard
 
+  of msgSessionEnd:
+    discard
+
 proc decode*(data: seq[byte]): Result[ProtocolMessage, string] =
   if data.len < 2:
     return err("Message too short")
   
   let kindByte = data[0]
-  if kindByte > ord(msgSyncDone):
+  if kindByte > ord(msgSessionEnd):
     return err("Invalid message kind: " & $kindByte)
   
   let kind = MessageKind(kindByte)
@@ -403,6 +409,9 @@ proc decode*(data: seq[byte]): Result[ProtocolMessage, string] =
 
   of msgSyncDone:
     discard
+
+  of msgSessionEnd:
+    discard
   
   ok(msg)
 
@@ -453,3 +462,10 @@ proc newPong*(pingTimestamp: int64): ProtocolMessage =
 
 proc newSyncDone*(): ProtocolMessage =
   ProtocolMessage(kind: msgSyncDone)
+
+proc newSessionEnd*(): ProtocolMessage =
+  ## Final marker of a sync session. Receiving it proves the buddy has finished
+  ## every phase, so closing the connection can no longer cut off data they
+  ## still need. Appended to MessageKind so existing kind bytes keep their
+  ## values.
+  ProtocolMessage(kind: msgSessionEnd)

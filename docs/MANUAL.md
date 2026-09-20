@@ -262,6 +262,8 @@ When sync time is empty (default), the daemon initiates connections whenever it 
 6. Both sides update SQLite index
 7. Restored files are hash-verified after write
 8. File writes use atomic `.buddytmp` + `flushFile` + `moveFile` for crash safety
+9. The session ends with a session-end exchange in a fixed order, so neither side
+   hangs up while the other still has data in flight through a relay
 
 ### NAT Traversal
 

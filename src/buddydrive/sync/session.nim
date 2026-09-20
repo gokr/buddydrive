@@ -69,6 +69,10 @@ proc receiveRemoteFolderLists(
     else:
       raise newException(CatchableError, "unexpected message while receiving folder lists")
 
+const
+  SessionEndTimeout = chronos.seconds(10)
+  SessionEndLingerTimeout = chronos.seconds(2)
+
 type
   MoveInstruction = tuple[oldPath: string, newPath: string, hash: string]
 
@@ -189,6 +193,9 @@ proc servePhase(sendTransfer: FileTransfer, receiveTransfer: FileTransfer, conn:
     case msg.kind
     of msgSyncDone:
       return true
+    of msgSessionEnd:
+      # Buddy ended the session early; nothing more will come.
+      return false
     of msgFileRequest:
       if not await sendTransfer.sendFileData(conn, msg.requestPath, msg.requestOffset, msg.requestLength):
         return false
@@ -244,6 +251,58 @@ proc syncFolder(
 
   true
 
+proc receiveSessionEnd(conn: Connection, protocol: SyncProtocol, timeout: Duration): Future[bool] {.async.} =
+  ## Reads until the buddy's session-end marker, the connection closes, or we
+  ## give up. Anything else on the wire at this point is ignored rather than
+  ## treated as an error: the session itself is already decided.
+  let deadline = Moment.now() + timeout
+  while true:
+    let remaining = deadline - Moment.now()
+    if remaining <= ZeroDuration:
+      return false
+    let msgOpt =
+      try:
+        await protocol.receiveMessage(conn).wait(remaining)
+      except CatchableError:
+        return false
+    if msgOpt.isNone():
+      return false
+    if msgOpt.get().kind == msgSessionEnd:
+      return true
+
+proc awaitSessionEnd(conn: Connection, protocol: SyncProtocol, endsFirst: bool) {.async.} =
+  ## Closes the session down in a fixed order, so neither side hangs up while
+  ## the other still has bytes in flight.
+  ##
+  ## Whichever side finished its phases first used to close immediately, while
+  ## the other was still waiting for a file ack and the final sync-done. A relay
+  ## tears down both halves when one closes and drops whatever it still had
+  ## buffered, so the slower side saw a truncated stream and reported failure on
+  ## a sync that had in fact transferred everything. On loopback the bytes are
+  ## always flushed already, which is why this only showed up over a real link.
+  ##
+  ## The same UUID comparison that orders the delta phases decides who speaks
+  ## first here, keeping the conversation strictly alternating — a simultaneous
+  ## exchange deadlocks on an unbuffered transport. The responder then waits for
+  ## the initiator to hang up, so the last marker cannot be cut off either.
+  ##
+  ## Never fails the session: a buddy that predates this message just leaves us
+  ## waiting for the timeout.
+  if endsFirst:
+    try:
+      await protocol.sendMessage(conn, newSessionEnd())
+    except CatchableError:
+      return
+    discard await receiveSessionEnd(conn, protocol, SessionEndTimeout)
+  else:
+    discard await receiveSessionEnd(conn, protocol, SessionEndTimeout)
+    try:
+      await protocol.sendMessage(conn, newSessionEnd())
+    except CatchableError:
+      return
+    # Wait for the initiator to hang up before we do.
+    discard await receiveSessionEnd(conn, protocol, SessionEndLingerTimeout)
+
 proc syncBuddyFolders*(
     config: AppConfig,
     buddyId: string,
@@ -258,10 +317,13 @@ proc syncBuddyFolders*(
   var localFolders = applicableFolders(config, buddyId)
   localFolders.sort(proc(a, b: FolderConfig): int = cmp(a.name, b.name))
 
+  var allOk = true
   for folder in localFolders:
     if folder.name notin remoteLists:
       continue
     if not await syncFolder(config, buddyId, buddyId, folder, remoteLists[folder.name], conn, protocol):
-      return false
+      allOk = false
+      break
 
-  true
+  await awaitSessionEnd(conn, protocol, config.buddy.uuid < buddyId)
+  allOk

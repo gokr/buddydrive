@@ -566,6 +566,7 @@ The relay verifies signatures using the verify key previously stored alongside t
 9. **Hash verification** — `verifyRestoredFile` re-scans and checks hash after write — DONE
 10. **Delete vs never-had** — `computeOutboundDelta` only tells the buddy to delete a path when the local index shows we held it; a path we have never seen stays in the projection and is pulled instead. Index rows for vanished files survive until the session completes (`pruneIndexOfMissingFiles`), because they are the only record that a local deletion happened. Before this, any file the buddy had and we lacked was deleted on their side and never fetched, so a one-sided file was destroyed rather than replicated — DONE
 11. **Append-only honours deletes** — `deleteLocalFile` refuses to remove files in an append-only folder — DONE
+12. **Session-end handshake** — `msgSessionEnd` closes a session in a fixed order: the side with the lower UUID sends it and waits for the buddy's, the other side answers and then waits for the buddy to hang up first. Before this, whoever finished first closed straight away; a relay drops whatever it still has buffered when one half closes, so the other side saw a truncated stream and reported failure on a sync that had already transferred everything. Only reproducible over a real link — on loopback the bytes are always flushed already. The exchange is deliberately alternating rather than simultaneous, which would deadlock on an unbuffered transport. A buddy that predates the message just costs a timeout — DONE
 
 ### Phase E: Connection & Scheduling — PARTIALLY COMPLETE
 
@@ -649,41 +650,29 @@ green suite while file sync was deleting data.
 
 To deploy your own relay, see the [buddydrive-relay repository](https://github.com/gokr/buddydrive-relay).
 
-## What I Could Not Fix
+## Infrastructure Status
 
-Found while fixing the sync delta and the integration tests; all three are
-outside this repository.
+Verified 2026-09-20 against the live deployment.
 
-### HTTPS is broken on api and relay hostnames — blocks every real user
+### Resolved
 
-`https://api.buddydrive.org` does not complete a TLS handshake, so discovery,
-config sync, and relay-list lookup all fail in the field. The plain TCP relay on
-port 41722 is fine, and so is `www.buddydrive.org` — that one is fronted by
-Cloudflare (188.114.96.1), which is why the website looks healthy while the API
-does not.
+- **HTTPS on `api.buddydrive.org`** — a Let's Encrypt certificate is in place
+  and every endpoint the client uses answers: `/relays/<region>` returns the
+  relay list, `/discovery/<key>` and `/kv/<key>` behave as expected. The
+  config-sync e2e test passes against the live API
+  (`BUDDYDRIVE_KV_API_URL=https://api.buddydrive.org nimble testConfigSync`),
+  so recovery works in production.
+- **buddydrive-relay repository** — public and clonable.
+- **Relay build on macOS** — fixed upstream; `sin_family` now takes the platform
+  width. A `config.nims` there links libsodium so the tests run without
+  `DYLD_LIBRARY_PATH`.
 
-Observed on `159.195.108.207` (`wowbagger.krampe.se`, both `api.` and
-`relay-eu.` are CNAMEs to it):
+### Outstanding
 
-- Port 443 accepts TCP connections, and plain HTTP answers `308` redirecting to
-  HTTPS with `Server: Caddy`
-- The handshake then either aborts with `tlsv1 alert internal error` and no
-  certificate presented, or hangs until the client times out
-
-That is Caddy answering for hostnames it holds no certificate for: either the
-names are missing from the site blocks, or ACME issuance for them failed. Check
-`caddy validate` and the ACME errors in `journalctl -u caddy` on that host.
-
-### buddydrive-relay repository is not publicly reachable
-
-`https://github.com/gokr/buddydrive-relay`, linked from README.md and from this
-document, returns 404 to an unauthenticated clone, so it is private or was never
-pushed. The integration tests no longer depend on it (see
-`tests/support/test_relay.nim`), but the links are dead for everyone else.
-
-### Relay source does not build on macOS
-
-At the extraction commit (`65ea115^`), `relay/src/relay.nim` sets
-`addrInfo.sin_family = AF_INET.uint16`, but `sin_family` is `uint8` on BSD and
-macOS, so the build fails with a type mismatch. Fix belongs in the relay
-repository; `typeof(addrInfo.sin_family)(AF_INET)` works on both.
+- **`https://relay-eu.buddydrive.org` has no certificate** and fails the TLS
+  handshake with `tlsv1 alert internal error`. Nothing depends on it: the client
+  only speaks raw TCP to port 41722 on that host, which works. Worth removing
+  from Caddy or giving a certificate, so it stops looking like an outage.
+- **The deployed relay predates the half-close fix** in the relay repository. The
+  client no longer depends on that fix (see the session-end handshake above),
+  but deploying it restores the guarantee for any other client.
