@@ -188,6 +188,19 @@ suite "SyncDone message":
     check decoded.isOk
     check decoded.get().kind == msgSyncDone
 
+suite "SessionEnd message":
+  test "encode/decode round-trip":
+    let msg = newSessionEnd()
+    let encoded = encode(msg)
+    let decoded = decode(encoded)
+    check decoded.isOk
+    check decoded.get().kind == msgSessionEnd
+
+  test "kind byte is appended, so existing kinds keep their values":
+    # Older buddies must still decode every message they already knew.
+    check ord(msgFileList) == 0
+    check ord(msgSyncDone) == ord(msgSessionEnd) - 1
+
 suite "Decode edge cases":
   test "too-short data returns error":
     let decoded = decode(@[byte(0)])

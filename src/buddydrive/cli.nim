@@ -800,7 +800,7 @@ proc handleRecover*() =
     echo "Run 'buddydrive start' to sync your folders."
   else:
     echo ""
-    echo "Could not recover from relay."
+    echo "Could not recover from relay (see the reason above)."
     echo ""
     echo "To recover from a buddy, provide their info:"
     stdout.write("Buddy ID: ")
