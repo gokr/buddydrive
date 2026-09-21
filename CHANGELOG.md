@@ -68,6 +68,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Syncs through a relay could report failure even though every file had
+  transferred: the peer that finished its phases first closed the connection
+  while the other was still waiting for a file ack and the final sync-done,
+  and a relay drops whatever it still has buffered when one half closes. Sync
+  sessions now end with an explicit `msgSessionEnd` exchange in a fixed order,
+  decided by the same UUID comparison that orders the delta phases, so neither
+  side hangs up while the other still has data in flight. The message kind was
+  appended to the protocol enum, so existing kind bytes are unchanged and a
+  buddy predating it only costs a timeout.
+- A failed `recover` no longer reads as a lost backup: an unreachable or
+  failing config service was reported the same as "no config is stored for
+  this recovery phrase", so a machine being rebuilt could conclude its backup
+  was gone. Recovery now distinguishes found, missing, and unavailable, and
+  tells the user the service could not be reached and to try again later.
 - Double-nonce bug in `encrypt`/`decrypt` that produced a corrupted
   nonce-prefixed ciphertext and broke decryption.
 - Crash when mounting the pairing protocol handler on an already-started
