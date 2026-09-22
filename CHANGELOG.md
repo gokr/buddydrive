@@ -65,6 +65,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation was consolidated under `docs/`, the website is deployed via
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script.
+- Integration tests are now self-contained and fail loudly. Network-touching
+  tests previously swallowed real failures as unittest skips — which Testament
+  counts as passes — and the relay tests had been non-functional since the relay
+  moved to its own repository. They now use an in-process TCP relay stand-in
+  (`tests/support/test_relay.nim`), a KV API stub that verifies Ed25519 signatures
+  for real (`tests/support/kv_stub.nim`), and per-process isolated data
+  directories. New coverage includes bidirectional sync in one session,
+  deletion propagation, append-only ignoring a remote delete, mismatched pairing
+  codes, and the session-end exchange.
 
 ### Fixed
 
@@ -80,3 +89,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   addresses.
 - macOS build and runtime: `libsodium.dylib` loading and the missing
   `liblz4-dev` dependency.
+- Sync no longer deletes files that exist on only one side. `computeOutboundDelta`
+  treated a path the buddy holds but the local machine does not as a delete
+  instruction and dropped it from the pull projection, so the file was destroyed
+  on the buddy instead of being replicated — restoring onto an empty machine
+  would have wiped the buddy's copy while reporting a successful sync. A remote
+  path is now deleted only when the local index shows it was held before;
+  `rebuildIndexFromDisk` no longer prunes rows for vanished files (pruning moved
+  to `pruneIndexOfMissingFiles`, run after deletions are propagated), so a failed
+  session errs toward a deleted file returning rather than a live file going away.
+- Append-only folders now reject deletions as well as overwrites; previously
+  `deleteLocalFile` was not covered by the policy.
+- Sync sessions through the relay no longer fail at the end when one peer
+  finishes first. The finishing peer closed the connection while the other was
+  still waiting for a file ack and the final `sync-done`, and the relay tore down
+  both halves, dropping buffered data so the slower peer saw a truncated stream.
+  Sessions now end with an explicit `msgSessionEnd` exchange, ordered by the same
+  UUID comparison that orders the delta phases; the message kind was appended so
+  existing byte values are unchanged, and an older buddy only costs a timeout.
+- Recovery no longer reports "Could not recover from relay" when the config
+  service is merely unreachable. `fetchConfigFromRelay` now distinguishes found,
+  missing, and unavailable, so `attemptRecovery` tells a user rebuilding a lost
+  machine to retry later instead of implying no config is stored for their phrase.
