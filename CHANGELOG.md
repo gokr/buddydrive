@@ -65,6 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation was consolidated under `docs/`, the website is deployed via
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script.
+- Network integration tests are now self-contained and fail loudly. They had
+  been silently skipping real failures (reported as skips, which testament
+  counts as passes, plus a `|| true` on the test task), and the relay tests
+  had been dead since the relay server moved to its own repository. Tests now
+  use an in-process TCP relay stand-in, a KV API stand-in that verifies
+  Ed25519 signatures, and an isolated config/index directory per test process.
 
 ### Fixed
 
@@ -80,3 +86,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   addresses.
 - macOS build and runtime: `libsodium.dylib` loading and the missing
   `liblz4-dev` dependency.
+- Sync no longer deletes files that exist on only one side. A remote path is
+  now deleted only when the index shows the file was held locally before;
+  paths never seen are pulled instead of removed, so restoring onto a machine
+  without its data fetches the buddy's copy rather than wiping it. Index rows
+  for missing files are retained until deletions have been propagated, so a
+  failed session leaves a deleted file recoverable rather than a live file
+  gone. `deleteLocalFile` also refuses on append-only folders, which
+  previously only blocked overwrites.
+- Sync sessions now end with an explicit session-end exchange, ordered by the
+  same UUID comparison used for the delta phases. Previously the peer that
+  finished first closed the connection while the other was still awaiting the
+  final file ack and sync-done; the public relay then dropped the buffered
+  remainder, so the slower side saw a truncated stream and reported a failed
+  sync even though everything had transferred.
+- Recovery now distinguishes a missing config from an unreachable service.
+  `fetchConfigFromRelayChecked` reports found/missing/unavailable, and
+  `attemptRecovery` reports accordingly, so a user rebuilding a lost machine
+  is no longer told their backup does not exist when the config service merely
+  could not answer, and is advised to retry instead.
