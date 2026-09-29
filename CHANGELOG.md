@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation was consolidated under `docs/`, the website is deployed via
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script.
+- The integration suite is self-contained and fails loudly: it runs against an
+  in-process relay and KV stand-ins instead of the removed relay binary, each
+  test process gets an isolated config/index directory, and tests that silently
+  downgraded failures to skips now fail on a real error.
 
 ### Fixed
 
@@ -80,3 +84,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   addresses.
 - macOS build and runtime: `libsodium.dylib` loading and the missing
   `liblz4-dev` dependency.
+- Sync no longer deletes files that exist on only one side: a remote path is
+  deleted only when the local index shows it was held before, and files never
+  seen locally are pulled instead. This prevents a restore onto an empty
+  machine from wiping the buddy's copy. Index rows for vanished files are now
+  pruned after deletions are propagated rather than during the rebuild, so a
+  failed session resurrects a deleted file rather than losing a live one.
+- `deleteLocalFile` now refuses deletions on append-only folders, which
+  previously only blocked overwrites; such folders no longer lose files to a
+  remote delete.
+- Syncs over the relay no longer report failure after transferring everything:
+  sessions end with an explicit session-end exchange in a fixed order, so
+  neither peer hangs up while the other still has data in flight. Buddies
+  predating the new message just incur a timeout instead of a failed session.
+- Recovery now distinguishes a missing config from an unreachable config
+  service, so a machine being rebuilt is no longer told its backup does not
+  exist when the service merely failed to answer.
