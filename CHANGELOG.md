@@ -41,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   buddy data.
 - Testament-based test suite with unit and integration tests covering crypto,
   pairing, discovery, sync, crash safety, and relay/KV integration.
+- Self-contained integration tests: an in-process TCP relay stand-in for region
+  `local`, a KV API stand-in that verifies Ed25519 signatures, and isolated
+  per-test config and index directories. The suite now fails loudly instead of
+  converting failures into skips, with new coverage for bidirectional sync in a
+  single session, deletion propagation, append-only delete handling, and
+  mismatched pairing codes not meeting on the relay.
 - Relay server KV-store API with HMAC-authenticated discovery records,
   a `/relays/<region>` endpoint for per-region TCP relay addresses, packaged
   EU CIDR snapshots, and abuse hardening.
@@ -65,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation was consolidated under `docs/`, the website is deployed via
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script.
+- Append-only folders now also refuse remote deletes, not only remote
+  overwrites.
+- Documentation updated for the corrected delete and append-only sync
+  semantics (`docs/MANUAL.md`, `README.md`, `docs/architecture.md`).
 
 ### Fixed
 
@@ -80,3 +90,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   addresses.
 - macOS build and runtime: `libsodium.dylib` loading and the missing
   `liblz4-dev` dependency.
+- Data loss when a file existed on only one side: sync treated "the buddy has a
+  path I don't" as a deletion and dropped the path from the pull projection, so
+  the file was destroyed instead of replicated (restoring onto an empty machine
+  would have wiped the buddy's copy). A remote path is now deleted only when the
+  index shows it was previously held locally; paths never seen locally are kept
+  and pulled.
+- Truncated syncs through a relay: the peer that finished first closed the
+  connection while the other was still waiting for a file ack and the final
+  sync-done, and the relay dropped its buffered data, so the slower side
+  reported a failed sync that had in fact transferred everything. Sessions now
+  end with an explicit session-end exchange in a fixed order, so neither side
+  hangs up while the other still has data in flight.
+- `recover` could not distinguish "no config is stored for this phrase" from
+  "the config service could not answer", and reported a missing backup when the
+  service was merely unreachable. The CLI now states which case occurred and
+  advises retrying when the service is unavailable.
