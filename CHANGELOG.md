@@ -65,9 +65,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation was consolidated under `docs/`, the website is deployed via
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script.
+- Append-only folders now also refuse remote deletions, not only remote
+  overwrites, so existing local files cannot be removed by the buddy.
+- The integration test suite is self-contained and fails loudly: removed the
+  failure-swallowing wrappers and `|| true`, added an in-process TCP relay
+  stand-in and a signature-verifying KV API stub, and isolated each test run
+  in a fresh config and index directory.
 
 ### Fixed
 
+- Sync no longer deletes files that exist on only one side. A remote path is
+  deleted only when the local index shows it was held before; paths never seen
+  locally are pulled instead. This previously destroyed one-sided files and
+  could wipe a buddy's copy when restoring onto an empty machine.
+- Sync sessions now end with an explicit session-end exchange in a fixed
+  order, so a peer cannot hang up while the buddy still has data in flight
+  through a relay. Relayed syncs that transferred everything could previously
+  report a truncated, failed session.
+- Recovery now distinguishes "no config is stored for this recovery phrase"
+  from "the config service could not be reached", instead of reporting an
+  unreachable service as a missing backup.
 - Double-nonce bug in `encrypt`/`decrypt` that produced a corrupted
   nonce-prefixed ciphertext and broke decryption.
 - Crash when mounting the pairing protocol handler on an already-started
