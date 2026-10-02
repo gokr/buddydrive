@@ -55,6 +55,23 @@ proc stringToBytes(value: string): seq[byte] =
   for i, c in value:
     result[i] = byte(c)
 
+proc safeJoin*(root: string, relativePath: string): Option[string] =
+  ## Joins a path that came from a buddy onto a local root, refusing anything
+  ## that could land outside it: absolute paths, empty or dot components, and
+  ## parent directories that are symlinks.
+  if relativePath.len == 0 or relativePath.isAbsolute() or '\0' in relativePath:
+    return none(string)
+  let parts = relativePath.split({DirSep, AltSep})
+  for part in parts:
+    if part.len == 0 or part == "." or part == "..":
+      return none(string)
+  var current = root
+  for i in 0 ..< parts.len - 1:
+    current = current / parts[i]
+    if symlinkExists(current):
+      return none(string)
+  some(root / relativePath)
+
 proc newFileScanner*(folder: FolderConfig, index: FileIndex = nil): FileScanner =
   result = FileScanner()
   result.folder = folder

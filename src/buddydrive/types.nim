@@ -17,6 +17,7 @@ type
     pairingCode*: string
     addresses*: seq[string]
     syncTime*: string
+    storagePath*: string
     addedAt*: Time
   
   FolderConfig* = object

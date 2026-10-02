@@ -210,7 +210,7 @@ proc parseCli*(): CommandLine =
           case result.configKey
           of "api-base-url", "api_base_url", "relay-region", "relay_region", "storage-base-path", "storage_base_path", "bandwidth-limit", "bandwidth_limit":
             result.configValue = args[3]
-          of "buddy-pairing-code", "buddy_pairing_code", "buddy-name", "buddy_name", "buddy-sync-time", "buddy_sync_time", "sync-time", "sync_time", "folder-append-only", "folder_append_only":
+          of "buddy-pairing-code", "buddy_pairing_code", "buddy-name", "buddy_name", "buddy-sync-time", "buddy_sync_time", "sync-time", "sync_time", "buddy-storage-path", "buddy_storage_path", "folder-append-only", "folder_append_only":
             if args.len >= 5:
               result.configTarget = args[3]
               result.configValue = args[4]
@@ -327,6 +327,16 @@ proc handleConfig*(cmd: CommandLine) =
       saveConfig(cfg)
       echo "Pairing code set for buddy: ", cfg.buddies[idx].id.uuid.shortId()
       return
+    of "buddy-storage-path", "buddy_storage_path":
+      let idx = cfg.getBuddy(cmd.configTarget)
+      if idx < 0:
+        echo "Buddy not found: ", cmd.configTarget.shortId()
+        return
+      cfg.buddies[idx].storagePath =
+        if cmd.configValue.toLowerAscii() == "default": "" else: absolutePath(cmd.configValue)
+      saveConfig(cfg)
+      echo "Storage folder for buddy ", cfg.buddies[idx].id.uuid.shortId(), ": ", cfg.buddyStorageRoot(cfg.buddies[idx].id.uuid)
+      return
     of "buddy-name", "buddy_name":
       let idx = cfg.getBuddy(cmd.configTarget)
       if idx < 0:
@@ -354,7 +364,7 @@ proc handleConfig*(cmd: CommandLine) =
       return
     else:
       echo "Unknown config key: ", cmd.configKey
-      echo "Supported keys: api-base-url, relay-region, storage-base-path, bandwidth-limit, buddy-pairing-code, buddy-name, buddy-sync-time, folder-append-only"
+      echo "Supported keys: api-base-url, relay-region, storage-base-path, bandwidth-limit, buddy-pairing-code, buddy-name, buddy-sync-time, buddy-storage-path, folder-append-only"
       return
 
   let cfg = loadConfig()
@@ -574,6 +584,7 @@ proc handleListBuddies*() =
     echo "    ID: ", buddy.id.uuid
     if buddy.pairingCode.len > 0:
       echo "    Pairing code: ", buddy.pairingCode
+    echo "    Storage: ", cfg.buddyStorageRoot(buddy.id.uuid)
     echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
 
 proc handleConnect*(cmd: CommandLine) =

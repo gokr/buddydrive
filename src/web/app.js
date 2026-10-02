@@ -96,7 +96,21 @@ const renderFolders = (folders) => {
   }
 };
 
-const renderBuddies = (buddies) => {
+const formatBytes = (bytes) => {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+};
+
+const renderBuddies = (buddies, storage = []) => {
+  const storageById = {};
+  for (const entry of storage) storageById[entry.buddyId] = entry;
   dom.buddiesList.innerHTML = "";
   dom.buddiesEmpty.hidden = buddies.length > 0;
 
@@ -104,6 +118,10 @@ const renderBuddies = (buddies) => {
     const state = buddy.state || "disconnected";
     const shortId = buddy.id ? buddy.id.substring(0, 16) + "..." : "";
     const latency = buddy.latencyMs >= 0 ? `${buddy.latencyMs}ms` : "";
+    const stored = storageById[buddy.id];
+    const storedText = stored
+      ? `Storing ${stored.files} files (${formatBytes(stored.bytes)}) in ${stored.path}`
+      : "";
 
     const item = document.createElement("div");
     item.className = "list-item";
@@ -111,6 +129,7 @@ const renderBuddies = (buddies) => {
       <div class="list-item-info">
         <div class="list-item-name">${escHtml(buddy.name || "Unknown")}</div>
         <div class="list-item-detail">${escHtml(shortId)}</div>
+        ${storedText ? `<div class="list-item-detail">${escHtml(storedText)}</div>` : ""}
       </div>
       <div class="list-item-right">
         ${latency ? `<span class="dim">${latency}</span>` : ""}
@@ -166,14 +185,15 @@ const escAttr = (str) => escHtml(str).replace(/"/g, "&quot;");
 // Refresh all data
 const refresh = async () => {
   try {
-    const [status, folders, buddies] = await Promise.all([
+    const [status, folders, buddies, storage] = await Promise.all([
       api.get("/status"),
       api.get("/folders"),
       api.get("/buddies"),
+      api.get("/storage").catch(() => ({ storage: [] })),
     ]);
     renderStatus(status);
     renderFolders(folders.folders || []);
-    renderBuddies(buddies.buddies || []);
+    renderBuddies(buddies.buddies || [], storage.storage || []);
   } catch (e) {
     console.error("Refresh failed:", e);
   }

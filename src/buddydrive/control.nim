@@ -257,6 +257,39 @@ proc buddiesJson(): JsonNode =
     })
   %*{"buddies": buddies}
 
+proc storageUsage(root: string): tuple[files: int, bytes: int64] =
+  if not dirExists(root):
+    return
+  for path in walkDirRec(root, relative = false):
+    if path.endsWith(".buddytmp"):
+      continue
+    if path.endsWith(".meta"):
+      inc result.files
+      continue
+    try:
+      result.bytes += getFileSize(path)
+    except CatchableError:
+      discard
+    if not path.endsWith(".blob"):
+      inc result.files
+
+proc storageJson(): JsonNode =
+  if not config.configExists():
+    return %*{"storage": []}
+  let cfg = config.loadConfig()
+  var entries: seq[JsonNode] = @[]
+  for buddy in cfg.buddies:
+    let root = cfg.buddyStorageRoot(buddy.id.uuid)
+    let usage = storageUsage(root)
+    entries.add(%*{
+      "buddyId": buddy.id.uuid,
+      "buddyName": buddy.id.name,
+      "path": root,
+      "files": usage.files,
+      "bytes": usage.bytes,
+    })
+  %*{"storage": entries}
+
 proc foldersJson(): JsonNode =
   var liveFolders: Table[string, JsonNode] = initTable[string, JsonNode]()
   
@@ -599,6 +632,7 @@ proc handleRequest*(raw: string): string =
       of "/status": jsonResponse(200, statusJson())
       of "/buddies": jsonResponse(200, buddiesJson())
       of "/folders": jsonResponse(200, foldersJson())
+      of "/storage": jsonResponse(200, storageJson())
       of "/config": jsonResponse(200, configJson())
       of "/logs": jsonResponse(200, logsJson())
       of "/recovery":

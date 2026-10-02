@@ -134,11 +134,12 @@ journalctl -u buddydrive -f
 |-----|-----------|-------------|
 | `api-base-url` | `<url>` | Set API base URL for discovery and config sync |
 | `relay-region` | `<region>` | Set relay region (eu, us, local) |
-| `storage-base-path` | `<path>` | Set base path for storing buddy files |
+| `storage-base-path` | `<path>` | Base folder for buddies without their own `buddy-storage-path` (default `~/.buddydrive/storage`) |
 | `bandwidth-limit` | `<kbps>` | Set bandwidth limit (0 = unlimited) |
 | `buddy-pairing-code` | `<buddy-id> <code>` | Set pairing code for a buddy |
 | `buddy-name` | `<name>` | Update your buddy display name |
 | `buddy-sync-time` | `<buddy-id> <HH:MM>` | Set per-buddy sync time (empty = always) |
+| `buddy-storage-path` | `<buddy-id> <path\|default>` | Folder where this buddy's backups are kept on your machine |
 | `folder-append-only` | `<folder-name> <on\|off>` | Toggle folder append-only mode |
 
 ### add-folder Options
@@ -318,8 +319,13 @@ id = "buddy-id-here"
 name = "cranky-wrench"
 pairing_code = "ABCD-EFGH"
 sync_time = "03:00"
+storage_path = "/mnt/backup/cranky-wrench"
 added_at = "2026-04-10T12:00:00Z"
 ```
+
+### Where a Buddy's Files Are Kept
+
+Every buddy gets a storage folder of its own on your machine: `storage_path` if you set one, otherwise `<storage_base_path>/<buddy-id>` (by default `~/.buddydrive/storage/<buddy-id>`). Each folder the buddy shares with you lives in a sub-folder named by its folder id, so a buddy's `docs` never mixes with your own `docs`. Encrypted folders hold only opaque `.blob` files and small `.meta` sidecars; you cannot read their names or contents. Unencrypted folders are stored as normal files you can browse.
 
 ### Data Files
 

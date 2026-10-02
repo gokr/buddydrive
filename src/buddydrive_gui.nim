@@ -508,6 +508,16 @@ proc createBuddyRow(buddy: JsonNode): GtkBox =
     let detailsLabel = gtkLabelNew(cstring(detailsText))
     gtkWidgetAddCssClass(detailsLabel, "caption")
     gtkBoxAppend(leftBox, detailsLabel)
+
+  if buddyId.len > 0 and buddyconfig.configExists():
+    try:
+      let storageText = "Storage: " & buddyconfig.loadConfig().buddyStorageRoot(buddyId)
+      let storageLabel = gtkLabelNew(cstring(storageText))
+      gtkWidgetAddCssClass(storageLabel, "caption")
+      gtkWidgetAddCssClass(storageLabel, "dim-label")
+      gtkBoxAppend(leftBox, storageLabel)
+    except CatchableError:
+      discard
   
   gtkBoxAppend(row, leftBox)
 

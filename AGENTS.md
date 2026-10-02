@@ -102,7 +102,8 @@ src/
         ├── scanner.nim         # Polling file scanner, chunk I/O, .buddytmp atomic writes
         ├── index.nim           # SQLite file index
         ├── transfer.nim        # Chunked file transfer (64KB, LZ4 compression)
-        ├── session.nim         # Sync sessions
+        ├── session.nim         # Sync sessions (owner round + storage round per buddy)
+        ├── storage.nim         # Storage side: a buddy's folders kept on our disk
         ├── policy.nim          # Sync policy (sync window, append-only, shouldSyncRemoteFile)
         └── config_sync.nim     # Config sync to relay/buddies, recovery logic
 ```
@@ -190,7 +191,10 @@ tests/
 
 The new sync model is now **largely implemented**. See `docs/PLAN.md` for the full design and remaining work. Key implemented features:
 
-- **Encrypted backup model**: files stored encrypted on buddy's machine (filenames + content). Buddy is storage, not co-author.
+- **Encrypted backup model**: files stored encrypted on buddy's machine (filenames + content). Buddy is storage, not co-author. Sync is never a mirror between same-named folders.
+- **Per-buddy storage root**: `[[buddies]] storage_path`, else `<storage_base_path or ~/.buddydrive/storage>/<buddy-uuid>`. Each shared folder lives in `<root>/<folder-id>/` (see `buddyStorageRoot` in `config.nim`, `sync/storage.nim`).
+- **Opaque blobs**: encrypted folders are stored as `<hh>/<hash>.blob` (sealed chunk frames as sent) plus a `.meta` JSON sidecar. Unencrypted folders are stored as plain files.
+- **Paths from a buddy go through `safeJoin`** (`scanner.nim`) before touching disk.
 - **Per-buddy sync_time**: replaces global sync window. Controls when to initiate, not when to accept.
 - **Always accept incoming**: sync time controls initiation only. Incoming connections from known buddies are always accepted.
 - **Deterministic initiator**: CGNAT side initiates (dials the public side). If both public, lower UUID initiates.
@@ -203,6 +207,7 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **Hash verification on restore**: `verifyRestoredFile` re-scans and checks hash after write.
 - **SQLite index is cache**: both sides maintain indexes for performance, but restore only needs the folder key + buddy's filesystem.
 - **Restore flow**: recover config from relay → connect to buddy → list encrypted paths → decrypt paths → request missing files → verify hashes → rebuild index
+- **Wire protocol version 5** (`ProtocolVersion` in `messages.nim`): older peers are rejected at the handshake.
 
 ### Remaining Work
 

@@ -28,7 +28,7 @@ type
     started*: bool
     startTime*: Time
 
-const BuddyDriveProtocol* = "/buddydrive/1.0.0"
+const BuddyDriveProtocol* = "/buddydrive/2.0.0"
 
 proc generateKeyPair*(): (PublicKey, PrivateKey) =
   var rng = newRng()

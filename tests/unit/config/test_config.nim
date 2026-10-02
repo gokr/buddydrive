@@ -210,6 +210,32 @@ suite "Buddy management":
       check reloaded.buddies[0].id.name == "ivan"
       check reloaded.buddies[0].syncTime == "03:00"
 
+  test "buddy storage folder persists and has a default":
+    withTestDir("buddystorage"):
+      putEnv("BUDDYDRIVE_CONFIG_DIR", testDir)
+      putEnv("BUDDYDRIVE_DATA_DIR", testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      var cfg = newAppConfig(newBuddyId("hh", "heidi"))
+      var custom: BuddyInfo
+      custom.id = newBuddyId("custom-uuid", "carol")
+      custom.storagePath = testDir / "carol-backups"
+      var plain: BuddyInfo
+      plain.id = newBuddyId("plain-uuid", "dave")
+      cfg.buddies = @[custom, plain]
+      buddyconfig.saveConfig(cfg)
+
+      let reloaded = buddyconfig.loadConfig()
+      check reloaded.buddies[0].storagePath == testDir / "carol-backups"
+      check reloaded.buddyStorageRoot("custom-uuid") == testDir / "carol-backups"
+      check reloaded.buddyStorageRoot("plain-uuid") == testDir / "storage" / "plain-uuid"
+
+      var based = reloaded
+      based.storageBasePath = testDir / "base"
+      check based.buddyStorageRoot("plain-uuid") == testDir / "base" / "plain-uuid"
+      check based.buddyStorageRoot("custom-uuid") == testDir / "carol-backups"
+
   test "addBuddy updates existing buddy by uuid":
     withTestDir("updatebuddy"):
       putEnv("BUDDYDRIVE_CONFIG_DIR", testDir)

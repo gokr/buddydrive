@@ -279,9 +279,8 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
 
   for folder in daemon.config.folders:
     cleanupTempFiles(folder.path)
-    if daemon.config.storageBasePath.len > 0:
-      for buddyId in folder.buddies:
-        cleanupTempFiles(daemon.config.storageBasePath / buddyId / folder.name)
+  for buddy in daemon.config.buddies:
+    cleanupTempFiles(daemon.config.buddyStorageRoot(buddy.id.uuid))
 
   try:
     var announceAddrs: seq[MultiAddress] = @[]

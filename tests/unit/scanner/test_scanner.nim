@@ -2,6 +2,7 @@ import std/unittest
 import std/os except FileInfo
 import std/times
 import std/sequtils
+import std/options
 import ../../../src/buddydrive/types
 import ../../../src/buddydrive/sync/scanner
 import ../../../src/buddydrive/sync/transfer
@@ -322,3 +323,25 @@ when defined(posix):
         let changes = scanner.scanChanges(prevFiles)
         check changes.len == 1
         check changes[0].kind == fcModified
+
+suite "safeJoin":
+  test "accepts a plain relative path":
+    withTestDir("safejoin_ok"):
+      check safeJoin(testDir, "a/b.txt") == some(testDir / "a/b.txt")
+
+  test "rejects paths that leave the root":
+    withTestDir("safejoin_escape"):
+      check safeJoin(testDir, "../outside.txt").isNone
+      check safeJoin(testDir, "a/../../outside.txt").isNone
+      check safeJoin(testDir, "/etc/passwd").isNone
+      check safeJoin(testDir, "").isNone
+      check safeJoin(testDir, "a//b").isNone
+      check safeJoin(testDir, "./a").isNone
+
+  when defined(posix):
+    test "rejects paths through a symlinked directory":
+      withTestDir("safejoin_symlink"):
+        createDir(testDir / "real")
+        createSymlink(testDir / "real", testDir / "link")
+        check safeJoin(testDir, "link/file.txt").isNone
+        check safeJoin(testDir, "real/file.txt").isSome
