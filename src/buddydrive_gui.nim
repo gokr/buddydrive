@@ -214,7 +214,7 @@ proc localConfigJson(): JsonNode =
       "name": buddy.id.name,
       "pairing_code": buddy.pairingCode,
       "sync_time": buddy.syncTime,
-      "addedAt": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+      "addedAt": buddy.addedAt.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
     })
   %*{
     "buddy": {

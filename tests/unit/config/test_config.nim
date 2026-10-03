@@ -185,6 +185,24 @@ suite "Folder management":
       check cfg.getFolder("b") == 1
       check cfg.getFolder("c") == -1
 
+suite "Timestamps":
+  test "added_at survives a save and load unchanged":
+    withTestDir("addedat"):
+      putEnv("BUDDYDRIVE_CONFIG_DIR", testDir)
+      putEnv("BUDDYDRIVE_DATA_DIR", testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      var cfg = newAppConfig(newBuddyId("hh", "heidi"))
+      var buddy: BuddyInfo
+      buddy.id = newBuddyId("buddy-1", "carol")
+      buddy.addedAt = fromUnix(1_790_000_000)
+      cfg.buddies = @[buddy]
+      for _ in 0 ..< 3:
+        buddyconfig.saveConfig(cfg)
+        cfg = buddyconfig.loadConfig()
+      check cfg.buddies[0].addedAt.toUnix() == 1_790_000_000
+
 suite "Folder identity":
   test "newSyncFolder gives every folder an id and a key":
     let a = newSyncFolder("docs", "/tmp/docs")

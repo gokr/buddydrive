@@ -70,11 +70,11 @@ type
     ownerBuddy*: string
   
   ConnectionState* = enum
-    csDisconnected
-    csConnecting
-    csConnected
-    csSyncing
-    csError
+    csDisconnected = "disconnected"
+    csConnecting = "connecting"
+    csConnected = "connected"
+    csSyncing = "syncing"
+    csError = "error"
   
   SyncStatus* = object
     folder*: string

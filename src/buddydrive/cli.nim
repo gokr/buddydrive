@@ -129,6 +129,11 @@ proc parseCli*(): CommandLine =
         result.buddyId = key
       of "code":
         result.pairingCode = key
+      of "port":
+        try:
+          result.controlPort = parseInt(key)
+        except ValueError:
+          result.showHelp = true
       pendingValue = ""
       continue
     
@@ -165,7 +170,12 @@ proc parseCli*(): CommandLine =
         result.generateCode = true
       of "port", "p":
         if val.len > 0:
-          result.controlPort = parseInt(val)
+          try:
+            result.controlPort = parseInt(val)
+          except ValueError:
+            result.showHelp = true
+        else:
+          pendingValue = "port"
       of "daemon", "d":
         result.daemon = true
       of "help", "h":

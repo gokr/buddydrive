@@ -128,7 +128,7 @@ proc configToToml*(config: AppConfig, includeHeader = false): string =
         result.add("storage_path = \"" & escapeToml(buddy.storagePath) & "\"\n")
       if buddy.addresses.len > 0:
         result.add("addresses = [" & buddy.addresses.mapIt("\"" & escapeToml(it) & "\"").join(", ") & "]\n")
-      result.add("added_at = \"" & buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'") & "\"\n")
+      result.add("added_at = \"" & buddy.addedAt.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'") & "\"\n")
 
 proc parseConfigToml*(toml: TomlValueRef): AppConfig =
   result.buddy.uuid = toml["buddy"]["id"].getStr()

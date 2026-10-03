@@ -1,4 +1,4 @@
-import std/[json, net, os, strutils, tables, times, options]
+import std/[json, net, os, strutils, tables, times, options, uri]
 import chronos
 import db_connector/db_sqlite
 import types
@@ -94,7 +94,7 @@ proc writeLiveStatus*(buddyStatuses: seq[BuddyStatus], folderStatuses: seq[SyncS
       db.exec(sql"""
         INSERT INTO buddy_state (id, name, state, latency_ms, last_activity)
         VALUES (?, ?, ?, ?, ?)
-      """, b.id, b.name, $b.state, b.latencyMs, b.lastSync.format("yyyy-MM-dd'T'HH:mm:ss'Z'"))
+      """, b.id, b.name, $b.state, b.latencyMs, b.lastSync.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'"))
     
     db.exec(sql"DELETE FROM folder_state")
     for f in folderStatuses:
@@ -168,7 +168,7 @@ proc parseRequest*(raw: string): tuple[httpMethod: string, path: string, body: s
   let requestLine = head[0].split(" ")
   if requestLine.len >= 2:
     result.httpMethod = requestLine[0]
-    result.path = requestLine[1]
+    result.path = decodeUrl(requestLine[1], decodePlus = false)
   if parts.len > 1:
     result.body = parts[1]
 
@@ -253,7 +253,7 @@ proc buddiesJson(): JsonNode =
       "pairingCode": buddy.pairingCode,
       "state": "disconnected",
       "latencyMs": -1,
-      "lastSync": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+      "lastSync": buddy.addedAt.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
       "syncTime": buddy.syncTime
     })
   %*{"buddies": buddies}
@@ -315,6 +315,7 @@ proc foldersJson(): JsonNode =
   var folders: seq[JsonNode] = @[]
   for folder in cfg.folders:
     var folderJson = %*{
+      "id": folder.id,
       "name": folder.name,
       "path": folder.path,
       "encrypted": folder.encrypted,
@@ -353,7 +354,7 @@ proc configJson(): JsonNode =
       "name": buddy.id.name,
       "pairing_code": buddy.pairingCode,
       "sync_time": buddy.syncTime,
-      "addedAt": buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+      "addedAt": buddy.addedAt.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
       "syncTime": buddy.syncTime
     })
   %*{
@@ -407,6 +408,38 @@ proc addFolderFromBody(body: string): tuple[status: int, response: JsonNode] =
     for item in parsed["buddies"]:
       folder.buddies.add(item.getStr())
   cfg.addFolder(folder)
+  (200, %*{"ok": true})
+
+proc updateFolderFromBody(body: string): tuple[status: int, response: JsonNode] =
+  ## Changes a folder's name, path, sharing or append-only flag. Encryption is
+  ## left alone: switching it would orphan what the buddy already stores.
+  let parsed = parseJson(body)
+  let folderId = parsed{"id"}.getStr("")
+  var cfg = config.loadConfig()
+  var idx = -1
+  for i, folder in cfg.folders:
+    if folderId.len > 0 and folder.id == folderId:
+      idx = i
+  if idx < 0:
+    return (404, %*{"error": "Folder not found", "code": "FOLDER_NOT_FOUND"})
+
+  let name = parsed{"name"}.getStr(cfg.folders[idx].name)
+  let path = parsed{"path"}.getStr(cfg.folders[idx].path)
+  if name.len == 0 or path.len == 0:
+    return (400, %*{"error": "name and path are required", "code": "INVALID_REQUEST"})
+  for i, folder in cfg.folders:
+    if i != idx and folder.name == name:
+      return (409, %*{"error": "A folder with that name already exists", "code": "FOLDER_EXISTS"})
+
+  cfg.folders[idx].name = name
+  cfg.folders[idx].path = path
+  if parsed.hasKey("appendOnly"):
+    cfg.folders[idx].appendOnly = parsed["appendOnly"].getBool(false)
+  if parsed.hasKey("buddies"):
+    cfg.folders[idx].buddies = @[]
+    for item in parsed["buddies"]:
+      cfg.folders[idx].buddies.add(item.getStr())
+  config.saveConfig(cfg)
   (200, %*{"ok": true})
 
 proc removeFolderByName(name: string): tuple[status: int, response: JsonNode] =
@@ -664,6 +697,9 @@ proc handleRequest*(raw: string): string =
       of "/config/reload":
         discard config.loadConfig()
         jsonResponse(200, %*{"ok": true})
+      of "/folders/update":
+        let resp = updateFolderFromBody(req.body)
+        jsonResponse(resp.status, resp.response)
       of "/folders":
         let resp = addFolderFromBody(req.body)
         jsonResponse(resp.status, resp.response)
