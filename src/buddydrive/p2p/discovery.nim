@@ -25,6 +25,7 @@ type
   DiscoveryService* = ref object
     node*: BuddyNode
     apiBaseUrl*: string
+    selfId*: string
     started*: bool
 
   BuddyRecord* = object
@@ -40,8 +41,12 @@ const
   AuthKeyContext = "/auth"
   PublishInterval* = chronos.seconds(4 * 60 * 60)
 
-proc deriveDiscoveryKey*(pairingCode: string): string =
-  let hash = crypto_generichash(pairingCode & DiscoveryKeyContext, 32)
+proc deriveDiscoveryKey*(pairingCode: string, ownerId: string): string =
+  ## Where one side of a pair publishes its record. Both buddies hold the same
+  ## pairing code, so the owner's id is part of the key: each side publishes
+  ## under its own id and looks the other up under theirs, instead of both
+  ## writing, and reading back, a single record.
+  let hash = crypto_generichash(pairingCode & "/" & ownerId & DiscoveryKeyContext, 32)
   var hashBytes = newSeq[byte](hash.len)
   for i in 0 ..< hash.len:
     hashBytes[i] = byte(hash[i])
@@ -79,10 +84,11 @@ proc discoveryRecordJson*(
     j["relayRegion"] = %relayRegion
   $j
 
-proc newDiscovery*(node: BuddyNode, apiBaseUrl: string): DiscoveryService =
+proc newDiscovery*(node: BuddyNode, apiBaseUrl: string, selfId: string): DiscoveryService =
   result = DiscoveryService()
   result.node = node
   result.apiBaseUrl = apiBaseUrl
+  result.selfId = selfId
   result.started = false
 
 proc shouldInitiate*(myBuddyId: string, myPubliclyReachable: bool, buddyId: string, buddyRecord: BuddyRecord): bool =
@@ -105,7 +111,7 @@ proc publishBuddy*(discovery: DiscoveryService, buddy: BuddyInfo, relayRegion: s
   if buddy.pairingCode.len == 0:
     return false
 
-  let discoveryKey = try: deriveDiscoveryKey(buddy.pairingCode) except: return false
+  let discoveryKey = try: deriveDiscoveryKey(buddy.pairingCode, discovery.selfId) except: return false
   let authKey = try: deriveAuthKey(buddy.pairingCode) except: return false
 
   let recordJson = discoveryRecordJson(
@@ -134,7 +140,7 @@ proc publishBuddy*(discovery: DiscoveryService, buddy: BuddyInfo, relayRegion: s
     return false
 
 proc unpublishBuddy*(discovery: DiscoveryService, pairingCode: string): bool =
-  let discoveryKey = try: deriveDiscoveryKey(pairingCode) except: return false
+  let discoveryKey = try: deriveDiscoveryKey(pairingCode, discovery.selfId) except: return false
   let authKey = try: deriveAuthKey(pairingCode) except: return false
   let hmacHex = try: computeHmac(authKey, "") except: return false
 
@@ -151,11 +157,11 @@ proc unpublishBuddy*(discovery: DiscoveryService, pairingCode: string): bool =
     echo "Error unpublishing discovery: ", e.msg
     return false
 
-proc findBuddy*(discovery: DiscoveryService, pairingCode: string): Option[BuddyRecord] =
+proc findBuddy*(discovery: DiscoveryService, pairingCode: string, buddyId: string): Option[BuddyRecord] =
   if not discovery.started:
     return none(BuddyRecord)
 
-  let discoveryKey = try: deriveDiscoveryKey(pairingCode) except: return none(BuddyRecord)
+  let discoveryKey = try: deriveDiscoveryKey(pairingCode, buddyId) except: return none(BuddyRecord)
   let url = discovery.apiBaseUrl & "/discovery/" & discoveryKey
 
   try:

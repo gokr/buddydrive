@@ -302,7 +302,7 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
 
     daemon.startupReachabilityDiagnostic()
     
-    daemon.discovery = newDiscovery(daemon.node, daemon.config.apiBaseUrl)
+    daemon.discovery = newDiscovery(daemon.node, daemon.config.apiBaseUrl, daemon.config.buddy.uuid)
     await daemon.discovery.start()
 
     if daemon.config.buddies.len > 0:
@@ -614,7 +614,7 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
       )
       continue
     try:
-      let record = daemon.discovery.findBuddy(buddy.pairingCode)
+      let record = daemon.discovery.findBuddy(buddy.pairingCode, buddy.id.uuid)
       if record.isSome:
         let rec = record.get()
         if not shouldInitiate(daemon.config.buddy.uuid, myPubliclyReachable, buddy.id.uuid, rec):

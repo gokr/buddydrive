@@ -102,6 +102,34 @@ proc handleRequest(client: Socket) =
   if contentLength > 0:
     body = client.recv(contentLength, timeout = 5000)
 
+  if path.startsWith("/discovery/"):
+    # Discovery records, keyed as the client derives them. HMACs are not
+    # checked: the stub cannot know the pairing code behind them.
+    let recordKey = "discovery:" & path[11 .. ^1]
+    case httpMethod
+    of "PUT":
+      withLock storeLock:
+        store[recordKey] = body
+      respond(client, "201 Created")
+    of "GET":
+      var value = ""
+      var found = false
+      withLock storeLock:
+        found = recordKey in store
+        if found:
+          value = store[recordKey]
+      if found:
+        respond(client, "200 OK", value)
+      else:
+        respond(client, "404 Not Found")
+    of "DELETE":
+      withLock storeLock:
+        store.del(recordKey)
+      respond(client, "204 No Content")
+    else:
+      respond(client, "405 Method Not Allowed")
+    return
+
   if not path.startsWith("/kv/"):
     respond(client, "404 Not Found")
     return
