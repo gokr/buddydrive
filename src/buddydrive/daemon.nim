@@ -195,10 +195,26 @@ proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
       if existing != nil:
         await existing.close()
     daemon.buddyConnections[bc.buddyId] = bc
-    asyncSpawn daemon.runBuddySync(bc)
+    # libp2p closes an incoming stream as soon as its handler returns, so the
+    # session has to run to the end inside the handler.
+    await daemon.runBuddySync(bc)
   else:
     echo "Rejected connection from unknown buddy"
     await bc.close()
+
+proc mountPairingProtocol*(daemon: Daemon) {.async.} =
+  ## Accepts buddies dialing in on the started node.
+  let pairingHandler = proc(conn: Connection, proto: string): Future[void] {.closure, gcsafe, async: (raises: [CancelledError]).} =
+    try:
+      await daemon.handleIncomingConnection(conn)
+    except CancelledError:
+      raise
+    except CatchableError:
+      discard
+
+  let pairingProto = LPProtocol.new(@[PairingProtocol], pairingHandler)
+  await pairingProto.start()
+  daemon.node.switch.mount(pairingProto)
 
 proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).}
 
@@ -283,17 +299,7 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     await daemon.node.start()
     daemon.syncProtocol = newSyncProtocol(daemon.node)
 
-    let pairingHandler = proc(conn: Connection, proto: string): Future[void] {.closure, gcsafe, async: (raises: [CancelledError]).} =
-      try:
-        await daemon.handleIncomingConnection(conn)
-      except CancelledError:
-        raise
-      except CatchableError:
-        discard
-
-    let pairingProto = LPProtocol.new(@[PairingProtocol], pairingHandler)
-    await pairingProto.start()
-    daemon.node.switch.mount(pairingProto)
+    await daemon.mountPairingProtocol()
 
     echo "Node started with Peer ID: ", daemon.node.peerIdStr()
     
