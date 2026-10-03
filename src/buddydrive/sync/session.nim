@@ -8,6 +8,7 @@ import ../p2p/messages
 import ../p2p/protocol
 import transfer
 import storage
+import ../logutils
 
 ## A sync session between two buddies is two backups over one connection:
 ## each side's folders are stored, encrypted, on the other side. The side that
@@ -31,6 +32,19 @@ proc applicableFolders(config: AppConfig, buddyId: string): seq[FolderConfig] =
       result.add(folder)
   result.sort(proc(a, b: FolderConfig): int = cmp(folderWireId(a), folderWireId(b)))
 
+proc logSession(message: string) =
+  {.cast(gcsafe).}:
+    try:
+      logWarn("Sync: " & message)
+    except Exception:
+      discard
+
+proc sessionFailed(reason: string): bool =
+  ## Every way a session can give up says why; a bare "failed" is useless
+  ## when two machines are involved.
+  logSession("stopped: " & reason)
+  false
+
 const
   SessionEndTimeout = chronos.seconds(10)
   SessionEndLingerTimeout = chronos.seconds(2)
@@ -50,12 +64,12 @@ type
 proc sendOwnerLists(owned: seq[OwnedFolder], conn: Connection, protocol: SyncProtocol): Future[bool] {.async.} =
   for folder in owned:
     if not await folder.transfer.sendFileList(conn, folder.files):
-      return false
+      return sessionFailed("could not send the file list of " & folder.transfer.scanner.folder.name)
   try:
     await protocol.sendMessage(conn, newSyncDone())
     true
-  except CatchableError:
-    false
+  except CatchableError as e:
+    sessionFailed("could not finish sending file lists: " & e.msg)
 
 proc receiveOwnerLists(conn: Connection, protocol: SyncProtocol): Future[seq[ProtocolMessage]] {.async.} =
   var seen = initHashSet[string]()
@@ -156,10 +170,11 @@ proc ownerServePhase(folder: OwnedFolder, conn: Connection): Future[bool] {.asyn
   for info in folder.files:
     pathsByWireName[info.encryptedPath] = info.path
 
+  let folderName = transfer.scanner.folder.name
   while true:
     let msgOpt = await transfer.protocol.receiveMessage(conn)
     if msgOpt.isNone():
-      return false
+      return sessionFailed("connection lost while the buddy fetched " & folderName)
 
     let msg = msgOpt.get()
     case msg.kind
@@ -170,17 +185,20 @@ proc ownerServePhase(folder: OwnedFolder, conn: Connection): Future[bool] {.asyn
         try:
           await transfer.protocol.sendMessage(conn, newFileAck(false))
         except CatchableError:
-          return false
+          return sessionFailed("connection lost while the buddy fetched " & folderName)
       else:
-        discard await transfer.sendFileData(conn, pathsByWireName[msg.requestPath], msg.requestOffset, msg.requestLength)
+        let path = pathsByWireName[msg.requestPath]
+        if not await transfer.sendFileData(conn, path, msg.requestOffset, msg.requestLength):
+          logSession("could not send " & folderName & "/" & path & " to the buddy")
     else:
-      return false
+      return sessionFailed("unexpected " & $msg.kind & " while the buddy fetched " & folderName)
 
 proc ownerSyncFolder(folder: OwnedFolder, conn: Connection): Future[bool] {.async.} =
   let transfer = folder.transfer
+  let folderName = transfer.scanner.folder.name
   let storedOpt = await transfer.requestListPaths(conn)
   if storedOpt.isNone():
-    return false
+    return sessionFailed("the buddy did not say what it stores of " & folderName)
 
   let plan = computeOwnerPlan(transfer, folder.files, readableStored(transfer, storedOpt.get()))
 
@@ -200,7 +218,8 @@ proc ownerSyncFolder(folder: OwnedFolder, conn: Connection): Future[bool] {.asyn
     let target = safeJoin(transfer.scanner.rootPath, held.path)
     if target.isNone or fileExists(target.get()) or symlinkExists(target.get()):
       continue
-    discard await transfer.syncFile(conn, held, held.encryptedPath)
+    if not await transfer.syncFile(conn, held, held.encryptedPath):
+      logSession("could not restore " & folderName & "/" & held.path & " from the buddy")
 
   try:
     await transfer.protocol.sendMessage(conn, newSyncDone())
@@ -219,10 +238,11 @@ proc ownerSyncFolder(folder: OwnedFolder, conn: Connection): Future[bool] {.asyn
 
 proc storageOwnerPhase(storage: StorageFolder, conn: Connection): Future[bool] {.async.} =
   ## Carries out the owner's instructions and answers its restore requests.
+  let folderName = storage.folderName
   while true:
     let msgOpt = await storage.protocol.receiveMessage(conn)
     if msgOpt.isNone():
-      return false
+      return sessionFailed("connection lost while the buddy updated its " & folderName)
 
     let msg = msgOpt.get()
     case msg.kind
@@ -230,35 +250,40 @@ proc storageOwnerPhase(storage: StorageFolder, conn: Connection): Future[bool] {
       return true
     of msgListPathsRequest:
       if msg.listFolderId != storage.folderId:
-        return false
+        return sessionFailed("the buddy asked about folder " & msg.listFolderId & " while syncing " & folderName)
       var entries: seq[FileEntry] = @[]
       for info in storage.listStored():
         entries.add(toFileEntry(info))
       try:
         await storage.protocol.sendMessage(conn, newListPathsResponse(storage.folderId, entries))
-      except CatchableError:
-        return false
+      except CatchableError as e:
+        return sessionFailed("could not list what we store of " & folderName & ": " & e.msg)
     of msgMoveFile:
       discard storage.applyMove(msg.oldPath, msg.newPath)
     of msgFileDelete:
       discard storage.applyDelete(msg.deletedPath)
     of msgFileRequest:
-      discard await storage.serveRestore(conn, msg.requestPath, msg.requestOffset, msg.requestLength)
+      if not await storage.serveRestore(conn, msg.requestPath, msg.requestOffset, msg.requestLength):
+        logSession("could not send a stored file of " & folderName & " back to the buddy")
     else:
-      return false
+      return sessionFailed("unexpected " & $msg.kind & " while the buddy updated its " & folderName)
 
 proc storageFetchPhase(storage: StorageFolder, conn: Connection, ownerFiles: seq[FileInfo]): Future[bool] {.async.} =
   let work = storage.filesToFetch(ownerFiles)
+  var failures = 0
   for info in work.fetch:
-    discard await storage.storeFromOwner(conn, info)
+    if not await storage.storeFromOwner(conn, info):
+      inc failures
+  if failures > 0:
+    logSession("could not store " & $failures & " of " & $work.fetch.len & " files of the buddy's " & storage.folderName)
   for info in work.metadata:
     discard storage.updateMetadata(info)
 
   try:
     await storage.protocol.sendMessage(conn, newSyncDone())
     true
-  except CatchableError:
-    false
+  except CatchableError as e:
+    sessionFailed("connection lost after storing the buddy's " & storage.folderName & ": " & e.msg)
 
 proc runOwnerRound(owned: seq[OwnedFolder], conn: Connection): Future[bool] {.async.} =
   for folder in owned:
@@ -277,8 +302,8 @@ proc runStorageRound(
     let storage =
       try:
         newStorageFolder(config, buddyId, listing, protocol)
-      except CatchableError:
-        return false
+      except CatchableError as e:
+        return sessionFailed("could not prepare storage for the buddy's " & listing.folderName & ": " & e.msg)
     defer: storage.close()
 
     var ownerFiles: seq[FileInfo] = @[]
