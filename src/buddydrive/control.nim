@@ -1,8 +1,9 @@
-import std/[json, net, os, random, strutils, tables, times, options]
+import std/[json, net, os, strutils, tables, times, options]
 import chronos
 import db_connector/db_sqlite
 import types
 import config
+import crypto
 import control_web
 import recovery
 import sync/config_sync
@@ -385,14 +386,7 @@ proc logsJson(): JsonNode =
   %*{"logs": logs}
 
 proc pairingCodeJson(): JsonNode =
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-  randomize()
-  var code = ""
-  for _ in 0 .. 3:
-    code.add(chars[rand(chars.high)])
-  code.add('-')
-  for _ in 0 .. 3:
-    code.add(chars[rand(chars.high)])
+  let code = generatePairingCode()
   let cfg = config.loadConfig()
   %*{
     "buddyId": cfg.buddy.uuid,

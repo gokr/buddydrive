@@ -210,6 +210,7 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **SQLite index is cache**: both sides maintain indexes for performance, but restore only needs the folder key + buddy's filesystem.
 - **Restore flow**: recover config from relay → connect to buddy → list encrypted paths → decrypt paths → request missing files → verify hashes → rebuild index
 - **Discovery publishes public addresses only** (plus `announce_addr`). LAN buddies are reached via per-buddy `addresses` in config, dialed first.
+- **Pairing codes** come from libsodium's CSPRNG (`generatePairingCode` in `crypto.nim`), never `std/random`.
 - **Wire protocol version 5** (`ProtocolVersion` in `messages.nim`): older peers are rejected at the handshake.
 
 ### Remaining Work

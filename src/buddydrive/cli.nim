@@ -17,9 +17,10 @@ import recovery
 import sync/policy
 import sync/config_sync
 
+export crypto.generatePairingCode
+
 proc generateBuddyName*(): string
 proc generateUuid*(): string
-proc generatePairingCode*(): string
 
 type
   CommandKind* = enum
@@ -931,12 +932,3 @@ proc generateUuid*(): string =
   let uuid = genUuid()
   result = $uuid
 
-proc generatePairingCode*(): string =
-  randomize()
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-  result = ""
-  for i in 0..3:
-    result.add(chars[rand(chars.len - 1)])
-  result.add("-")
-  for i in 0..3:
-    result.add(chars[rand(chars.len - 1)])
