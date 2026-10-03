@@ -40,6 +40,7 @@ nimble testConfig
 nimble testCrypto
 nimble testRecovery
 nimble testPolicy
+nimble testAddrs
 nimble testScanner
 nimble testIndex
 nimble testMessages
@@ -92,6 +93,7 @@ src/
     ├── nat.nim                 # NAT traversal (UPnP, CGNAT detection)
     ├── p2p/
     │   ├── node.nim            # libp2p node setup
+    │   ├── addrs.nim           # Address selection: what to publish, what to dial
     │   ├── discovery.nim       # KV-store relay discovery (publish/lookup via relay, HMAC auth)
     │   ├── protocol.nim        # BuddyDrive sync protocol
     │   ├── pairing.nim         # Buddy pairing handshake
@@ -207,6 +209,7 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **Hash verification on restore**: `verifyRestoredFile` re-scans and checks hash after write.
 - **SQLite index is cache**: both sides maintain indexes for performance, but restore only needs the folder key + buddy's filesystem.
 - **Restore flow**: recover config from relay → connect to buddy → list encrypted paths → decrypt paths → request missing files → verify hashes → rebuild index
+- **Discovery publishes public addresses only** (plus `announce_addr`). LAN buddies are reached via per-buddy `addresses` in config, dialed first.
 - **Wire protocol version 5** (`ProtocolVersion` in `messages.nim`): older peers are rejected at the handshake.
 
 ### Remaining Work

@@ -139,6 +139,7 @@ journalctl -u buddydrive -f
 | `buddy-pairing-code` | `<buddy-id> <code>` | Set pairing code for a buddy |
 | `buddy-name` | `<name>` | Update your buddy display name |
 | `buddy-sync-time` | `<buddy-id> <HH:MM>` | Set per-buddy sync time (empty = always) |
+| `buddy-addresses` | `<buddy-id> <multiaddr[,multiaddr]\|none>` | Known addresses for a buddy, dialed before discovered ones (e.g. a buddy on your LAN) |
 | `buddy-storage-path` | `<buddy-id> <path\|default>` | Folder where this buddy's backups are kept on your machine |
 | `folder-append-only` | `<folder-name> <on\|off>` | Toggle folder append-only mode |
 
@@ -320,8 +321,19 @@ name = "cranky-wrench"
 pairing_code = "ABCD-EFGH"
 sync_time = "03:00"
 storage_path = "/mnt/backup/cranky-wrench"
+addresses = ["/ip4/192.168.1.101/tcp/41721"]   # optional, see below
 added_at = "2026-04-10T12:00:00Z"
 ```
+
+### Buddies on the Same Network
+
+Discovery records only carry public addresses (plus any `announce_addr`); private LAN addresses are never published. If a buddy is on your own network, for example while testing, give each side the other's LAN address:
+
+```bash
+buddydrive config set buddy-addresses <buddy-id> /ip4/192.168.1.101/tcp/41721
+```
+
+Those addresses are dialed first. The buddy still has to be found through discovery once, since that is where its peer ID comes from.
 
 ### Where a Buddy's Files Are Kept
 

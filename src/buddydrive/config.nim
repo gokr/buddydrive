@@ -124,6 +124,8 @@ proc configToToml*(config: AppConfig, includeHeader = false): string =
         result.add("sync_time = \"" & escapeToml(buddy.syncTime) & "\"\n")
       if buddy.storagePath.len > 0:
         result.add("storage_path = \"" & escapeToml(buddy.storagePath) & "\"\n")
+      if buddy.addresses.len > 0:
+        result.add("addresses = [" & buddy.addresses.mapIt("\"" & escapeToml(it) & "\"").join(", ") & "]\n")
       result.add("added_at = \"" & buddy.addedAt.format("yyyy-MM-dd'T'HH:mm:ss'Z'") & "\"\n")
 
 proc parseConfigToml*(toml: TomlValueRef): AppConfig =
@@ -178,6 +180,10 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
       buddy.pairingCode = buddyTbl{"pairing_code"}.getStr("")
       buddy.syncTime = buddyTbl{"sync_time"}.getStr("")
       buddy.storagePath = buddyTbl{"storage_path"}.getStr("")
+      buddy.addresses = @[]
+      if "addresses" in buddyTbl:
+        for address in buddyTbl["addresses"].getElems():
+          buddy.addresses.add(address.getStr())
       buddy.addedAt = parseTime(buddyTbl{"added_at"}.getStr("1970-01-01T00:00:00Z"), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
       result.buddies.add(buddy)
 

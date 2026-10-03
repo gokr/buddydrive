@@ -9,6 +9,7 @@ import libp2p/stream/connection
 from libp2p/protocols/protocol import LPProtocol
 import types
 import p2p/node
+import p2p/addrs
 import p2p/discovery
 import p2p/protocol
 import p2p/pairing
@@ -71,51 +72,6 @@ proc newDaemon*(config: AppConfig): Daemon =
 
   if config.recovery.enabled and config.recovery.masterKey.len > 0:
     result.masterKey = some(hexToBytes(config.recovery.masterKey))
-
-proc isPrivateOrLoopback(ma: MultiAddress): bool =
-  let s = $ma
-  if s.contains("/p2p-circuit"):
-    return true
-  if s.startsWith("/ip4/127.") or s.startsWith("/ip4/10.") or
-      s.startsWith("/ip4/192.168.") or s.startsWith("/ip4/169.254."):
-    return true
-  if s.startsWith("/ip4/172."):
-    let parts = s.split("/")
-    if parts.len > 2:
-      let octets = parts[2].split(".")
-      if octets.len > 1:
-        try:
-          let second = parseInt(octets[1])
-          return second >= 16 and second <= 31
-        except ValueError:
-          discard
-  if s.startsWith("/ip4/100."):
-    let parts = s.split("/")
-    if parts.len > 2:
-      let octets = parts[2].split(".")
-      if octets.len > 1:
-        try:
-          let second = parseInt(octets[1])
-          return second >= 64 and second <= 127
-        except ValueError:
-          discard
-  if s.startsWith("/ip6/::1") or s.startsWith("/ip6/fc") or
-      s.startsWith("/ip6/fd") or s.startsWith("/ip6/fe80"):
-    return true
-  false
-
-proc isRelayAddress(ma: MultiAddress): bool =
-  ($ma).contains("/p2p-circuit")
-
-proc directDialableAddrs(addrs: seq[MultiAddress]): seq[MultiAddress] =
-  for ma in addrs:
-    let s = $ma
-    if isRelayAddress(ma):
-      continue
-    if isPrivateOrLoopback(ma):
-      continue
-    if s.contains("/tcp/"):
-      result.add(ma)
 
 proc hasDirectReachability(addrs: seq[MultiAddress]): bool =
   directDialableAddrs(addrs).len > 0
@@ -478,6 +434,14 @@ proc buddyPairingCode(config: AppConfig, buddyId: string): string =
     if buddy.id.uuid == buddyId:
       return buddy.pairingCode
 
+proc configuredBuddyAddrs(config: AppConfig, buddyId: string): seq[MultiAddress] =
+  ## Addresses set by hand in [[buddies]] addresses, dialed before anything
+  ## discovery found. Meant for buddies on the same network, whose private
+  ## addresses are never published.
+  for buddy in config.buddies:
+    if buddy.id.uuid == buddyId:
+      return parseAddrs(buddy.addresses)
+
 proc connectToBuddyViaRelay(daemon: Daemon, buddyId: string): Future[bool] {.async: (raises: []).} =
   let pairingCode = buddyPairingCode(daemon.config, buddyId)
   if daemon.config.relayRegion.len == 0 or pairingCode.len == 0:
@@ -524,7 +488,7 @@ proc explainDirectConnectivityFailure(addrs: seq[MultiAddress]): string =
 
   let privateOnly = addrs.allIt(isPrivateOrLoopback(it))
   if privateOnly:
-    return "buddy only advertised private or loopback addresses"
+    return "buddy only advertised private addresses, and none of them is on our local network"
 
   "no public TCP address was found among discovered addresses"
 
@@ -533,7 +497,10 @@ proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq
     return false
 
   let directPhaseStartedAt = getTime()
-  let dialAddrs = directDialableAddrs(addrs)
+  var dialAddrs = configuredBuddyAddrs(daemon.config, buddyId)
+  for ma in lanDialableAddrs(addrs, daemon.node.getAddrs()) & directDialableAddrs(addrs):
+    if ma notin dialAddrs:
+      dialAddrs.add(ma)
   if dialAddrs.len == 0:
     let elapsedSeconds = int((getTime() - directPhaseStartedAt).inSeconds)
     if elapsedSeconds < RelayJoinDelaySeconds:
@@ -656,7 +623,7 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
             addrs.add(maRes.get())
 
         let pidRes = PeerID.init(rec.peerId)
-        if pidRes.isOk and addrs.len > 0:
+        if pidRes.isOk and (addrs.len > 0 or buddy.addresses.len > 0):
           discard await daemon.connectToBuddy(buddy.id.uuid, pidRes.get(), addrs)
         elif addrs.len == 0:
           if rec.relayRegion.len > 0:
@@ -696,7 +663,7 @@ proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
               addrs.add(maRes.get())
 
           let pidRes = PeerID.init(cached.get().peerId)
-          if pidRes.isOk and addrs.len > 0:
+          if pidRes.isOk and (addrs.len > 0 or buddy.addresses.len > 0):
             discard await daemon.connectToBuddy(buddy.id.uuid, pidRes.get(), addrs)
           elif cached.get().relayRegion.len > 0:
             daemon.logDiagnostic(

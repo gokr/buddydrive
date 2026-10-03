@@ -223,11 +223,13 @@ suite "Buddy management":
       custom.storagePath = testDir / "carol-backups"
       var plain: BuddyInfo
       plain.id = newBuddyId("plain-uuid", "dave")
+      plain.addresses = @["/ip4/192.168.1.101/tcp/41721"]
       cfg.buddies = @[custom, plain]
       buddyconfig.saveConfig(cfg)
 
       let reloaded = buddyconfig.loadConfig()
       check reloaded.buddies[0].storagePath == testDir / "carol-backups"
+      check reloaded.buddies[1].addresses == @["/ip4/192.168.1.101/tcp/41721"]
       check reloaded.buddyStorageRoot("custom-uuid") == testDir / "carol-backups"
       check reloaded.buddyStorageRoot("plain-uuid") == testDir / "storage" / "plain-uuid"
 

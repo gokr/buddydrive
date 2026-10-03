@@ -10,6 +10,7 @@ import libp2p/multiaddress
 import libp2p/crypto/crypto
 import libp2p/nameresolving/dnsresolver
 import synchandler
+import addrs
 import ../types
 
 export results
@@ -106,9 +107,7 @@ proc getAddrs*(node: BuddyNode): seq[MultiAddress] =
   result = node.peerInfo.addrs
 
 proc getAdvertisedAddrs*(node: BuddyNode): seq[MultiAddress] =
-  if node.announceAddrs.len > 0:
-    return node.announceAddrs
-  node.getAddrs()
+  publishableAddrs(node.announceAddrs, node.getAddrs())
 
 proc peerIdStr*(node: BuddyNode): string =
   $node.peerId
