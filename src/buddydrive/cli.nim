@@ -468,9 +468,7 @@ proc handleAddFolder*(cmd: CommandLine) =
     echo "Error: Folder name already exists: ", cmd.folderName
     return
   
-  var folder = newFolderConfig(cmd.folderName, absPath, cmd.folderEncrypted)
-  folder.id = generateUuid()
-  folder.folderKey = crypto.generateKey()
+  var folder = newSyncFolder(cmd.folderName, absPath, cmd.folderEncrypted)
   folder.appendOnly = cmd.folderAppendOnly
   
   if cmd.buddyId.len > 0:

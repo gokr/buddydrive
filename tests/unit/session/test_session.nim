@@ -198,6 +198,22 @@ suite "Session sync":
 
       check readFile(testDir / "b-stores" / "folder-a" / "sub" / "shared.txt") == "shared data\n"
 
+  test "an encrypted folder without a key is never sent":
+    withTestDir("session_no_key"):
+      let folderA = testDir / "a"
+      createDir(folderA)
+      createDir(testDir / "b")
+      writeFile(folderA / "secret.txt", "top secret\n")
+      var keyless = syncFolder("folder-a", folderA)
+      keyless.folderKey = ""
+      let cfgA = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[keyless])
+      let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")])
+
+      syncBoth(cfgA, cfgB)
+
+      check not dirExists(testDir / "b-stores" / "folder-a")
+      check not anyFileMentions(testDir / "b-stores", ["secret"])
+
   test "a buddy's file list cannot reach outside its storage folder":
     withTestDir("session_traversal"):
       let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[])

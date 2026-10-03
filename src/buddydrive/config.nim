@@ -4,7 +4,9 @@ import std/times
 import std/strutils
 import std/sequtils
 import parsetoml
+import uuids
 import types
+import crypto
 import logutils
 
 export newAppConfig
@@ -253,6 +255,29 @@ proc getFolder*(config: AppConfig, name: string): int =
     if folder.name == name:
       return i
   return -1
+
+proc newSyncFolder*(name, path: string, encrypted = true): FolderConfig =
+  ## The only way folders should be created. A folder needs a stable id so a
+  ## rename does not orphan its backup, and its own key: an "encrypted" folder
+  ## without one would go to the buddy in plain form.
+  result = newFolderConfig(name, path, encrypted)
+  result.id = $genUuid()
+  result.folderKey = generateKey()
+
+proc hasUsableKey*(folder: FolderConfig): bool =
+  folder.folderKey.len == KeySize
+
+proc ensureFolderIdentities*(config: var AppConfig): seq[string] =
+  ## Gives folders created without an id or key (older GUIs did this) the ones
+  ## they should have had. Returns what was changed, for logging.
+  for folder in config.folders.mitems:
+    if folder.id.len == 0:
+      folder.id = $genUuid()
+      result.add("folder " & folder.name & " had no id; assigned " & folder.id)
+    if not folder.hasUsableKey():
+      folder.folderKey = generateKey()
+      result.add("folder " & folder.name & " had no encryption key; generated one" &
+        (if folder.encrypted: ". Files already sent to a buddy from it were not encrypted" else: ""))
 
 proc storageBaseDir*(config: AppConfig): string =
   if config.storageBasePath.len > 0:

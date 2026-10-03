@@ -397,9 +397,12 @@ proc pairingCodeJson(): JsonNode =
 proc addFolderFromBody(body: string): tuple[status: int, response: JsonNode] =
   let parsed = parseJson(body)
   var cfg = config.loadConfig()
-  var folder = newFolderConfig(parsed{"name"}.getStr(""), parsed{"path"}.getStr(""), parsed{"encrypted"}.getBool(true))
+  var folder = newSyncFolder(parsed{"name"}.getStr(""), parsed{"path"}.getStr(""), parsed{"encrypted"}.getBool(true))
   if folder.name.len == 0 or folder.path.len == 0:
     return (400, %*{"error": "name and path are required", "code": "INVALID_REQUEST"})
+  if cfg.getFolder(folder.name) >= 0:
+    return (409, %*{"error": "A folder with that name already exists", "code": "FOLDER_EXISTS"})
+  folder.appendOnly = parsed{"appendOnly"}.getBool(parsed{"append_only"}.getBool(false))
   if parsed.hasKey("buddies"):
     for item in parsed["buddies"]:
       folder.buddies.add(item.getStr())
@@ -446,11 +449,19 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
   if parsed.hasKey("folders"):
     cfg.folders = @[]
     for item in parsed["folders"].getElems():
-      var folder = newFolderConfig(
+      var folder = newSyncFolder(
         item{"name"}.getStr(""),
         item{"path"}.getStr(""),
         item{"encrypted"}.getBool(true)
       )
+      # An existing folder keeps its id and key; replacing the key would make
+      # its backup unreadable.
+      let itemId = item{"id"}.getStr("")
+      for existing in oldCfg.folders:
+        if (itemId.len > 0 and existing.id == itemId) or (itemId.len == 0 and existing.name == folder.name):
+          folder.id = existing.id
+          folder.folderKey = existing.folderKey
+          break
       folder.appendOnly = item{"append_only"}.getBool(false)
       if item.hasKey("buddies"):
         for buddyId in item["buddies"].getElems():
@@ -472,6 +483,8 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
       for oldBuddy in oldCfg.buddies:
         if oldBuddy.id.uuid == buddyId:
           buddy.addedAt = oldBuddy.addedAt
+          buddy.storagePath = oldBuddy.storagePath
+          buddy.addresses = oldBuddy.addresses
           break
       if item.hasKey("addedAt"):
         try:

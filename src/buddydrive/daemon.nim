@@ -17,6 +17,7 @@ import p2p/rawrelay
 import sync/policy
 import sync/session
 import config
+import logutils
 import sync/scanner
 import control
 import nat
@@ -201,6 +202,19 @@ proc handleIncomingConnection*(daemon: Daemon, conn: Connection) {.async.} =
 
 proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).}
 
+proc repairFolderIdentities(daemon: Daemon) =
+  ## Folders made without an id or key get them before anything is synced.
+  {.cast(gcsafe).}:
+    try:
+      let changes = daemon.config.ensureFolderIdentities()
+      if changes.len > 0:
+        saveConfig(daemon.config)
+        daemon.configMtime = getLastModificationTime(getConfigPath())
+        for change in changes:
+          logWarn("Config repaired: " & change)
+    except Exception as e:
+      echo "Could not repair folder config: ", e.msg
+
 proc reloadConfigIfChanged(daemon: Daemon) {.gcsafe.} =
   {.cast(gcsafe).}:
     try:
@@ -210,6 +224,7 @@ proc reloadConfigIfChanged(daemon: Daemon) {.gcsafe.} =
         daemon.config = loadConfig()
         daemon.configMtime = mtime
         echo "Config reloaded from disk"
+        daemon.repairFolderIdentities()
     except CatchableError as e:
       echo "Config reload failed: ", e.msg
 
@@ -232,6 +247,7 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
     return
   
   echo "Starting daemon..."
+  daemon.repairFolderIdentities()
 
   for folder in daemon.config.folders:
     cleanupTempFiles(folder.path)

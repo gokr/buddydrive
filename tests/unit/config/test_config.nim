@@ -185,6 +185,26 @@ suite "Folder management":
       check cfg.getFolder("b") == 1
       check cfg.getFolder("c") == -1
 
+suite "Folder identity":
+  test "newSyncFolder gives every folder an id and a key":
+    let a = newSyncFolder("docs", "/tmp/docs")
+    let b = newSyncFolder("docs", "/tmp/docs")
+    check a.id.len > 0
+    check a.hasUsableKey()
+    check a.id != b.id
+    check a.folderKey != b.folderKey
+
+  test "ensureFolderIdentities repairs folders made without them":
+    var cfg = newAppConfig(newBuddyId("hh", "heidi"))
+    cfg.folders = @[newFolderConfig("gui-made", "/tmp/a"), newSyncFolder("fine", "/tmp/b")]
+    let untouched = cfg.folders[1]
+    let changes = cfg.ensureFolderIdentities()
+    check changes.len == 2
+    check cfg.folders[0].id.len > 0
+    check cfg.folders[0].hasUsableKey()
+    check cfg.folders[1] == untouched
+    check cfg.ensureFolderIdentities().len == 0
+
 suite "Buddy management":
   test "addBuddy adds and persists buddy":
     withTestDir("addbuddy"):

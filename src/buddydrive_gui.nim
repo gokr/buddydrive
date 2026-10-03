@@ -650,7 +650,7 @@ proc onAddFolderResponse(w: GtkWindow, responseId: cint, userData: pointer) {.cd
     if name.len > 0 and path.len > 0:
       if data.originalName.len == 0:
         var cfg = currentConfig()
-        var folder = newFolderConfig(name, path, encrypted)
+        var folder = newSyncFolder(name, path, encrypted)
         folder.appendOnly = appendOnly
         folder.buddies = buddyIds
         cfg.addFolder(folder)

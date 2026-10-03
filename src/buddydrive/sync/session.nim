@@ -22,7 +22,11 @@ proc folderAppliesToBuddy(folder: FolderConfig, buddyId: string): bool =
   folder.buddies.len == 0 or buddyId in folder.buddies
 
 proc applicableFolders(config: AppConfig, buddyId: string): seq[FolderConfig] =
+  ## An encrypted folder without a usable key is left out rather than sent in
+  ## plain form; the daemon gives such folders a key at startup.
   for folder in config.folders:
+    if folder.encrypted and folder.folderKey.len != KeySize:
+      continue
     if folderAppliesToBuddy(folder, buddyId):
       result.add(folder)
   result.sort(proc(a, b: FolderConfig): int = cmp(folderWireId(a), folderWireId(b)))
