@@ -81,9 +81,10 @@ Commands:
   remove-folder <name>      Remove a folder
   list-folders              List configured folders
   add-buddy                 Pair with a buddy
-    --generate-code         Generate a pairing code
     --id <buddy-id>         Buddy ID to pair with
-    --code <code>           Pairing code from buddy
+    --generate-code         Generate a pairing code, save it for this
+                            buddy and print the command to send them
+    --code <code>           Pairing code your buddy generated
   remove-buddy <id>         Remove a buddy
   list-buddies              List paired buddies
   connect <address>         Connect to a buddy manually
@@ -264,7 +265,7 @@ proc handleInit*() =
   echo ""
   echo "Next steps:"
   echo "  1. Add a folder: buddydrive add-folder <path> --name <name>"
-  echo "  2. Pair with a buddy: buddydrive add-buddy --generate-code"
+  echo "  2. Pair with a buddy: buddydrive add-buddy --generate-code --id <buddy-id>"
   echo "  3. Start syncing: buddydrive start"
 
 proc handleConfig*(cmd: CommandLine) =
@@ -439,7 +440,7 @@ proc handleConfig*(cmd: CommandLine) =
       echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired yet."
-    echo "Use 'buddydrive add-buddy --generate-code' to pair."
+    echo "Use 'buddydrive add-buddy --generate-code --id <buddy-id>' to pair."
 
 proc handleAddFolder*(cmd: CommandLine) =
   if not config.configExists():
@@ -525,50 +526,55 @@ proc handleListFolders*() =
     if folder.buddies.len > 0:
       echo "    Buddies: ", folder.buddies.join(", ")
 
+proc storeBuddyCode(buddyId: string, code: string) =
+  ## Adds the buddy, or updates the code of one we already have without
+  ## losing its other settings.
+  var cfg = loadConfig()
+  var buddy: BuddyInfo
+  let idx = cfg.getBuddy(buddyId)
+  if idx >= 0:
+    buddy = cfg.buddies[idx]
+  else:
+    buddy.id.uuid = buddyId
+    buddy.addedAt = getTime()
+  buddy.pairingCode = code
+  cfg.addBuddy(buddy)
+
 proc handleAddBuddy*(cmd: CommandLine) =
+  ## Both buddies must store the same pairing code for each other: it keys the
+  ## discovery record and the relay rendezvous. One side generates it, the
+  ## other enters it.
   if not config.configExists():
     echo "No config found. Run 'buddydrive init' first."
     return
-  
+
+  let cfg = loadConfig()
+
   if cmd.generateCode:
-    echo "Generating pairing code..."
-    echo ""
+    if cmd.buddyId.len == 0:
+      echo "Error: Buddy ID required, so the code can be saved for that buddy"
+      echo "Usage: buddydrive add-buddy --generate-code --id <buddy-id>"
+      echo ""
+      echo "Your Buddy ID, to give to your buddy: ", cfg.buddy.uuid
+      return
     let code = generatePairingCode()
-    let cfg = loadConfig()
-    echo "Share this with your buddy:"
-    echo "  Your Buddy ID: ", cfg.buddy.uuid
-    echo "  Your Name: ", cfg.buddy.name
-    echo "  Pairing Code: ", code
+    storeBuddyCode(cmd.buddyId, code)
+    echo "Buddy added: ", cmd.buddyId.shortId(), " with pairing code ", code
     echo ""
-    echo "Your buddy should run:"
+    echo "Send your buddy this command:"
     echo "  buddydrive add-buddy --id ", cfg.buddy.uuid, " --code ", code
+    echo ""
+    echo "The code is a secret: anyone who has it can find your buddy's address."
     return
-  
-  if cmd.buddyId.len == 0:
-    echo "Error: Buddy ID required"
+
+  if cmd.buddyId.len == 0 or cmd.pairingCode.len == 0:
+    echo "Error: Buddy ID and pairing code required"
     echo "Usage: buddydrive add-buddy --id <buddy-id> --code <code>"
+    echo "   or: buddydrive add-buddy --generate-code --id <buddy-id>"
     return
-  
-  if cmd.pairingCode.len == 0:
-    echo "Error: Pairing code required"
-    echo "Usage: buddydrive add-buddy --id <buddy-id> --code <code>"
-    return
-  
-  echo "Pairing with buddy: ", cmd.buddyId.shortId()
-  echo "Pairing code: ", cmd.pairingCode
-  echo ""
-  
-  var cfg = loadConfig()
-  var buddy: BuddyInfo
-  buddy.id.uuid = cmd.buddyId
-  buddy.id.name = ""
-  buddy.pairingCode = cmd.pairingCode
-  buddy.addedAt = getTime()
-  
-  cfg.addBuddy(buddy)
-  
-  echo "Buddy added: ", cmd.buddyId.shortId()
-  echo "Pairing code stored for relay fallback."
+
+  storeBuddyCode(cmd.buddyId, cmd.pairingCode)
+  echo "Buddy added: ", cmd.buddyId.shortId(), " with pairing code ", cmd.pairingCode
   echo "Start the daemon with 'buddydrive start' to connect."
 
 proc handleRemoveBuddy*(cmd: CommandLine) =
@@ -596,7 +602,7 @@ proc handleListBuddies*() =
   
   if cfg.buddies.len == 0:
     echo "No buddies paired yet."
-    echo "Use 'buddydrive add-buddy --generate-code' to pair."
+    echo "Use 'buddydrive add-buddy --generate-code --id <buddy-id>' to pair."
     return
   
   echo "Buddies:"
@@ -724,7 +730,7 @@ proc handleStatus*() =
       echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired."
-    echo "Use 'buddydrive add-buddy --generate-code' to pair."
+    echo "Use 'buddydrive add-buddy --generate-code --id <buddy-id>' to pair."
 
 proc handleLogs*() =
   let logPath = config.getLogPath()

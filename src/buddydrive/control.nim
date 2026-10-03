@@ -391,8 +391,7 @@ proc pairingCodeJson(): JsonNode =
   %*{
     "buddyId": cfg.buddy.uuid,
     "buddyName": cfg.buddy.name,
-    "pairingCode": code,
-    "expiresAt": (getTime() + initDuration(minutes = 5)).format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+    "pairingCode": code
   }
 
 proc addFolderFromBody(body: string): tuple[status: int, response: JsonNode] =
@@ -505,10 +504,17 @@ proc pairBuddyFromBody(body: string): tuple[status: int, response: JsonNode] =
   
   var cfg = config.loadConfig()
   var buddy: BuddyInfo
-  buddy.id = newBuddyId(buddyId, buddyName)
+  let idx = cfg.getBuddy(buddyId)
+  if idx >= 0:
+    buddy = cfg.buddies[idx]
+  else:
+    buddy.id.uuid = buddyId
+    buddy.addedAt = getTime()
+  if buddyName.len > 0 or idx < 0:
+    buddy.id.name = buddyName
   buddy.pairingCode = code
-  buddy.syncTime = parsed{"sync_time"}.getStr("")
-  buddy.addedAt = getTime()
+  if parsed.hasKey("sync_time"):
+    buddy.syncTime = parsed{"sync_time"}.getStr("")
   cfg.addBuddy(buddy)
   (200, %*{"ok": true, "message": "Buddy paired successfully"})
 

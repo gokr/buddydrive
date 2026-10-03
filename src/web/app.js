@@ -321,7 +321,17 @@ const initEvents = () => {
     document.getElementById("buddy-id").value = "";
     document.getElementById("buddy-pair-name").value = "";
     document.getElementById("buddy-code").value = "";
+    document.getElementById("pair-hint").textContent =
+      "Enter the code your buddy sent you, or generate one and send it to them. Both of you must use the same code.";
     openDialog("dialog-pair-buddy");
+  });
+
+  document.getElementById("btn-generate-code").addEventListener("click", async () => {
+    const info = await api.post("/buddies/pairing-code");
+    document.getElementById("buddy-code").value = info.pairingCode || "";
+    document.getElementById("pair-hint").textContent =
+      `Send your buddy your Buddy ID ${info.buddyId} and this code, then press Pair. ` +
+      "They enter both in their own Pair dialog.";
   });
 
   document.getElementById("btn-cancel-pair").addEventListener("click", () => {
