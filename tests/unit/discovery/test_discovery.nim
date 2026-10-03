@@ -1,5 +1,6 @@
 import std/unittest
-import std/options
+import std/[json, options]
+import libp2p/multiaddress
 import ../../../src/buddydrive/p2p/discovery
 import ../../../src/buddydrive/recovery
 import ../../../src/buddydrive/crypto
@@ -70,3 +71,17 @@ suite "Deterministic initiator":
     let record = BuddyRecord(isPubliclyReachable: false)
     check shouldInitiate("aaaa", false, "bbbb", record)
     check not shouldInitiate("cccc", false, "bbbb", record)
+
+suite "Discovery record":
+  test "addresses are published as multiaddr strings":
+    let addrs = @[
+      MultiAddress.init("/ip4/85.24.176.102/tcp/41721").get(),
+      MultiAddress.init("/ip4/192.168.1.101/tcp/41721").get(),
+    ]
+    let record = parseJson(discoveryRecordJson("peer", addrs, true, "", "eu"))
+    check record["addresses"][0].getStr() == "/ip4/85.24.176.102/tcp/41721"
+    check record["addresses"][1].getStr() == "/ip4/192.168.1.101/tcp/41721"
+    for address in record["addresses"]:
+      check MultiAddress.init(address.getStr()).isOk
+    check record["relayRegion"].getStr() == "eu"
+    check record["isPubliclyReachable"].getBool()

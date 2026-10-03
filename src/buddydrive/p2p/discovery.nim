@@ -4,6 +4,7 @@ import chronos
 import curly
 import webby/httpheaders
 import libsodium/sodium
+import libp2p/multiaddress
 import ../types
 import ../recovery
 import node
@@ -57,6 +58,27 @@ proc computeHmac*(authKey: string, data: string): string =
   let mac = crypto_auth(data, authKey)
   toHex(mac)
 
+proc discoveryRecordJson*(
+    peerId: string,
+    addrs: seq[MultiAddress],
+    isPubliclyReachable: bool,
+    syncTime: string,
+    relayRegion: string,
+): string =
+  var addrStrs: seq[string] = @[]
+  for ma in addrs:
+    addrStrs.add($ma)
+
+  var j = %*{
+    "peerId": peerId,
+    "addresses": addrStrs,
+    "isPubliclyReachable": isPubliclyReachable,
+    "syncTime": syncTime
+  }
+  if relayRegion.len > 0:
+    j["relayRegion"] = %relayRegion
+  $j
+
 proc newDiscovery*(node: BuddyNode, apiBaseUrl: string): DiscoveryService =
   result = DiscoveryService()
   result.node = node
@@ -86,21 +108,13 @@ proc publishBuddy*(discovery: DiscoveryService, buddy: BuddyInfo, relayRegion: s
   let discoveryKey = try: deriveDiscoveryKey(buddy.pairingCode) except: return false
   let authKey = try: deriveAuthKey(buddy.pairingCode) except: return false
 
-  let addrs = discovery.node.getAdvertisedAddrs()
-  var addrStrs: seq[string] = @[]
-  for ma in addrs:
-    addrStrs.add($ma)
-
-  var j = %*{
-    "peerId": discovery.node.peerIdStr(),
-    "addresses": addrStrs,
-    "isPubliclyReachable": isPubliclyReachable,
-    "syncTime": buddy.syncTime
-  }
-  if relayRegion.len > 0:
-    j["relayRegion"] = %relayRegion
-
-  let recordJson = $j
+  let recordJson = discoveryRecordJson(
+    discovery.node.peerIdStr(),
+    discovery.node.getAdvertisedAddrs(),
+    isPubliclyReachable,
+    buddy.syncTime,
+    relayRegion,
+  )
   let hmacHex = try: computeHmac(authKey, recordJson) except: return false
 
   let url = discovery.apiBaseUrl & "/discovery/" & discoveryKey
