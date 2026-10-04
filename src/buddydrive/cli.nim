@@ -44,6 +44,7 @@ type
     cmdRecover
     cmdSyncConfig
     cmdExportRecovery
+    cmdTakeover
     cmdHelp
   
   CommandLine* = object
@@ -100,6 +101,8 @@ Commands:
   recover                   Restore from BIP39 mnemonic
   sync-config               Manually sync config to relay/buddies
   export-recovery           Show recovery phrase again
+  takeover                  Make this machine the owner of your folders at
+                            your buddies, replacing another machine
   help                      Show this help
 """
 
@@ -211,6 +214,7 @@ proc parseCli*(): CommandLine =
     of "recover": cmdRecover
     of "sync-config": cmdSyncConfig
     of "export-recovery": cmdExportRecovery
+    of "takeover": cmdTakeover
     of "help": cmdHelp
     else: cmdHelp
   
@@ -863,6 +867,7 @@ proc handleRecover*() =
   if configOpt.isSome:
     let cfg = configOpt.get()
     saveConfig(cfg)
+    requestTakeover(cfg.buddies.mapIt(it.id.uuid))
     echo ""
     echo "Recovery successful!"
     echo ""
@@ -870,7 +875,9 @@ proc handleRecover*() =
     echo "Buddies: ", cfg.buddies.len
     echo "Folders: ", cfg.folders.len
     echo ""
-    echo "Run 'buddydrive start' to sync your folders."
+    echo "Run 'buddydrive start' to sync your folders. This machine takes over"
+    echo "your folders at each buddy on its first sync with it; the old machine"
+    echo "is refused from then on."
   else:
     echo ""
     echo "Could not recover from relay (see the reason above)."
@@ -912,6 +919,21 @@ proc handleSyncConfig*() =
   
   if cfg.buddies.len > 0:
     echo "Buddy config sync is not implemented yet."
+
+proc handleTakeover*() =
+  ## For when this machine replaces another one with the same identity, but
+  ## the config did not come from 'recover' (copied by hand, restored from a
+  ## backup).
+  if not config.configExists():
+    echo "No config found. Run 'buddydrive init' first."
+    return
+  let cfg = loadConfig()
+  if cfg.buddies.len == 0:
+    echo "No buddies configured; nothing to take over."
+    return
+  requestTakeover(cfg.buddies.mapIt(it.id.uuid))
+  echo "This machine will take over your folders at ", cfg.buddies.len, " buddies on its next sync with each."
+  echo "Only do this if the other machine is retired: from then on it is refused."
 
 proc handleExportRecovery*() =
   if not config.configExists():

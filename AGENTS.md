@@ -213,7 +213,8 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **Discovery publishes public addresses only** (plus `announce_addr`). LAN buddies are reached via per-buddy `addresses` in config, dialed first.
 - **Pairing codes** come from libsodium's CSPRNG (`generatePairingCode` in `crypto.nim`), never `std/random`.
 - **Create folders with `newSyncFolder`** (`config.nim`), never bare `newFolderConfig`: it sets the stable id and the folder key. An encrypted folder without a key is skipped by sync, and the daemon repairs such folders at startup (`ensureFolderIdentities`).
-- **Wire protocol version 5** (`ProtocolVersion` in `messages.nim`): older peers are rejected at the handshake.
+- **One owning machine per stored folder**: owners send `config.machineId()` (data dir, not config.toml); the storage side records it in `<buddy root>/<folder dir>.owner` and answers another machine with `msgFolderRefused`, unless it takes over (`requestTakeover`, set by `recover` and `buddydrive takeover`, cleared per buddy after a successful session).
+- **Wire protocol version 6** (`ProtocolVersion` in `messages.nim`): older peers are rejected at the handshake.
 
 ### Remaining Work
 

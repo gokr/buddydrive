@@ -203,6 +203,34 @@ suite "Timestamps":
         cfg = buddyconfig.loadConfig()
       check cfg.buddies[0].addedAt.toUnix() == 1_790_000_000
 
+suite "Machine identity":
+  test "machine id is created once and kept":
+    withTestDir("machineid"):
+      putEnv("BUDDYDRIVE_CONFIG_DIR", testDir)
+      putEnv("BUDDYDRIVE_DATA_DIR", testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      let first = buddyconfig.machineId()
+      check first.len > 0
+      check buddyconfig.machineId() == first
+
+  test "pending takeovers are cleared per buddy":
+    withTestDir("takeover"):
+      putEnv("BUDDYDRIVE_CONFIG_DIR", testDir)
+      putEnv("BUDDYDRIVE_DATA_DIR", testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      check buddyconfig.pendingTakeovers().len == 0
+      buddyconfig.requestTakeover(@["buddy-1", "buddy-2"])
+      check buddyconfig.pendingTakeovers() == @["buddy-1", "buddy-2"]
+      buddyconfig.clearTakeover("buddy-1")
+      check buddyconfig.pendingTakeovers() == @["buddy-2"]
+      buddyconfig.clearTakeover("buddy-2")
+      check buddyconfig.pendingTakeovers().len == 0
+      check not fileExists(buddyconfig.getTakeoverPath())
+
 suite "Folder identity":
   test "newSyncFolder gives every folder an id and a key":
     let a = newSyncFolder("docs", "/tmp/docs")

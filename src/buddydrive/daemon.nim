@@ -170,8 +170,15 @@ proc runBuddySync(daemon: Daemon, bc: BuddyConnection) {.async.} =
     daemon.activeSyncs[bc.buddyId] = false
 
   try:
-    if await syncBuddyFolders(daemon.config, bc.buddyId, bc.conn, daemon.syncProtocol):
+    var takeover = false
+    {.cast(gcsafe).}:
+      takeover = bc.buddyId in pendingTakeovers()
+    if await syncBuddyFolders(daemon.config, bc.buddyId, bc.conn, daemon.syncProtocol, takeover = takeover):
       echo "Folder sync finished with: ", bc.buddyName
+      if takeover:
+        {.cast(gcsafe).}:
+          clearTakeover(bc.buddyId)
+        echo "This machine now owns its folders at buddy ", bc.buddyId.shortId()
     else:
       daemon.logDiagnostic(
         diagnosticKey,

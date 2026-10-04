@@ -40,6 +40,52 @@ proc getIndexPath*(): string =
 proc getLogPath*(): string =
   result = getDataDir() / LOG_FILE
 
+proc ensureDataDir*()
+
+proc getMachineIdPath*(): string =
+  getDataDir() / "machine-id"
+
+proc machineId*(): string =
+  ## Identifies this installation, as opposed to the buddy identity in
+  ## config.toml, which recovery copies to a new machine. A storage buddy uses
+  ## it to tell two machines claiming to be the same owner apart.
+  let path = getMachineIdPath()
+  if fileExists(path):
+    result = readFile(path).strip()
+    if result.len > 0:
+      return
+  ensureDataDir()
+  result = $genUuid()
+  writeFile(path, result & "\n")
+
+proc getTakeoverPath*(): string =
+  getDataDir() / "takeover-pending"
+
+proc pendingTakeovers*(): seq[string] =
+  ## Buddies this machine still has to claim ownership at, one per line.
+  let path = getTakeoverPath()
+  if not fileExists(path):
+    return
+  for line in readFile(path).splitLines():
+    if line.strip().len > 0:
+      result.add(line.strip())
+
+proc requestTakeover*(buddyIds: seq[string]) =
+  ## This machine replaces the previous owner: at the next successful session
+  ## with each of these buddies, it claims its folders there.
+  ensureDataDir()
+  writeFile(getTakeoverPath(), buddyIds.join("\n") & "\n")
+
+proc clearTakeover*(buddyId: string) =
+  let remaining = pendingTakeovers().filterIt(it != buddyId)
+  if remaining.len == 0:
+    try:
+      removeFile(getTakeoverPath())
+    except OSError:
+      discard
+  else:
+    writeFile(getTakeoverPath(), remaining.join("\n") & "\n")
+
 proc ensureConfigDir*() =
   let dir = getConfigDir()
   if not dir.dirExists():

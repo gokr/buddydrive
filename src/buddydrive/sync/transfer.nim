@@ -258,7 +258,13 @@ proc ownerFileEntries*(transfer: FileTransfer, files: seq[FileInfo]): seq[FileEn
           continue
     result.add(entry)
 
-proc sendFileList*(transfer: FileTransfer, conn: Connection, files: seq[FileInfo]): Future[bool] {.async.} =
+proc sendFileList*(
+    transfer: FileTransfer,
+    conn: Connection,
+    files: seq[FileInfo],
+    ownerMachine = "",
+    takeover = false,
+): Future[bool] {.async.} =
   let folder = transfer.scanner.folder
   let msg = newFileList(
     folder.name,
@@ -266,6 +272,8 @@ proc sendFileList*(transfer: FileTransfer, conn: Connection, files: seq[FileInfo
     folderWireId(folder),
     transfer.useEncryptedChunks(),
     folder.appendOnly,
+    ownerMachine,
+    takeover,
   )
 
   try:

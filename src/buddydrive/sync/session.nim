@@ -4,6 +4,7 @@ import chronos
 import libp2p/stream/connection
 import ../types
 import ../crypto
+import ../config
 import ../p2p/messages
 import ../p2p/protocol
 import transfer
@@ -68,9 +69,15 @@ type
     deletes: seq[string]
     restores: seq[FileInfo]
 
-proc sendOwnerLists(owned: seq[OwnedFolder], conn: Connection, protocol: SyncProtocol): Future[bool] {.async.} =
+proc sendOwnerLists(
+    owned: seq[OwnedFolder],
+    conn: Connection,
+    protocol: SyncProtocol,
+    ownerMachine: string,
+    takeover: bool,
+): Future[bool] {.async.} =
   for folder in owned:
-    if not await folder.transfer.sendFileList(conn, folder.files):
+    if not await folder.transfer.sendFileList(conn, folder.files, ownerMachine, takeover):
       return sessionFailed("could not send the file list of " & folder.transfer.scanner.folder.name)
   try:
     await protocol.sendMessage(conn, newSyncDone())
@@ -203,11 +210,25 @@ proc ownerServePhase(folder: OwnedFolder, conn: Connection): Future[bool] {.asyn
 proc ownerSyncFolder(folder: OwnedFolder, buddyId: string, conn: Connection): Future[bool] {.async.} =
   let transfer = folder.transfer
   let folderName = transfer.scanner.folder.name
-  let storedOpt = await transfer.requestListPaths(conn)
-  if storedOpt.isNone():
+  let folderId = folderWireId(transfer.scanner.folder)
+  try:
+    await transfer.protocol.sendMessage(conn, newListPathsRequest(folderId))
+  except CatchableError as e:
+    return sessionFailed("could not ask what the buddy stores of " & folderName & ": " & e.msg)
+  let answer = await transfer.protocol.receiveMessage(conn)
+  if answer.isNone():
     return sessionFailed("the buddy did not say what it stores of " & folderName)
+  if answer.get().kind == msgFolderRefused:
+    # Nothing is changed on either side; the folder simply waits.
+    logSession("the buddy refused " & folderName & ": " & answer.get().refusedReason)
+    return true
+  if answer.get().kind != msgListPathsResponse or answer.get().listResponseFolderId != folderId:
+    return sessionFailed("unexpected answer about what the buddy stores of " & folderName)
+  var stored: seq[FileInfo] = @[]
+  for entry in answer.get().listFiles:
+    stored.add(toFileInfo(entry))
 
-  let plan = computeOwnerPlan(transfer, folder.files, readableStored(transfer, storedOpt.get()))
+  let plan = computeOwnerPlan(transfer, folder.files, readableStored(transfer, stored))
 
   for move in plan.moves:
     try:
@@ -311,6 +332,21 @@ proc runStorageRound(
     protocol: SyncProtocol,
 ): Future[bool] {.async.} =
   for listing in listings:
+    let ownership = decideOwnership(config, buddyId, listing)
+    if ownership.note.len > 0:
+      logSession(ownership.note)
+    if not ownership.accepted:
+      # Answer the owner's first question with a refusal and move on together.
+      let request = await protocol.receiveMessage(conn)
+      if request.isNone() or request.get().kind != msgListPathsRequest or
+          request.get().listFolderId != listing.folderId:
+        return sessionFailed("unexpected message while refusing the buddy's " & listing.folderName)
+      try:
+        await protocol.sendMessage(conn, newFolderRefused(listing.folderId, ownership.note))
+      except CatchableError as e:
+        return sessionFailed("could not refuse the buddy's " & listing.folderName & ": " & e.msg)
+      continue
+
     let storage =
       try:
         newStorageFolder(config, buddyId, listing, protocol)
@@ -386,7 +422,19 @@ proc syncBuddyFolders*(
     buddyId: string,
     conn: Connection,
     protocol: SyncProtocol,
+    ownerMachine = "",
+    takeover = false,
 ): Future[bool] {.async.} =
+  ## ownerMachine defaults to this installation's machine id. takeover claims
+  ## our folders at this buddy even if another machine owns them there.
+  let machine =
+    if ownerMachine.len > 0: ownerMachine
+    else:
+      try:
+        {.cast(gcsafe).}:
+          machineId()
+      except Exception:
+        ""
   var owned: seq[OwnedFolder] = @[]
   defer:
     for folder in owned:
@@ -404,7 +452,7 @@ proc syncBuddyFolders*(
       transfer.close()
       logSession("skipping " & folder.name & " this time: " & e.msg)
 
-  let sendListsFut = sendOwnerLists(owned, conn, protocol)
+  let sendListsFut = sendOwnerLists(owned, conn, protocol, machine, takeover)
   let listings = await receiveOwnerLists(conn, protocol)
   if not await sendListsFut:
     return false

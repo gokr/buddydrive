@@ -435,6 +435,73 @@ suite "Session sync":
       check storedFiles(testDir / "b-stores" / "folder-a", ".blob").len == 0
       check storedFiles(testDir / "c-stores" / "folder-a", ".blob").len == 0
 
+  proc syncAs(owner: AppConfig, buddy: AppConfig, machine: string, takeover = false) =
+    proc run(): Future[tuple[leftOk: bool, rightOk: bool]] {.async.} =
+      let (left, right) = bridgedConnections(closeTogether = false)
+      defer:
+        await left.close()
+        await right.close()
+      let fut1 = syncBuddyFolders(owner, owner.buddies[0].id.uuid, left, newSyncProtocol(),
+        ownerMachine = machine, takeover = takeover)
+      let fut2 = syncBuddyFolders(buddy, buddy.buddies[0].id.uuid, right, newSyncProtocol())
+      result.leftOk = await fut1
+      result.rightOk = await fut2
+    let outcome = waitFor run()
+    check outcome.leftOk
+    check outcome.rightOk
+
+  proc twoMachines(testDir: string): tuple[old, new, buddy: AppConfig, oldDir, newDir: string] =
+    ## Two installations with one buddy identity and the same folder (id and
+    ## key), as after recovering onto a new machine.
+    result.oldDir = testDir / "old-machine"
+    result.newDir = testDir / "new-machine"
+    createDir(result.oldDir)
+    createDir(result.newDir)
+    createDir(testDir / "b")
+    let folder = syncFolder("folder-a", result.oldDir)
+    var moved = folder
+    moved.path = result.newDir
+    result.old = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[folder])
+    result.new = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[moved])
+    result.buddy = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")])
+
+  test "a second machine with the same identity is refused":
+    withTestDir("session_second_owner"):
+      let m = twoMachines(testDir)
+      writeFile(m.oldDir / "from-old.txt", "old\n")
+      syncAs(m.old, m.buddy, "machine-old")
+      let stored = testDir / "b-stores" / "folder-a"
+      let before = readBlobs(stored)
+      check before.len == 1
+
+      writeFile(m.newDir / "from-new.txt", "new\n")
+      syncAs(m.new, m.buddy, "machine-new")
+
+      check readBlobs(stored) == before
+      check not fileExists(m.newDir / "from-old.txt")
+      check fileExists(m.newDir / "from-new.txt")
+
+  test "takeover hands the folder to the new machine and refuses the old one":
+    withTestDir("session_takeover"):
+      let m = twoMachines(testDir)
+      writeFile(m.oldDir / "from-old.txt", "old\n")
+      syncAs(m.old, m.buddy, "machine-old")
+      let stored = testDir / "b-stores" / "folder-a"
+
+      syncAs(m.new, m.buddy, "machine-new", takeover = true)
+      # The new machine restores what the old one had backed up.
+      check readFile(m.newDir / "from-old.txt") == "old\n"
+      let afterTakeover = readBlobs(stored)
+
+      writeFile(m.oldDir / "late-change.txt", "old machine is still running\n")
+      syncAs(m.old, m.buddy, "machine-old")
+      check readBlobs(stored) == afterTakeover
+
+      # Without asking again, the new machine keeps owning it.
+      writeFile(m.newDir / "next.txt", "next\n")
+      syncAs(m.new, m.buddy, "machine-new")
+      check readBlobs(stored).len == afterTakeover.len + 1
+
   test "a buddy's file list cannot reach outside its storage folder":
     withTestDir("session_traversal"):
       let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[])

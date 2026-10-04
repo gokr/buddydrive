@@ -127,6 +127,7 @@ journalctl -u buddydrive -f
 | `buddydrive recover` | Restore config from a 12-word recovery phrase and then resync folders |
 | `buddydrive sync-config` | Manually push encrypted config to the relay and configured buddies |
 | `buddydrive export-recovery` | Show stored recovery public key and master key metadata |
+| `buddydrive takeover` | Make this machine the owner of your folders at your buddies, replacing another machine |
 
 ### config set Keys
 
@@ -213,6 +214,12 @@ Restore happens in two layers:
 - **File restore** — once the daemon is running again, normal sync recreates missing local files from your buddy
 
 Append-only folders still protect existing local files from being overwritten or deleted by the remote side.
+
+### One Machine Per Identity
+
+Each buddy stores your folders for one machine at a time. Machines are told apart by a machine id kept in the data directory (`machine-id`), not in `config.toml`, so a recovered config does not carry it along. The first machine to back up a folder owns it there; another machine with the same identity is refused, and the log says so, rather than both overwriting each other's backup.
+
+When a machine replaces another one, it takes over: `buddydrive recover` does this automatically, and `buddydrive takeover` does it for a config you copied by hand. On its next sync with each buddy the new machine claims your folders, restores what they hold, and from then on the old machine is refused. Only take over from a machine you have retired.
 
 ### Folder Policies
 

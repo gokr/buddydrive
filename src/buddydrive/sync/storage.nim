@@ -12,7 +12,7 @@
 ## browsed.
 
 import std/os except FileInfo
-import std/[json, options, strutils, algorithm, tables]
+import std/[json, options, strutils, algorithm, tables, times]
 import chronos
 import libp2p/stream/connection
 import ../types
@@ -74,6 +74,58 @@ proc storageDirName*(folderId: string): string =
 
 proc storageFolderRoot*(config: AppConfig, ownerId: string, folderId: string): string =
   config.buddyStorageRoot(ownerId) / storageDirName(folderId)
+
+type
+  OwnershipDecision* = object
+    accepted*: bool
+    note*: string
+
+proc ownerRecordPath(config: AppConfig, ownerId: string, folderId: string): string =
+  ## Next to the folder's directory, not in it: inside, an unencrypted folder
+  ## would list it as one of the owner's files.
+  config.buddyStorageRoot(ownerId) / (storageDirName(folderId) & ".owner")
+
+proc decideOwnership*(config: AppConfig, ownerId: string, listing: ProtocolMessage): OwnershipDecision =
+  ## One machine owns each stored folder. Two machines with the same buddy
+  ## identity (say, a recovered one while the old one still runs) would
+  ## otherwise overwrite each other's backup. The first machine to send a
+  ## folder owns it; another is refused unless it explicitly takes over, after
+  ## which the previous one is refused instead.
+  let machine = listing.ownerMachine
+  if machine.len == 0:
+    return OwnershipDecision(accepted: true)
+
+  let path = config.ownerRecordPath(ownerId, listing.folderId)
+  var recorded = ""
+  var since = ""
+  if fileExists(path):
+    try:
+      let node = parseJson(readFile(path))
+      recorded = node{"machine"}.getStr("")
+      since = node{"since"}.getStr("")
+    except CatchableError:
+      discard
+
+  if recorded == machine:
+    return OwnershipDecision(accepted: true)
+
+  if recorded.len > 0 and not listing.ownerTakeover:
+    return OwnershipDecision(accepted: false, note:
+      "folder " & listing.folderName & " is backed up here from another machine (" &
+      recorded.shortId() & (if since.len > 0: ", since " & since else: "") &
+      "). If this machine replaces that one, run 'buddydrive takeover' on it.")
+
+  try:
+    createDir(path.parentDir())
+    writeFile(path, $(%*{"machine": machine, "since": now().utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")}))
+  except CatchableError as e:
+    return OwnershipDecision(accepted: false, note: "cannot record the owner of " & listing.folderName & ": " & e.msg)
+  if recorded.len > 0:
+    OwnershipDecision(accepted: true, note:
+      "folder " & listing.folderName & " taken over by machine " & machine.shortId() &
+      " from " & recorded.shortId())
+  else:
+    OwnershipDecision(accepted: true)
 
 proc newStorageFolder*(
     config: AppConfig,
