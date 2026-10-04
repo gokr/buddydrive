@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Relay server KV-store API with HMAC-authenticated discovery records,
   a `/relays/<region>` endpoint for per-region TCP relay addresses, packaged
   EU CIDR snapshots, and abuse hardening.
+- Self-contained integration tests: an in-process TCP relay stand-in and a KV
+  API stub that verifies Ed25519 signatures for real, with a fresh config and
+  index directory per test process. Network-touching tests now fail loudly
+  instead of being counted as skips.
 
 ### Changed
 
@@ -80,3 +84,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   addresses.
 - macOS build and runtime: `libsodium.dylib` loading and the missing
   `liblz4-dev` dependency.
+- Sync could delete a file that existed on only one side instead of
+  replicating it: a remote path is now deleted only when the local index
+  shows it was previously held, so files never seen before stay in the
+  projection and are pulled. `deleteLocalFile` also refuses deletions in
+  append-only folders, which previously blocked only overwrites.
+- Sync sessions through the public relay could report failure after all files
+  had transferred, because the peer that finished first closed the connection
+  while the other still awaited file acks and sync-done. Sessions now end with
+  an explicit `msgSessionEnd` exchange and a fixed teardown order, so neither
+  side closes while the peer still has data in flight.
+- Recovery reported "Could not recover from relay" for any non-200 response,
+  making an unreachable or failing config service look like a missing backup.
+  Recovery now distinguishes "no config is stored for this recovery phrase"
+  from "the service could not be reached; your config may still be stored".
