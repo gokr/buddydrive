@@ -152,7 +152,7 @@ buddydrive status
 ### Current CLI Limitations
 
 - `buddydrive start --daemon` is not fully implemented yet
-- `buddydrive stop` is a placeholder command today
+- `buddydrive stop`, `Ctrl+C` or SIGTERM shut the daemon down cleanly
 - `buddydrive status` shows configured state, not live daemon connectivity
 - `buddydrive connect` does not perform a manual direct dial yet
 - `buddydrive export-recovery` shows stored recovery metadata, not the original 12-word phrase
@@ -207,7 +207,7 @@ buddydrive connect <address>           Manual connect placeholder
 buddydrive start                       Start sync daemon
   --port <control-port>                Override control API port
   --daemon                             Accepted but stays foreground
-buddydrive stop                        Stop placeholder command
+buddydrive stop                        Ask the daemon to shut down cleanly
 buddydrive status                      Show configured status
 buddydrive logs                        Show recent logs
 buddydrive setup-recovery              Generate recovery phrase and sync encrypted config

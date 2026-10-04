@@ -120,7 +120,7 @@ journalctl -u buddydrive -f
 | `buddydrive list-buddies` | List paired buddies |
 | `buddydrive connect <address>` | Manual connect placeholder |
 | `buddydrive start [--port <control-port>]` | Start sync daemon in the foreground |
-| `buddydrive stop` | Stop command (not yet implemented; use Ctrl+C) |
+| `buddydrive stop` | Ask the running daemon to shut down cleanly |
 | `buddydrive status` | Show configured folders, buddies, and sync time |
 | `buddydrive logs` | Show recent logs |
 | `buddydrive setup-recovery` | Generate and verify a 12-word recovery phrase, then sync encrypted config to the relay |
@@ -171,7 +171,7 @@ journalctl -u buddydrive -f
 
 - `buddydrive init --with-recovery` is shown in help but not implemented; use `init` then `setup-recovery` separately
 - `buddydrive start --daemon` currently prints a note and continues in the foreground
-- `buddydrive stop` is not implemented yet; use your process manager or `Ctrl+C`
+- `buddydrive stop`, `Ctrl+C` and SIGTERM (e.g. `systemctl stop`) all shut down cleanly: the daemon removes its discovery record and UPnP port mapping before exiting. A second `Ctrl+C` exits immediately
 - `buddydrive status` does not yet query the running daemon for live connection state
 - `buddydrive connect` does not perform a manual direct dial yet
 - `buddydrive recover` currently restores configuration from the relay path; the buddy fallback prompt is present, but that fetch path is not implemented yet

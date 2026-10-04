@@ -16,6 +16,8 @@ import control
 import recovery
 import sync/policy
 import sync/config_sync
+when defined(posix):
+  import std/posix
 
 export crypto.generatePairingCode
 
@@ -638,6 +640,24 @@ proc handleConnect*(cmd: CommandLine) =
   echo "Note: Direct connection not yet implemented."
   echo "Use 'buddydrive start' to connect via relay discovery."
 
+var shutdownSignalled: bool
+
+when defined(posix):
+  proc onShutdownSignal(sig: cint) {.noconv.} =
+    ## Only sets a flag: the run loop does the actual shutdown, which cannot
+    ## happen inside a signal handler. A second signal exits at once, in case
+    ## the clean shutdown hangs.
+    if shutdownSignalled:
+      exitnow(128 + sig)
+    shutdownSignalled = true
+
+  proc installShutdownHandlers() =
+    discard signal(SIGINT, onShutdownSignal)
+    discard signal(SIGTERM, onShutdownSignal)
+else:
+  proc installShutdownHandlers() =
+    setControlCHook(proc() {.noconv.} = shutdownSignalled = true)
+
 proc handleStart*(cmd: CommandLine) =
   if not config.configExists():
     echo "No config found. Run 'buddydrive init' first."
@@ -685,19 +705,24 @@ proc handleStart*(cmd: CommandLine) =
         echo "  ", folder.name, " -> ", folder.path
       echo ""
       echo "Press Ctrl+C to stop..."
-      
-      while daemon.isRunning():
+
+      while daemon.isRunning() and not shutdownSignalled:
         await sleepAsync(chronos.seconds(1))
+      if shutdownSignalled:
+        echo "Shutdown requested, stopping cleanly..."
     except Exception as e:
       echo "Error: ", e.msg
     finally:
       await daemon.stop()
   
+  installShutdownHandlers()
   waitFor runDaemon()
 
 proc handleStop*() =
-  echo "Stopping BuddyDrive daemon..."
-  echo "Note: Daemon mode not implemented yet."
+  ## Asks a running daemon to shut down cleanly; it checks for the request
+  ## every couple of seconds.
+  requestDaemonStop()
+  echo "Stop requested. The daemon unpublishes itself and exits within a few seconds."
 
 proc handleStatus*() =
   if not config.configExists():

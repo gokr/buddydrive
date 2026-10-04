@@ -331,11 +331,10 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
           running = true
         )
     
+    # Kept, not asyncSpawn-ed: stop() cancels them, and chronos turns the
+    # cancellation of a spawned task into a fatal FutureDefect.
     daemon.discoveryLoop = daemon.runDiscoveryLoop()
-    asyncSpawn daemon.discoveryLoop
-    
     daemon.statusUpdateFut = statusUpdateLoop(daemon)
-    asyncSpawn daemon.statusUpdateFut
     
     startControlServer(controlPort)
     
