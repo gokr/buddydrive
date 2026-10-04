@@ -59,6 +59,17 @@ proc deriveAuthKey*(pairingCode: string): string =
     authKey[i] = hash[i]
   authKey
 
+proc discoveryToken*(pairingCode: string, ownerId: string): string =
+  ## Proves to the API that a write comes from the record's owner. Unlike the
+  ## HMAC it does not depend on the record, so a restarted buddy (new peer ID)
+  ## can still replace and delete its own record. It includes the owner's id so
+  ## one buddy of a pair cannot overwrite the other's record.
+  let hash = crypto_generichash(deriveAuthKey(pairingCode) & "/token/" & ownerId, 32)
+  var raw = newString(hash.len)
+  for i in 0 ..< hash.len:
+    raw[i] = char(hash[i])
+  toHex(raw)
+
 proc computeHmac*(authKey: string, data: string): string =
   let mac = crypto_auth(data, authKey)
   toHex(mac)
@@ -122,6 +133,7 @@ proc publishBuddy*(discovery: DiscoveryService, buddy: BuddyInfo, relayRegion: s
     relayRegion,
   )
   let hmacHex = try: computeHmac(authKey, recordJson) except: return false
+  let token = try: discoveryToken(buddy.pairingCode, discovery.selfId) except: return false
 
   let url = discovery.apiBaseUrl & "/discovery/" & discoveryKey
 
@@ -131,6 +143,7 @@ proc publishBuddy*(discovery: DiscoveryService, buddy: BuddyInfo, relayRegion: s
       var h = emptyHttpHeaders()
       h["Content-Type"] = "application/json"
       h["X-HMAC"] = hmacHex
+      h["X-BD-Discovery-Token"] = token
       curl.put(url, h, body = recordJson.toOpenArray(0, recordJson.len - 1), timeout = 30)
     if resp.code == 201:
       return true
@@ -143,6 +156,7 @@ proc unpublishBuddy*(discovery: DiscoveryService, pairingCode: string): bool =
   let discoveryKey = try: deriveDiscoveryKey(pairingCode, discovery.selfId) except: return false
   let authKey = try: deriveAuthKey(pairingCode) except: return false
   let hmacHex = try: computeHmac(authKey, "") except: return false
+  let token = try: discoveryToken(pairingCode, discovery.selfId) except: return false
 
   let url = discovery.apiBaseUrl & "/discovery/" & discoveryKey
 
@@ -151,6 +165,7 @@ proc unpublishBuddy*(discovery: DiscoveryService, pairingCode: string): bool =
     let resp = block:
       var h = emptyHttpHeaders()
       h["X-HMAC"] = hmacHex
+      h["X-BD-Discovery-Token"] = token
       curl.delete(url, h, timeout = 30)
     return resp.code == 204
   except Exception as e:

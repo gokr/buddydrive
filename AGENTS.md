@@ -94,7 +94,7 @@ src/
     ├── p2p/
     │   ├── node.nim            # libp2p node setup
     │   ├── addrs.nim           # Address selection: what to publish, what to dial
-    │   ├── discovery.nim       # KV-store relay discovery (publish/lookup via relay, HMAC auth)
+    │   ├── discovery.nim       # Relay API discovery: per-buddy record keys, owner token (X-BD-Discovery-Token)
     │   ├── protocol.nim        # BuddyDrive sync protocol
     │   ├── pairing.nim         # Buddy pairing handshake
     │   ├── messages.nim        # Protocol message types
@@ -209,6 +209,7 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **Hash verification on restore**: `verifyRestoredFile` re-scans and checks hash after write.
 - **SQLite index is cache**: both sides maintain indexes for performance, but restore only needs the folder key + buddy's filesystem.
 - **Restore flow**: recover config from relay → connect to buddy → list encrypted paths → decrypt paths → request missing files → verify hashes → rebuild index
+- **Discovery records are per buddy**: key = pairing code + publishing buddy's id; writes carry a stable owner token so a restarted buddy can replace its record (needs the matching buddydrive-relay).
 - **Discovery publishes public addresses only** (plus `announce_addr`). LAN buddies are reached via per-buddy `addresses` in config, dialed first.
 - **Pairing codes** come from libsodium's CSPRNG (`generatePairingCode` in `crypto.nim`), never `std/random`.
 - **Create folders with `newSyncFolder`** (`config.nim`), never bare `newFolderConfig`: it sets the stable id and the folder key. An encrypted folder without a key is skipped by sync, and the daemon repairs such folders at startup (`ensureFolderIdentities`).

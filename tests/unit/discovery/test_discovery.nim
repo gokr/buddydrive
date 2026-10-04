@@ -131,3 +131,38 @@ suite "Discovery between two buddies":
     check a.unpublishBuddy("SHAR-EDCD")
     check b.findBuddy("SHAR-EDCD", "buddy-a").isNone
     check a.findBuddy("SHAR-EDCD", "buddy-b").isSome
+
+  test "a restarted buddy replaces its own record":
+    # A restart means a new peer ID, so a new record body and HMAC. The API
+    # used to keep the first record forever; the token lets the owner replace it.
+    discard initCrypto()
+    let stub = startKvStub(freePort())
+    defer: stub.stop()
+
+    var buddy: BuddyInfo
+    buddy.id = newBuddyId("buddy-b")
+    buddy.pairingCode = "SHAR-EDCD"
+
+    let first = newBuddyNode(0, @[MultiAddress.init("/ip4/203.0.113.1/tcp/41721").get()])
+    waitFor first.start()
+    let firstRun = newDiscovery(first, stub.url, "buddy-a")
+    waitFor firstRun.start()
+    check firstRun.publishBuddy(buddy)
+    waitFor first.stop()
+
+    let second = newBuddyNode(0, @[MultiAddress.init("/ip4/203.0.113.1/tcp/41721").get()])
+    waitFor second.start()
+    defer: waitFor second.stop()
+    let secondRun = newDiscovery(second, stub.url, "buddy-a")
+    waitFor secondRun.start()
+    check secondRun.publishBuddy(buddy)
+
+    let reader = newDiscovery(second, stub.url, "buddy-b")
+    waitFor reader.start()
+    let seen = reader.findBuddy("SHAR-EDCD", "buddy-a")
+    check seen.isSome and seen.get().peerId == second.peerIdStr()
+
+  test "tokens differ per buddy and per pairing code":
+    check discoveryToken("SHAR-EDCD", "buddy-a") == discoveryToken("SHAR-EDCD", "buddy-a")
+    check discoveryToken("SHAR-EDCD", "buddy-a") != discoveryToken("SHAR-EDCD", "buddy-b")
+    check discoveryToken("SHAR-EDCD", "buddy-a") != discoveryToken("OTHE-RCOD", "buddy-a")
