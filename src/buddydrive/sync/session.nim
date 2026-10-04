@@ -74,7 +74,7 @@ proc sendOwnerLists(owned: seq[OwnedFolder], conn: Connection, protocol: SyncPro
 proc receiveOwnerLists(conn: Connection, protocol: SyncProtocol): Future[seq[ProtocolMessage]] {.async.} =
   var seen = initHashSet[string]()
   while true:
-    let msgOpt = await protocol.receiveMessage(conn)
+    let msgOpt = await protocol.receiveMessage(conn, folderListTimeout)
     if msgOpt.isNone():
       raise newException(CatchableError, "failed to receive buddy folder lists")
 
@@ -259,9 +259,12 @@ proc storageOwnerPhase(storage: StorageFolder, conn: Connection): Future[bool] {
       except CatchableError as e:
         return sessionFailed("could not list what we store of " & folderName & ": " & e.msg)
     of msgMoveFile:
-      discard storage.applyMove(msg.oldPath, msg.newPath)
+      if not storage.applyMove(msg.oldPath, msg.newPath):
+        logSession("could not rename a stored file of the buddy's " & folderName &
+          "; it will be fetched again under its new name")
     of msgFileDelete:
-      discard storage.applyDelete(msg.deletedPath)
+      if not storage.applyDelete(msg.deletedPath):
+        logSession("could not delete a stored file of the buddy's " & folderName)
     of msgFileRequest:
       if not await storage.serveRestore(conn, msg.requestPath, msg.requestOffset, msg.requestLength):
         logSession("could not send a stored file of " & folderName & " back to the buddy")
@@ -277,7 +280,8 @@ proc storageFetchPhase(storage: StorageFolder, conn: Connection, ownerFiles: seq
   if failures > 0:
     logSession("could not store " & $failures & " of " & $work.fetch.len & " files of the buddy's " & storage.folderName)
   for info in work.metadata:
-    discard storage.updateMetadata(info)
+    if not storage.updateMetadata(info):
+      logSession("could not update the stored mode or time of a file of the buddy's " & storage.folderName)
 
   try:
     await storage.protocol.sendMessage(conn, newSyncDone())

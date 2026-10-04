@@ -38,6 +38,9 @@ type
 
 const
   BlobSuffix = ".blob"
+  MaxFramePayload = 1024 * 1024
+    ## A frame holds one chunk of at most TransferChunkSize bytes, sealed and
+    ## possibly LZ4-compressed; this leaves ample room.
   MetaSuffix = ".meta"
   MaxDirNameLen = 128
 
@@ -327,6 +330,10 @@ proc sendBlob(storage: StorageFolder, conn: Connection, encryptedPath: string): 
       let compression = CompressionKind(header[0])
       let originalLen = int(readUint32(header, 1))
       let payloadLen = int(readUint32(header, 5))
+      # Check the length before trusting it with an allocation: a damaged blob
+      # could otherwise ask for gigabytes.
+      if payloadLen > MaxFramePayload or payloadLen.int64 > fileSize - f.getFilePos():
+        raise newException(IOError, "damaged blob frame")
       var payload = newSeq[byte](payloadLen)
       if payloadLen > 0 and f.readBytes(payload, 0, payloadLen) != payloadLen:
         raise newException(IOError, "truncated blob payload")

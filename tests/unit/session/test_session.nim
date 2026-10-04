@@ -1,4 +1,4 @@
-import std/[options, os, sequtils, strutils, unittest]
+import std/[json, options, os, sequtils, strutils, unittest]
 import chronos
 import libp2p/stream/bridgestream
 import ../../../src/buddydrive/types
@@ -279,6 +279,76 @@ suite "Session sync":
         check readBlobs(storedOne) == before
         check not anyFileMentions(testDir / "b-stores", ["locked-secret-name"])
 
+  when defined(posix):
+    test "a renamed encrypted symlink is moved, and a changed target is noticed":
+      withTestDir("session_symlink_move"):
+        let folderA = testDir / "a"
+        createDir(folderA)
+        createDir(testDir / "b")
+        writeFile(folderA / "target.txt", "target\n")
+        createSymlink("target.txt", folderA / "link-old")
+        let cfgA = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[syncFolder("folder-a", folderA)])
+        let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")])
+        let storedAtB = testDir / "b-stores" / "folder-a"
+
+        proc sealedTargets(): seq[string] =
+          for path in storedFiles(storedAtB, ".meta"):
+            let target = parseJson(readFile(storedAtB / path)){"symlinkTarget"}.getStr("")
+            if target.len > 0:
+              result.add(target)
+
+        syncBoth(cfgA, cfgB)
+        let before = sealedTargets()
+        check before.len == 1
+
+        # A move keeps the sealed target as stored; fetching the link again
+        # would seal it anew with a fresh random nonce.
+        moveFile(folderA / "link-old", folderA / "link-new")
+        syncBoth(cfgA, cfgB)
+        check sealedTargets() == before
+
+        removeFile(folderA / "link-new")
+        writeFile(folderA / "other.txt", "other\n")
+        createSymlink("other.txt", folderA / "link-new")
+        syncBoth(cfgA, cfgB)
+        check sealedTargets().len == 1
+        check sealedTargets() != before
+
+  test "a damaged blob is reported, not trusted with a huge allocation":
+    withTestDir("session_damaged_blob"):
+      let folderA = testDir / "a"
+      createDir(folderA)
+      createDir(testDir / "b")
+      writeFile(folderA / "good.txt", "good\n")
+      writeFile(folderA / "bad.txt", "bad\n")
+      let source = syncFolder("folder-a", folderA)
+      let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")])
+      syncBoth(peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[source]), cfgB)
+
+      # Make one blob's first frame claim a 4 GiB payload.
+      let storedAtB = testDir / "b-stores" / "folder-a"
+      var damaged = ""
+      for path in storedFiles(storedAtB, ".blob"):
+        var bytes = readFile(storedAtB / path)
+        if damaged.len == 0:
+          for i in 5 .. 8:
+            bytes[i] = char(0xff)
+          writeFile(storedAtB / path, bytes)
+          damaged = path
+
+      let restored = testDir / "restored"
+      createDir(restored)
+      var replacement = source
+      replacement.path = restored
+      syncBoth(peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[replacement]), cfgB)
+
+      # One of the two comes back; the damaged one does not, and nothing else breaks.
+      var back = 0
+      for name in ["good.txt", "bad.txt"]:
+        if fileExists(restored / name):
+          inc back
+      check back == 1
+
   test "a buddy's file list cannot reach outside its storage folder":
     withTestDir("session_traversal"):
       let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[])
@@ -316,6 +386,54 @@ suite "Session sync":
       check not fileExists(testDir / "b-stores" / "escaped.txt")
       for path in walkDirRec(testDir, relative = true):
         check "escaped" notin path
+
+suite "Stalled buddy":
+  test "a buddy that goes silent mid-session is given up on":
+    withTestDir("session_stalled"):
+      let saved = (messageIdleTimeout, folderListTimeout)
+      messageIdleTimeout = chronos.milliseconds(300)
+      folderListTimeout = chronos.milliseconds(300)
+      defer:
+        messageIdleTimeout = saved[0]
+        folderListTimeout = saved[1]
+      let cfg = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[])
+
+      proc run(cfg: AppConfig): Future[bool] {.async.} =
+        let (left, right) = bridgedConnections(closeTogether = false)
+        defer:
+          await left.close()
+          await right.close()
+        let protocol = newSyncProtocol()
+        let syncFut = syncBuddyFolders(cfg, BuddyTwo, left, protocol)
+        # The buddy offers a folder for us to store, then never asks anything.
+        await protocol.sendMessage(right, newFileList("docs", @[], "folder-x", encrypted = true))
+        await protocol.sendMessage(right, newSyncDone())
+        discard await protocol.receiveMessage(right)
+        return await syncFut.wait(chronos.seconds(20))
+
+      check not waitFor run(cfg)
+
+  test "a buddy that never sends its folder lists is given up on":
+    withTestDir("session_silent"):
+      let saved = folderListTimeout
+      folderListTimeout = chronos.milliseconds(300)
+      defer: folderListTimeout = saved
+      let cfg = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[])
+
+      proc run(cfg: AppConfig): Future[bool] {.async.} =
+        let (left, right) = bridgedConnections(closeTogether = false)
+        defer:
+          await left.close()
+          await right.close()
+        let protocol = newSyncProtocol()
+        let syncFut = syncBuddyFolders(cfg, BuddyTwo, left, protocol)
+        discard await protocol.receiveMessage(right)
+        try:
+          return await syncFut.wait(chronos.seconds(20))
+        except CatchableError:
+          return false
+
+      check not waitFor run(cfg)
 
 suite "Session end":
   test "waits for the buddy before finishing":
