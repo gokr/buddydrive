@@ -214,6 +214,71 @@ suite "Session sync":
       check not dirExists(testDir / "b-stores" / "folder-a")
       check not anyFileMentions(testDir / "b-stores", ["secret"])
 
+  proc twoFolderSetup(testDir: string): tuple[cfgA, cfgB: AppConfig, one, two: string] =
+    result.one = testDir / "one"
+    result.two = testDir / "two"
+    createDir(result.one)
+    createDir(result.two)
+    createDir(testDir / "b")
+    writeFile(result.one / "keep-1.txt", "first\n")
+    writeFile(result.one / "keep-2.txt", "second\n")
+    writeFile(result.two / "other.txt", "other\n")
+    result.cfgA = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores",
+      @[syncFolder("folder-one", result.one, name = "one"), syncFolder("folder-two", result.two, name = "two")])
+    result.cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")])
+
+  test "a missing folder is skipped and its backup kept":
+    # An unplugged disk used to scan as an empty folder, which told the
+    # buddy to delete every stored file of it.
+    withTestDir("session_missing_folder"):
+      let setup = twoFolderSetup(testDir)
+      syncBoth(setup.cfgA, setup.cfgB)
+      let storedOne = testDir / "b-stores" / "folder-one"
+      let before = readBlobs(storedOne)
+      check before.len == 2
+
+      moveDir(setup.one, testDir / "unplugged")
+      writeFile(setup.two / "new.txt", "new\n")
+      syncBoth(setup.cfgA, setup.cfgB)
+
+      check readBlobs(storedOne) == before
+      check storedFiles(testDir / "b-stores" / "folder-two", ".blob").len == 2
+
+  when defined(posix):
+    test "an unreadable folder is skipped and the others still sync":
+      withTestDir("session_unreadable_folder"):
+        let setup = twoFolderSetup(testDir)
+        syncBoth(setup.cfgA, setup.cfgB)
+        let storedOne = testDir / "b-stores" / "folder-one"
+        let before = readBlobs(storedOne)
+
+        setFilePermissions(setup.one, {})
+        try:
+          writeFile(setup.two / "new.txt", "new\n")
+          syncBoth(setup.cfgA, setup.cfgB)
+        finally:
+          setFilePermissions(setup.one, {fpUserRead, fpUserWrite, fpUserExec})
+
+        check readBlobs(storedOne) == before
+        check storedFiles(testDir / "b-stores" / "folder-two", ".blob").len == 2
+
+    test "an unreadable file holds back its folder rather than leaking its name":
+      withTestDir("session_unreadable_file"):
+        let setup = twoFolderSetup(testDir)
+        syncBoth(setup.cfgA, setup.cfgB)
+        let storedOne = testDir / "b-stores" / "folder-one"
+        let before = readBlobs(storedOne)
+
+        writeFile(setup.one / "locked-secret-name.txt", "locked\n")
+        setFilePermissions(setup.one / "locked-secret-name.txt", {})
+        try:
+          syncBoth(setup.cfgA, setup.cfgB)
+        finally:
+          setFilePermissions(setup.one / "locked-secret-name.txt", {fpUserRead, fpUserWrite})
+
+        check readBlobs(storedOne) == before
+        check not anyFileMentions(testDir / "b-stores", ["locked-secret-name"])
+
   test "a buddy's file list cannot reach outside its storage folder":
     withTestDir("session_traversal"):
       let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[])

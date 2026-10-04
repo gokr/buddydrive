@@ -381,7 +381,12 @@ proc syncBuddyFolders*(
       folder.transfer.close()
   for folder in applicableFolders(config, buddyId):
     let transfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
-    owned.add(OwnedFolder(transfer: transfer, files: transfer.scanner.scanDirectory()))
+    try:
+      owned.add(OwnedFolder(transfer: transfer, files: transfer.scanner.scanDirectoryStrict()))
+    except CatchableError as e:
+      # Left out of this session entirely, so the buddy keeps its copy as is.
+      transfer.close()
+      logSession("skipping " & folder.name & " this time: " & e.msg)
 
   let sendListsFut = sendOwnerLists(owned, conn, protocol)
   let listings = await receiveOwnerLists(conn, protocol)
