@@ -1,6 +1,8 @@
 import std/os except FileInfo
 import std/options
 import std/sets
+import std/sequtils
+import std/tables
 import std/times
 import std/base64
 import results
@@ -89,18 +91,41 @@ proc rebuildIndexFromDisk*(transfer: FileTransfer) =
   ## disappeared are deliberately kept: they are the only evidence that we
   ## once held a path, which is what lets the delta tell a local deletion
   ## apart from a file we have simply never seen. Call
-  ## pruneIndexOfMissingFiles once those deletions have been propagated.
+  ## pruneConfirmedDeletes once those deletions have been propagated.
   for fileInfo in transfer.scanner.scanDirectory():
     transfer.index.addFile(fileInfo, synced = true)
 
-proc pruneIndexOfMissingFiles*(transfer: FileTransfer) =
-  var onDisk: HashSet[string]
-  for fileInfo in transfer.scanner.scanDirectory():
-    onDisk.incl(fileInfo.path)
+proc pruneConfirmedDeletes*(transfer: FileTransfer, buddyId: string, backupBuddies: seq[string]) =
+  ## Called after a successful session with buddyId, which by then has been
+  ## told about every file that is gone from disk. An index row of a deleted
+  ## file is its tombstone: it is what makes the next session send the delete
+  ## instead of restoring the file. It may only go once every buddy the folder
+  ## is backed up to has heard of the delete; otherwise a buddy that has not
+  ## would hand the file back.
+  let onDisk =
+    try:
+      transfer.scanner.scanDirectoryStrict().mapIt(it.path).toHashSet()
+    except CatchableError:
+      return
+
+  let confirmations = transfer.index.deleteConfirmations()
+  for path in confirmations.keys:
+    if path in onDisk:
+      # The file is back; earlier confirmations were for a delete that no
+      # longer applies.
+      transfer.index.clearDeleteConfirmations(path)
 
   for existing in transfer.index.getAllFiles():
-    if existing.path notin onDisk:
+    if existing.path in onDisk:
+      continue
+    transfer.index.confirmDelete(existing.path, buddyId)
+    var confirmed =
+      if existing.path in confirmations: confirmations[existing.path]
+      else: initHashSet[string]()
+    confirmed.incl(buddyId)
+    if backupBuddies.allIt(it in confirmed):
       transfer.index.removeFile(existing.path)
+      transfer.index.clearDeleteConfirmations(existing.path)
 
 proc knownIndexPaths*(transfer: FileTransfer): HashSet[string] =
   ## Paths this folder has held at some point, according to the index.

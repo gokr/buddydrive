@@ -22,6 +22,12 @@ import ../logutils
 proc folderAppliesToBuddy(folder: FolderConfig, buddyId: string): bool =
   folder.buddies.len == 0 or buddyId in folder.buddies
 
+proc backupBuddies(config: AppConfig, folder: FolderConfig): seq[string] =
+  ## Every configured buddy this folder is backed up to.
+  for buddy in config.buddies:
+    if folderAppliesToBuddy(folder, buddy.id.uuid):
+      result.add(buddy.id.uuid)
+
 proc applicableFolders(config: AppConfig, buddyId: string): seq[FolderConfig] =
   ## An encrypted folder without a usable key is left out rather than sent in
   ## plain form; the daemon gives such folders a key at startup.
@@ -53,6 +59,7 @@ type
   OwnedFolder = object
     transfer: FileTransfer
     files: seq[FileInfo]
+    backupBuddies: seq[string]
 
   MoveInstruction = tuple[oldPath: string, newPath: string, hash: string]
 
@@ -193,7 +200,7 @@ proc ownerServePhase(folder: OwnedFolder, conn: Connection): Future[bool] {.asyn
     else:
       return sessionFailed("unexpected " & $msg.kind & " while the buddy fetched " & folderName)
 
-proc ownerSyncFolder(folder: OwnedFolder, conn: Connection): Future[bool] {.async.} =
+proc ownerSyncFolder(folder: OwnedFolder, buddyId: string, conn: Connection): Future[bool] {.async.} =
   let transfer = folder.transfer
   let folderName = transfer.scanner.folder.name
   let storedOpt = await transfer.requestListPaths(conn)
@@ -229,11 +236,12 @@ proc ownerSyncFolder(folder: OwnedFolder, conn: Connection): Future[bool] {.asyn
   if not await ownerServePhase(folder, conn):
     return false
 
-  # Deletions have reached the buddy by now, so stale index rows can go. An
-  # append-only folder keeps them: they are what stops a file we deleted here
-  # from being restored from the archive again.
+  # This buddy has now been told about every deletion. A tombstone goes once
+  # all the folder's buddies have been. An append-only folder keeps them: they
+  # are what stops a file we deleted here from being restored from the
+  # archive again.
   if not transfer.scanner.folder.appendOnly:
-    transfer.pruneIndexOfMissingFiles()
+    transfer.pruneConfirmedDeletes(buddyId, folder.backupBuddies)
   true
 
 proc storageOwnerPhase(storage: StorageFolder, conn: Connection): Future[bool] {.async.} =
@@ -289,9 +297,9 @@ proc storageFetchPhase(storage: StorageFolder, conn: Connection, ownerFiles: seq
   except CatchableError as e:
     sessionFailed("connection lost after storing the buddy's " & storage.folderName & ": " & e.msg)
 
-proc runOwnerRound(owned: seq[OwnedFolder], conn: Connection): Future[bool] {.async.} =
+proc runOwnerRound(owned: seq[OwnedFolder], buddyId: string, conn: Connection): Future[bool] {.async.} =
   for folder in owned:
-    if not await ownerSyncFolder(folder, conn):
+    if not await ownerSyncFolder(folder, buddyId, conn):
       return false
   true
 
@@ -386,7 +394,11 @@ proc syncBuddyFolders*(
   for folder in applicableFolders(config, buddyId):
     let transfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
     try:
-      owned.add(OwnedFolder(transfer: transfer, files: transfer.scanner.scanDirectoryStrict()))
+      owned.add(OwnedFolder(
+        transfer: transfer,
+        files: transfer.scanner.scanDirectoryStrict(),
+        backupBuddies: backupBuddies(config, folder),
+      ))
     except CatchableError as e:
       # Left out of this session entirely, so the buddy keeps its copy as is.
       transfer.close()
@@ -400,7 +412,7 @@ proc syncBuddyFolders*(
   let ownFoldersFirst = config.buddy.uuid < buddyId
   var allOk =
     if ownFoldersFirst:
-      await runOwnerRound(owned, conn)
+      await runOwnerRound(owned, buddyId, conn)
     else:
       await runStorageRound(config, buddyId, listings, conn, protocol)
   if allOk:
@@ -408,7 +420,7 @@ proc syncBuddyFolders*(
       if ownFoldersFirst:
         await runStorageRound(config, buddyId, listings, conn, protocol)
       else:
-        await runOwnerRound(owned, conn)
+        await runOwnerRound(owned, buddyId, conn)
 
   await awaitSessionEnd(conn, protocol, ownFoldersFirst)
   allOk

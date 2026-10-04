@@ -1,11 +1,11 @@
-import std/[options, times, strutils]
+import std/[options, times, strutils, sets, tables]
 import db_connector/db_sqlite
 import ../types
 import ../config
 
 export types
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 type
   IndexError* = object of CatchableError
@@ -61,6 +61,16 @@ proc migrate(index: FileIndex) =
     discard index.db.tryExec(sql"ALTER TABLE storage_files ADD COLUMN mode INTEGER NOT NULL DEFAULT 0")
     discard index.db.tryExec(sql"ALTER TABLE storage_files ADD COLUMN symlink_target TEXT NOT NULL DEFAULT ''")
   
+  if currentVersion < 4:
+    discard index.db.tryExec(sql"""
+      CREATE TABLE IF NOT EXISTS delete_confirmations (
+        folder TEXT NOT NULL,
+        path TEXT NOT NULL,
+        buddy TEXT NOT NULL,
+        UNIQUE(folder, path, buddy)
+      )
+    """)
+
   discard index.db.tryExec(sql("PRAGMA user_version = " & $SchemaVersion))
 
 proc newIndex*(folderName: string): FileIndex =
@@ -254,3 +264,15 @@ proc listByOwner*(index: FileIndex, ownerBuddy: string): seq[types.StorageFileIn
 proc updateStoragePath*(index: FileIndex, oldEncPath: string, newEncPath: string, ownerBuddy: string) =
   let query = "UPDATE storage_files SET encrypted_path = ? WHERE encrypted_path = ? AND owner_buddy = ?"
   discard index.db.tryExec(sql(query), newEncPath, oldEncPath, ownerBuddy)
+
+proc confirmDelete*(index: FileIndex, path: string, buddyId: string) =
+  ## Records that a buddy has been told a file is gone.
+  discard index.db.tryExec(sql"INSERT OR IGNORE INTO delete_confirmations (folder, path, buddy) VALUES (?, ?, ?)",
+    index.folderName, path, buddyId)
+
+proc deleteConfirmations*(index: FileIndex): Table[string, HashSet[string]] =
+  for row in index.db.rows(sql"SELECT path, buddy FROM delete_confirmations WHERE folder = ?", index.folderName):
+    result.mgetOrPut(row[0], initHashSet[string]()).incl(row[1])
+
+proc clearDeleteConfirmations*(index: FileIndex, path: string) =
+  discard index.db.tryExec(sql"DELETE FROM delete_confirmations WHERE folder = ? AND path = ?", index.folderName, path)

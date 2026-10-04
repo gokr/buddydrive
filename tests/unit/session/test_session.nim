@@ -348,6 +348,92 @@ suite "Session sync":
         if fileExists(restored / name):
           inc back
       check back == 1
+  proc syncPair(owner: AppConfig, buddyId: string, buddy: AppConfig) =
+    proc run(): Future[tuple[leftOk: bool, rightOk: bool]] {.async.} =
+      let (left, right) = bridgedConnections(closeTogether = false)
+      defer:
+        await left.close()
+        await right.close()
+      let fut1 = syncBuddyFolders(owner, buddyId, left, newSyncProtocol())
+      let fut2 = syncBuddyFolders(buddy, buddy.buddies[0].id.uuid, right, newSyncProtocol())
+      result.leftOk = await fut1
+      result.rightOk = await fut2
+    let outcome = waitFor run()
+    check outcome.leftOk
+    check outcome.rightOk
+
+  test "a delete reaches every buddy before its tombstone goes":
+    # One index serves all the buddies of a folder. Clearing a deleted file's
+    # row after the first buddy heard of it made the second buddy look like it
+    # held a file we never had, so the file was restored from there.
+    withTestDir("session_two_buddies"):
+      const BuddyThree = "33333333-3333-3333-3333-333333333333"
+      let folderA = testDir / "a"
+      createDir(folderA)
+      createDir(testDir / "b")
+      createDir(testDir / "c")
+      writeFile(folderA / "doomed.txt", "delete me\n")
+      writeFile(folderA / "kept.txt", "keep me\n")
+
+      var cfgA = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores-b", @[syncFolder("folder-a", folderA)])
+      var third: BuddyInfo
+      third.id = newBuddyId(BuddyThree, "peer-3333")
+      third.storagePath = testDir / "a-stores-c"
+      cfgA.buddies.add(third)
+      cfgA.folders[0].buddies = @[]
+      let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")])
+      let cfgC = peerConfig(BuddyThree, BuddyOne, testDir / "c-stores", @[syncFolder("folder-c", testDir / "c")])
+
+      syncPair(cfgA, BuddyTwo, cfgB)
+      syncPair(cfgA, BuddyThree, cfgC)
+      check storedFiles(testDir / "b-stores" / "folder-a", ".blob").len == 2
+      check storedFiles(testDir / "c-stores" / "folder-a", ".blob").len == 2
+
+      removeFile(folderA / "doomed.txt")
+      syncPair(cfgA, BuddyTwo, cfgB)
+      check storedFiles(testDir / "b-stores" / "folder-a", ".blob").len == 1
+
+      syncPair(cfgA, BuddyThree, cfgC)
+      check not fileExists(folderA / "doomed.txt")
+      check storedFiles(testDir / "c-stores" / "folder-a", ".blob").len == 1
+
+      # Both have confirmed now; nothing comes back from either.
+      syncPair(cfgA, BuddyTwo, cfgB)
+      syncPair(cfgA, BuddyThree, cfgC)
+      check not fileExists(folderA / "doomed.txt")
+      check fileExists(folderA / "kept.txt")
+
+  test "a file deleted, recreated and deleted again still reaches every buddy":
+    withTestDir("session_delete_twice"):
+      const BuddyThree = "33333333-3333-3333-3333-333333333333"
+      let folderA = testDir / "a"
+      createDir(folderA)
+      createDir(testDir / "b")
+      createDir(testDir / "c")
+      writeFile(folderA / "flip.txt", "v1\n")
+
+      var cfgA = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores-b", @[syncFolder("folder-a", folderA)])
+      var third: BuddyInfo
+      third.id = newBuddyId(BuddyThree, "peer-3333")
+      cfgA.buddies.add(third)
+      cfgA.folders[0].buddies = @[]
+      let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")])
+      let cfgC = peerConfig(BuddyThree, BuddyOne, testDir / "c-stores", @[syncFolder("folder-c", testDir / "c")])
+
+      syncPair(cfgA, BuddyTwo, cfgB)
+      syncPair(cfgA, BuddyThree, cfgC)
+      removeFile(folderA / "flip.txt")
+      syncPair(cfgA, BuddyTwo, cfgB)            # B confirms the first delete
+      writeFile(folderA / "flip.txt", "v2\n")   # back before C heard of it
+      syncPair(cfgA, BuddyTwo, cfgB)
+      syncPair(cfgA, BuddyThree, cfgC)
+      removeFile(folderA / "flip.txt")
+      syncPair(cfgA, BuddyThree, cfgC)          # only C confirms the second delete
+      syncPair(cfgA, BuddyTwo, cfgB)            # B's old confirmation must not count
+
+      check not fileExists(folderA / "flip.txt")
+      check storedFiles(testDir / "b-stores" / "folder-a", ".blob").len == 0
+      check storedFiles(testDir / "c-stores" / "folder-a", ".blob").len == 0
 
   test "a buddy's file list cannot reach outside its storage folder":
     withTestDir("session_traversal"):
