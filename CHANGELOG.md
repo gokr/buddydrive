@@ -80,3 +80,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   addresses.
 - macOS build and runtime: `libsodium.dylib` loading and the missing
   `liblz4-dev` dependency.
+- Sync no longer deletes a file that exists only on the buddy's side. A remote
+  path is now deleted only when the local index shows it was once held locally;
+  otherwise it is fetched, so restoring onto an empty machine pulls files down
+  instead of wiping the buddy's copy. Index rows for vanished files are
+  retained until deletions have propagated (so the worst case is a deleted file
+  reappearing rather than a live file being lost), and append-only folders now
+  refuse remote deletions as well as remote overwrites.
+- Sync sessions now end with an explicit session-end exchange in a fixed order,
+  so neither peer hangs up while the other still has data in flight through a
+  relay. Previously the first side to finish could close the connection and make
+  a relay truncate the other side's stream, reporting a failed sync on a
+  transfer that had in fact completed. The new `msgSessionEnd` message is
+  appended to the message kinds, so older buddies are unaffected.
+- `buddydrive recover` now distinguishes "no config is stored for this recovery
+  phrase" from "the config service could not be reached", instead of treating
+  every non-200 response as a missing backup.
+- Integration tests no longer swallow network failures through skips or
+  `|| true`, which had hidden the one-sided-deletion bug; the relay and KV-store
+  integration tests are now self-contained in-process stand-ins that fail
+  loudly.
