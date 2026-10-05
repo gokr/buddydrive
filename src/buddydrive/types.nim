@@ -86,6 +86,24 @@ type
     detail*: string
     lastSync*: Time
   
+  SessionRecord* = object
+    ## One connection with a buddy, as shown in the GUI's sync activity.
+    id*: int
+    buddyId*: string
+    buddyName*: string
+    dialedBy*: string
+      ## "us" or "buddy"
+    via*: string
+      ## "direct" or "relay"
+    startedAt*: Time
+    endedAt*: Time
+    outcome*: string
+      ## "running", "ok", "failed", "turned away" or "interrupted"
+    bytesSent*: int64
+    bytesReceived*: int64
+    filesSent*: int
+    filesReceived*: int
+
   BuddyStatus* = object
     id*: string
     name*: string

@@ -19,6 +19,10 @@ const dom = {
   buddiesEmpty: document.getElementById("buddies-empty"),
   logsContent: document.getElementById("logs-content"),
   logsContainer: document.getElementById("logs-container"),
+  activitySummary: document.getElementById("activity-summary"),
+  activityHistory: document.getElementById("activity-history"),
+  activityHistoryTitle: document.getElementById("activity-history-title"),
+  activityList: document.getElementById("activity-list"),
 };
 
 // API helpers
@@ -177,6 +181,129 @@ const renderBuddies = (buddies, storage = []) => {
   }
 };
 
+const formatTime = (iso) => (iso ? new Date(iso).toLocaleString() : "");
+
+const formatDuration = (startIso, endIso) => {
+  const seconds = Math.max(0, Math.round((new Date(endIso) - new Date(startIso)) / 1000));
+  if (seconds < 60) return `${seconds} s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+  return `${Math.floor(seconds / 3600)} h ${Math.floor((seconds % 3600) / 60)} min`;
+};
+
+const fileCountText = (n) => `${n} file${n === 1 ? "" : "s"}`;
+
+const sessionBuddy = (s) => s.buddyName || (s.buddyId || "").substring(0, 8) || "a buddy";
+
+const dialText = (s) => {
+  const name = sessionBuddy(s);
+  if (s.via === "relay") return `connected with ${name} through the relay`;
+  return s.dialedBy === "buddy" ? `${name} dialed us` : `we dialed ${name}`;
+};
+
+const transferText = (s, soFar = false) => {
+  const name = sessionBuddy(s);
+  const parts = [];
+  if (s.filesSent || s.bytesSent) {
+    parts.push(`sent ${fileCountText(s.filesSent)} (${formatBytes(s.bytesSent)}) to ${name}`);
+  }
+  if (s.filesReceived || s.bytesReceived) {
+    parts.push(`received ${fileCountText(s.filesReceived)} (${formatBytes(s.bytesReceived)}) from ${name}`);
+  }
+  if (parts.length === 0) return soFar ? "no file data yet" : "no file data needed transferring";
+  const text = parts.join(", ");
+  return (soFar ? "so far " : "") + text.charAt(0).toUpperCase() + text.slice(1);
+};
+
+const outcomeText = (s) => {
+  const name = sessionBuddy(s);
+  switch (s.outcome) {
+    case "ok": return "Finished";
+    case "failed": return "Did not finish, see the log";
+    case "interrupted": return "Cut off when the daemon stopped";
+    case "running": return "Running";
+    case "turned away":
+      return s.dialedBy === "buddy"
+        ? `turned away, a sync with ${name} was already running`
+        : `dropped, a sync with ${name} was already running`;
+    default: return s.outcome;
+  }
+};
+
+const activityLine = (cls, html) => `<div class="activity-line ${cls}">${html}</div>`;
+
+const outcomeSpan = (s) =>
+  `<span class="activity-outcome-${escAttr(s.outcome.replace(" ", "-"))}">${escHtml(outcomeText(s))}</span>`;
+
+const durationText = (s) =>
+  s.outcome === "running" || s.outcome === "interrupted" || s.outcome === "turned away"
+    ? ""
+    : ` · took ${formatDuration(s.startedAt, s.endedAt)}`;
+
+const renderActivity = (sessions) => {
+  const running = sessions.filter((s) => s.outcome === "running");
+  const finished = sessions.filter((s) => s.outcome !== "running" && s.outcome !== "turned away");
+  const last = finished[0];
+  const lines = [];
+
+  for (const s of running) {
+    lines.push(activityLine("activity-running",
+      `<strong>Syncing with ${escHtml(sessionBuddy(s))}</strong> since ${escHtml(formatTime(s.startedAt))} · ${escHtml(dialText(s))}`));
+    lines.push(activityLine("activity-detail", escHtml(transferText(s, true))));
+  }
+
+  if (last) {
+    lines.push(activityLine("",
+      `<strong>Last sync</strong> with ${escHtml(sessionBuddy(last))}: ${escHtml(formatTime(last.startedAt))}` +
+      `${escHtml(durationText(last))} · ${escHtml(dialText(last))} · ${outcomeSpan(last)}`));
+    lines.push(activityLine("activity-detail", escHtml(transferText(last))));
+  } else if (running.length === 0) {
+    lines.push(activityLine("activity-detail", "No sync sessions yet."));
+  }
+
+  const turnedAway = sessions.find((s) => s.outcome === "turned away");
+  if (turnedAway && (!last || new Date(turnedAway.startedAt) >= new Date(last.startedAt))) {
+    lines.push(activityLine("activity-outcome-turned-away",
+      `${escHtml(formatTime(turnedAway.startedAt))}: ${escHtml(dialText(turnedAway))} · ${escHtml(outcomeText(turnedAway))}`));
+  }
+
+  const totals = {};
+  for (const s of sessions) {
+    const name = sessionBuddy(s);
+    const t = (totals[name] ||= { bytesSent: 0, bytesReceived: 0, filesSent: 0, filesReceived: 0, buddyName: name });
+    t.bytesSent += s.bytesSent || 0;
+    t.bytesReceived += s.bytesReceived || 0;
+    t.filesSent += s.filesSent || 0;
+    t.filesReceived += s.filesReceived || 0;
+  }
+  const totalTexts = Object.values(totals)
+    .filter((t) => t.bytesSent || t.bytesReceived || t.filesSent || t.filesReceived)
+    .map((t) => {
+      const text = transferText(t);
+      return text.charAt(0).toLowerCase() + text.slice(1);
+    });
+  if (sessions.length > 1 && totalTexts.length > 0) {
+    lines.push(activityLine("activity-detail",
+      `Over the last ${sessions.length} sessions: ${escHtml(totalTexts.join("; "))}`));
+  }
+
+  dom.activitySummary.innerHTML = lines.join("");
+
+  dom.activityHistory.hidden = sessions.length === 0;
+  dom.activityHistoryTitle.textContent = `Recent sessions (${sessions.length})`;
+  dom.activityList.innerHTML = sessions.map((s) => {
+    const transfer = s.outcome === "turned away" ? "" :
+      `<div class="list-item-detail">${escHtml(transferText(s, s.outcome === "running"))}</div>`;
+    return `
+      <div class="list-item">
+        <div class="list-item-info">
+          <div class="list-item-name">${escHtml(formatTime(s.startedAt))} · ${escHtml(sessionBuddy(s))}</div>
+          <div class="list-item-detail">${escHtml(dialText(s))}${escHtml(durationText(s))} · ${outcomeSpan(s)}</div>
+          ${transfer}
+        </div>
+      </div>`;
+  }).join("");
+};
+
 const renderStatus = (data) => {
   const running = data.running || false;
   const syncEnabled = data.syncEnabled !== false;
@@ -221,13 +348,15 @@ const escAttr = (str) => escHtml(str).replace(/"/g, "&quot;");
 // Refresh all data
 const refresh = async () => {
   try {
-    const [status, folders, buddies, storage] = await Promise.all([
+    const [status, folders, buddies, storage, sessions] = await Promise.all([
       api.get("/status"),
       api.get("/folders"),
       api.get("/buddies"),
       api.get("/storage").catch(() => ({ storage: [] })),
+      api.get("/sessions").catch(() => ({ sessions: [] })),
     ]);
     renderStatus(status);
+    renderActivity(sessions.sessions || []);
     renderFolders(folders.folders || []);
     renderBuddies(buddies.buddies || [], storage.storage || []);
   } catch (e) {

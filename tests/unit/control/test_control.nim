@@ -317,3 +317,27 @@ suite "Folder endpoints":
       check status["status"].getStr() == "refused"
       check status["detail"].getStr() == "Bob refused it: owned by another machine"
       check status["lastSync"].getStr() == synced.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+
+  test "sync sessions are kept in state.db and listed newest first":
+    withTestDir("control_sessions"):
+      initTestConfig(testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      let started = initTime(1_800_000_000, 0)
+      writeSessions(@[
+        SessionRecord(id: 1, buddyId: "b1", buddyName: "Bob", dialedBy: "us", via: "direct",
+          startedAt: started, endedAt: started + initDuration(seconds = 12), outcome: "ok",
+          bytesSent: 2048, filesSent: 2, bytesReceived: 10, filesReceived: 1),
+        SessionRecord(id: 2, buddyId: "b1", buddyName: "Bob", dialedBy: "buddy", via: "direct",
+          startedAt: started + initDuration(seconds = 5), endedAt: started + initDuration(seconds = 5),
+          outcome: "turned away"),
+      ])
+      check readSessions().len == 2
+      let sessions = responseJson(handleRequest("GET /sessions HTTP/1.1\r\n\r\n"))["sessions"]
+      check sessions.len == 2
+      check sessions[0]["outcome"].getStr() == "turned away"
+      check sessions[0]["dialedBy"].getStr() == "buddy"
+      check sessions[1]["bytesSent"].getInt() == 2048
+      check sessions[1]["filesReceived"].getInt() == 1
+      check sessions[1]["endedAt"].getStr() == (started + initDuration(seconds = 12)).utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")

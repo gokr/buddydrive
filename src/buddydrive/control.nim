@@ -55,6 +55,22 @@ proc getStateDb(): DbConn =
     if column notin folderColumns:
       result.exec(sql("ALTER TABLE folder_state ADD COLUMN " & column & " TEXT"))
   result.exec(sql"""
+    CREATE TABLE IF NOT EXISTS sync_sessions (
+      id INTEGER PRIMARY KEY,
+      buddy_id TEXT,
+      buddy_name TEXT,
+      dialed_by TEXT,
+      via TEXT,
+      started_at INTEGER,
+      ended_at INTEGER,
+      outcome TEXT,
+      bytes_sent INTEGER,
+      bytes_received INTEGER,
+      files_sent INTEGER,
+      files_received INTEGER
+    )
+  """)
+  result.exec(sql"""
     CREATE TABLE IF NOT EXISTS cached_buddy_addrs (
       buddy_uuid TEXT PRIMARY KEY,
       peer_id TEXT,
@@ -145,6 +161,73 @@ proc writeLiveStatus*(buddyStatuses: seq[BuddyStatus], folderStatuses: seq[SyncS
       """, f.folder, f.totalBytes, f.syncedBytes, f.fileCount, f.syncedFiles, f.status, f.detail, formatStatusTime(f.lastSync))
   finally:
     db.close()
+
+proc writeSessions*(sessions: seq[SessionRecord]) =
+  config.ensureDataDir()
+  let db = getStateDb()
+  try:
+    db.exec(sql"BEGIN")
+    db.exec(sql"DELETE FROM sync_sessions")
+    for r in sessions:
+      db.exec(sql"""
+        INSERT INTO sync_sessions (id, buddy_id, buddy_name, dialed_by, via, started_at, ended_at,
+          outcome, bytes_sent, bytes_received, files_sent, files_received)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      """, r.id, r.buddyId, r.buddyName, r.dialedBy, r.via, r.startedAt.toUnix(), r.endedAt.toUnix(),
+        r.outcome, r.bytesSent, r.bytesReceived, r.filesSent, r.filesReceived)
+    db.exec(sql"COMMIT")
+  finally:
+    db.close()
+
+proc readSessions*(): seq[SessionRecord] =
+  ## Oldest first.
+  let statePath = config.getDataDir() / "state.db"
+  if not fileExists(statePath):
+    return @[]
+  let db = getStateDb()
+  try:
+    for row in db.rows(sql"""
+      SELECT id, buddy_id, buddy_name, dialed_by, via, started_at, ended_at, outcome,
+        bytes_sent, bytes_received, files_sent, files_received
+      FROM sync_sessions ORDER BY id
+    """):
+      result.add(SessionRecord(
+        id: row[0].parseInt(),
+        buddyId: row[1],
+        buddyName: row[2],
+        dialedBy: row[3],
+        via: row[4],
+        startedAt: fromUnix(row[5].parseBiggestInt()),
+        endedAt: fromUnix(row[6].parseBiggestInt()),
+        outcome: row[7],
+        bytesSent: row[8].parseBiggestInt(),
+        bytesReceived: row[9].parseBiggestInt(),
+        filesSent: row[10].parseInt(),
+        filesReceived: row[11].parseInt(),
+      ))
+  finally:
+    db.close()
+
+proc sessionsJson(): JsonNode =
+  var entries: seq[JsonNode] = @[]
+  let sessions = readSessions()
+  for i in countdown(sessions.high, 0):
+    let r = sessions[i]
+    entries.add(%*{
+      "id": r.id,
+      "buddyId": r.buddyId,
+      "buddyName": r.buddyName,
+      "dialedBy": r.dialedBy,
+      "via": r.via,
+      "startedAt": formatStatusTime(r.startedAt),
+      "endedAt": if r.outcome == "running": "" else: formatStatusTime(r.endedAt),
+      "outcome": r.outcome,
+      "bytesSent": r.bytesSent,
+      "bytesReceived": r.bytesReceived,
+      "filesSent": r.filesSent,
+      "filesReceived": r.filesReceived,
+    })
+  %*{"sessions": entries}
 
 type CachedBuddyAddr* = object
   peerId*: string
@@ -739,6 +822,7 @@ proc handleRequest*(raw: string): string =
       of "/buddies": jsonResponse(200, buddiesJson())
       of "/folders": jsonResponse(200, foldersJson())
       of "/storage": jsonResponse(200, storageJson())
+      of "/sessions": jsonResponse(200, sessionsJson())
       of "/config": jsonResponse(200, configJson())
       of "/logs": jsonResponse(200, logsJson())
       of "/recovery":

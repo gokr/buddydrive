@@ -23,6 +23,17 @@
   <main>
     <section class="card">
       <div class="card-header">
+        <h2>Sync activity</h2>
+      </div>
+      <div id="activity-summary" class="activity-summary"></div>
+      <details id="activity-history" class="activity-history" hidden>
+        <summary id="activity-history-title">Recent sessions</summary>
+        <div id="activity-list" class="list"></div>
+      </details>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
         <h2>Folders</h2>
         <div class="card-actions">
           <button id="btn-sync-all" class="btn btn-small">Sync All</button>

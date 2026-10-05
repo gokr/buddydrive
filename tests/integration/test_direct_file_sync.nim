@@ -105,6 +105,36 @@ suite "Daemon sessions":
       check dialAndWait(a, b, BuddyTwo)
       check storedFiles(testDir / "b-stores" / "folder-a", ".blob").len == 2
 
+      let dialed = a.currentSessions()
+      check dialed.len == 2
+      check dialed.allIt(it.outcome == "ok" and it.dialedBy == "us" and it.via == "direct")
+      check dialed.allIt(it.filesSent == 1 and it.bytesSent > 0 and it.filesReceived == 0)
+      check dialed[1].buddyId == BuddyTwo
+      let answered = b.currentSessions()
+      check answered.len == 2
+      check answered.allIt(it.outcome == "ok" and it.dialedBy == "buddy" and it.filesReceived == 1)
+
+  test "a buddy dialing in during a running sync is turned away, and that is recorded":
+    withTestDir("daemon_turned_away"):
+      let folderA = testDir / "a"
+      let folderB = testDir / "b"
+      createDir(folderA)
+      createDir(folderB)
+      let a = startedDaemon(peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[syncFolder("folder-a", folderA)]))
+      let b = startedDaemon(peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", folderB)]))
+      defer:
+        waitFor a.node.stop()
+        waitFor b.node.stop()
+
+      b.activeSyncs[BuddyOne] = true
+      discard dialAndWait(a, b, BuddyTwo)
+      let turned = b.currentSessions()
+      check turned.len == 1
+      check turned[0].outcome == "turned away"
+      check turned[0].dialedBy == "buddy"
+      check turned[0].buddyId == BuddyOne
+      check a.currentSessions()[0].outcome == "failed"
+
   test "a sync asked for from a GUI dials the buddy now":
     withTestDir("daemon_sync_request"):
       let folderA = testDir / "a"

@@ -169,6 +169,47 @@ main {
   color: var(--danger);
 }
 
+.activity-summary {
+  padding: 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+.activity-detail {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.activity-running {
+  color: var(--primary);
+}
+
+.activity-outcome-ok {
+  color: var(--success);
+}
+
+.activity-outcome-failed,
+.activity-outcome-interrupted {
+  color: var(--danger);
+}
+
+.activity-outcome-turned-away {
+  color: var(--warning);
+}
+
+.activity-history {
+  border-top: 1px solid var(--border);
+}
+
+.activity-history summary {
+  padding: 10px 20px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
 .dialog-note {
   font-size: 0.85rem;
   color: var(--text-dim);
