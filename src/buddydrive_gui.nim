@@ -1,4 +1,4 @@
-import std/[os, json, httpclient, options, osproc, strutils, times]
+import std/[os, json, httpclient, options, osproc, strutils, times, uri]
 import chronos
 import buddydrive/[cli, config as buddyconfig, control, recovery, sync/config_sync, types]
 
@@ -248,7 +248,9 @@ proc localFoldersJson(): JsonNode =
         "syncedBytes": 0,
         "fileCount": 0,
         "syncedFiles": 0,
-        "status": "idle"
+        "status": "idle",
+        "detail": "",
+        "lastSync": ""
       }
     })
   %*{"folders": folders}
@@ -337,11 +339,37 @@ proc formatBytes(bytes: int64): string =
   else:
     $(bytes div (1024 * 1024 * 1024)) & " GB"
 
+proc folderStatusText(status: JsonNode): string =
+  let syncStatus = status{"status"}.getStr("idle")
+  var parts = @[
+    case syncStatus
+    of "idle": "Not synced yet"
+    of "syncing": "Syncing"
+    of "synced": "Synced"
+    of "skipped": "Skipped"
+    of "refused": "Refused"
+    of "failed": "Sync did not finish"
+    else: syncStatus
+  ]
+  let lastSync = status{"lastSync"}.getStr("")
+  if lastSync.len > 0:
+    try:
+      parts.add("last synced " & parse(lastSync, "yyyy-MM-dd'T'HH:mm:ss'Z'", utc()).local.format("yyyy-MM-dd HH:mm"))
+    except CatchableError:
+      parts.add("last synced " & lastSync)
+  let totalBytes = status{"totalBytes"}.getInt(0)
+  if totalBytes > 0:
+    parts.add(formatBytes(status{"syncedBytes"}.getInt(0)) & " / " & formatBytes(totalBytes) & " (" & $status{"fileCount"}.getInt(0) & " files)")
+  parts.join(" · ")
+
 proc onFolderSyncClick(btn: GtkButton, userData: pointer) {.cdecl.} =
   let folderName = readSharedString(userData)
   if folderName.len > 0 and state.controlAvailable:
-    discard apiPost("/sync/" & folderName)
-    setMessage("Sync requested for folder '" & folderName & "'.")
+    let resp = apiPost("/sync/" & encodeUrl(folderName, usePlus = false))
+    if resp.hasKey("error"):
+      setMessage("Could not request a sync of '" & folderName & "': " & resp{"error"}.getStr())
+    else:
+      setMessage("Sync requested for folder '" & folderName & "'.")
   else:
     setMessage("Daemon is not running; cannot trigger sync.")
   deallocShared(userData)
@@ -424,13 +452,24 @@ proc createFolderRow(folder: JsonNode): GtkBox =
   let appendOnly = folder{"appendOnly"}.getBool(folder{"append_only"}.getBool(false))
   let totalBytes = status{"totalBytes"}.getInt(0)
   let syncedBytes = status{"syncedBytes"}.getInt(0)
-  let fileCount = status{"fileCount"}.getInt(0)
   let syncStatus = status{"status"}.getStr("idle")
-  
-  let statusText = syncStatus & " - " & formatBytes(syncedBytes) & " / " & formatBytes(totalBytes) & " (" & $fileCount & " files)"
-  let statusLabel = gtkLabelNew(cstring(statusText))
+  let problem = syncStatus in ["skipped", "refused", "failed"]
+
+  let statusLabel = gtkLabelNew(cstring(folderStatusText(status)))
   gtkWidgetAddCssClass(statusLabel, "caption")
+  if problem:
+    gtkWidgetAddCssClass(statusLabel, "error")
+  elif syncStatus == "synced":
+    gtkWidgetAddCssClass(statusLabel, "success")
   gtkBoxAppend(leftBox, statusLabel)
+
+  let detail = status{"detail"}.getStr("")
+  if problem and detail.len > 0:
+    let detailLabel = gtkLabelNew(cstring(detail))
+    gtkLabelSetWrap(detailLabel, 1)
+    gtkWidgetAddCssClass(detailLabel, "caption")
+    gtkWidgetAddCssClass(detailLabel, "error")
+    gtkBoxAppend(leftBox, detailLabel)
 
   let detailsLabel = gtkLabelNew(cstring("Encrypted: " & $folder{"encrypted"}.getBool(true) & " | Append-only: " & $appendOnly))
   gtkWidgetAddCssClass(detailsLabel, "caption")
@@ -453,7 +492,7 @@ proc createFolderRow(folder: JsonNode): GtkBox =
   discard gSignalConnect(cast[GObject](removeBtn), "clicked", cast[GCallback](onFolderRemoveClick), folderNameData3)
   gtkBoxAppend(row, actions)
   
-  if syncStatus == "syncing":
+  if syncStatus == "syncing" and totalBytes > 0:
     let progress = gtkProgressBarNew()
     let fraction = if totalBytes > 0: syncedBytes.float / totalBytes.float else: 0.0
     gtkProgressBarSetFraction(progress, fraction.cdouble)
@@ -1417,7 +1456,7 @@ proc createMainWindow(app: GtkApplication): GtkWindow =
     for folder in foldersJson{"folders"}.getElems():
       let name = folder{"name"}.getStr("")
       if name.len > 0:
-        discard apiPost("/sync/" & name)
+        discard apiPost("/sync/" & encodeUrl(name, usePlus = false))
   
   discard gSignalConnect(cast[GObject](syncAllBtn), "clicked", cast[GCallback](onSyncAllClick), nil)
   

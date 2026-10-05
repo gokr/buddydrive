@@ -20,7 +20,7 @@ import ../logutils
 ## needs. After the owner lists are exchanged, the folders of the buddy with
 ## the lower UUID are handled first, then those of the other.
 
-proc folderAppliesToBuddy(folder: FolderConfig, buddyId: string): bool =
+proc folderAppliesToBuddy*(folder: FolderConfig, buddyId: string): bool =
   folder.buddies.len == 0 or buddyId in folder.buddies
 
 proc backupBuddies(config: AppConfig, folder: FolderConfig): seq[string] =
@@ -57,6 +57,21 @@ const
   SessionEndLingerTimeout = chronos.seconds(2)
 
 type
+  FolderOutcome* = enum
+    foSynced
+    foSkipped
+    foRefused
+
+  FolderReport* = object
+    folderName*: string
+    outcome*: FolderOutcome
+    reason*: string
+
+  SessionReport* = ref object
+    ## What became of each of our folders in one session, for the GUIs.
+    ## Folders not listed did not get their turn: the session ended first.
+    folders*: seq[FolderReport]
+
   OwnedFolder = object
     transfer: FileTransfer
     files: seq[FileInfo]
@@ -68,6 +83,10 @@ type
     moves: seq[MoveInstruction]
     deletes: seq[string]
     restores: seq[FileInfo]
+
+proc note(report: SessionReport, folderName: string, outcome: FolderOutcome, reason = "") =
+  if report != nil:
+    report.folders.add(FolderReport(folderName: folderName, outcome: outcome, reason: reason))
 
 proc sendOwnerLists(
     owned: seq[OwnedFolder],
@@ -207,7 +226,7 @@ proc ownerServePhase(folder: OwnedFolder, conn: Connection): Future[bool] {.asyn
     else:
       return sessionFailed("unexpected " & $msg.kind & " while the buddy fetched " & folderName)
 
-proc ownerSyncFolder(folder: OwnedFolder, buddyId: string, conn: Connection): Future[bool] {.async.} =
+proc ownerSyncFolder(folder: OwnedFolder, buddyId: string, conn: Connection, report: SessionReport): Future[bool] {.async.} =
   let transfer = folder.transfer
   let folderName = transfer.scanner.folder.name
   let folderId = folderWireId(transfer.scanner.folder)
@@ -221,6 +240,7 @@ proc ownerSyncFolder(folder: OwnedFolder, buddyId: string, conn: Connection): Fu
   if answer.get().kind == msgFolderRefused:
     # Nothing is changed on either side; the folder simply waits.
     logSession("the buddy refused " & folderName & ": " & answer.get().refusedReason)
+    report.note(folderName, foRefused, answer.get().refusedReason)
     return true
   if answer.get().kind != msgListPathsResponse or answer.get().listResponseFolderId != folderId:
     return sessionFailed("unexpected answer about what the buddy stores of " & folderName)
@@ -263,6 +283,7 @@ proc ownerSyncFolder(folder: OwnedFolder, buddyId: string, conn: Connection): Fu
   # archive again.
   if not transfer.scanner.folder.appendOnly:
     transfer.pruneConfirmedDeletes(buddyId, folder.backupBuddies)
+  report.note(folderName, foSynced)
   true
 
 proc storageOwnerPhase(storage: StorageFolder, conn: Connection): Future[bool] {.async.} =
@@ -318,9 +339,9 @@ proc storageFetchPhase(storage: StorageFolder, conn: Connection, ownerFiles: seq
   except CatchableError as e:
     sessionFailed("connection lost after storing the buddy's " & storage.folderName & ": " & e.msg)
 
-proc runOwnerRound(owned: seq[OwnedFolder], buddyId: string, conn: Connection): Future[bool] {.async.} =
+proc runOwnerRound(owned: seq[OwnedFolder], buddyId: string, conn: Connection, report: SessionReport): Future[bool] {.async.} =
   for folder in owned:
-    if not await ownerSyncFolder(folder, buddyId, conn):
+    if not await ownerSyncFolder(folder, buddyId, conn, report):
       return false
   true
 
@@ -424,9 +445,11 @@ proc syncBuddyFolders*(
     protocol: SyncProtocol,
     ownerMachine = "",
     takeover = false,
+    report: SessionReport = nil,
 ): Future[bool] {.async.} =
   ## ownerMachine defaults to this installation's machine id. takeover claims
   ## our folders at this buddy even if another machine owns them there.
+  ## report, when given, collects the outcome of each of our folders.
   let machine =
     if ownerMachine.len > 0: ownerMachine
     else:
@@ -451,6 +474,7 @@ proc syncBuddyFolders*(
       # Left out of this session entirely, so the buddy keeps its copy as is.
       transfer.close()
       logSession("skipping " & folder.name & " this time: " & e.msg)
+      report.note(folder.name, foSkipped, e.msg)
 
   let sendListsFut = sendOwnerLists(owned, conn, protocol, machine, takeover)
   let listings = await receiveOwnerLists(conn, protocol)
@@ -460,7 +484,7 @@ proc syncBuddyFolders*(
   let ownFoldersFirst = config.buddy.uuid < buddyId
   var allOk =
     if ownFoldersFirst:
-      await runOwnerRound(owned, buddyId, conn)
+      await runOwnerRound(owned, buddyId, conn, report)
     else:
       await runStorageRound(config, buddyId, listings, conn, protocol)
   if allOk:
@@ -468,7 +492,7 @@ proc syncBuddyFolders*(
       if ownFoldersFirst:
         await runStorageRound(config, buddyId, listings, conn, protocol)
       else:
-        await runOwnerRound(owned, buddyId, conn)
+        await runOwnerRound(owned, buddyId, conn, report)
 
   await awaitSessionEnd(conn, protocol, ownFoldersFirst)
   allOk

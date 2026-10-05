@@ -98,6 +98,8 @@
         <input type="text" id="buddy-code" placeholder="XXXX-XXXX" required>
         <button type="button" class="btn btn-small" id="btn-generate-code">Generate</button>
       </div>
+      <label for="buddy-sync-time">Sync time (HH:MM, empty = any time)</label>
+      <input type="text" id="buddy-sync-time" placeholder="HH:MM">
       <p class="dim" id="pair-hint">Enter the code your buddy sent you, or generate one and send it to them. Both of you must use the same code.</p>
       <div class="dialog-actions">
         <button type="button" class="btn" id="btn-cancel-pair">Cancel</button>
@@ -133,13 +135,7 @@
         <input type="text" id="settings-relay-region" placeholder="eu">
       </fieldset>
 
-      <fieldset>
-        <legend>Sync Window</legend>
-        <label for="settings-sync-start">Start time (HH:MM, empty = always)</label>
-        <input type="text" id="settings-sync-start" placeholder="HH:MM">
-        <label for="settings-sync-end">End time (HH:MM)</label>
-        <input type="text" id="settings-sync-end" placeholder="HH:MM">
-      </fieldset>
+      <p class="dialog-note">When to sync is set per buddy, in the Pair with Buddy dialog.</p>
 
       <div class="dialog-actions">
         <button type="button" class="btn" id="btn-cancel-settings">Cancel</button>

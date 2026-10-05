@@ -43,9 +43,17 @@ proc getStateDb(): DbConn =
       synced_bytes INTEGER,
       file_count INTEGER,
       synced_files INTEGER,
-      status TEXT
+      status TEXT,
+      detail TEXT,
+      last_sync TEXT
     )
   """)
+  var folderColumns: seq[string] = @[]
+  for row in result.rows(sql"PRAGMA table_info(folder_state)"):
+    folderColumns.add(row[1])
+  for column in ["detail", "last_sync"]:
+    if column notin folderColumns:
+      result.exec(sql("ALTER TABLE folder_state ADD COLUMN " & column & " TEXT"))
   result.exec(sql"""
     CREATE TABLE IF NOT EXISTS cached_buddy_addrs (
       buddy_uuid TEXT PRIMARY KEY,
@@ -73,6 +81,39 @@ proc takeDaemonStopRequest*(): bool =
     discard
   false
 
+proc getSyncRequestPath*(): string =
+  config.getDataDir() / "sync-request"
+
+proc requestFolderSync*(folderName: string) =
+  ## Picked up by the daemon's status loop, like a stop request.
+  config.ensureDataDir()
+  let f = open(getSyncRequestPath(), fmAppend)
+  try:
+    f.writeLine(folderName)
+  finally:
+    f.close()
+
+proc takeSyncRequests*(): seq[string] =
+  ## The folder names asked for since the last call. The file is renamed
+  ## before reading, so a request written meanwhile lands in a new file.
+  let path = getSyncRequestPath()
+  let taken = path & ".taken"
+  try:
+    if not fileExists(path):
+      return @[]
+    moveFile(path, taken)
+    for line in readFile(taken).splitLines():
+      let name = line.strip()
+      if name.len > 0 and name notin result:
+        result.add(name)
+    removeFile(taken)
+  except CatchableError:
+    discard
+
+proc formatStatusTime(t: Time): string =
+  if t.toUnix() == 0: ""
+  else: t.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+
 proc writeRuntimeStatus*(peerId: string, addresses: seq[string], startTime: Time, running = true) =
   config.ensureDataDir()
   let db = getStateDb()
@@ -94,14 +135,14 @@ proc writeLiveStatus*(buddyStatuses: seq[BuddyStatus], folderStatuses: seq[SyncS
       db.exec(sql"""
         INSERT INTO buddy_state (id, name, state, latency_ms, last_activity)
         VALUES (?, ?, ?, ?, ?)
-      """, b.id, b.name, $b.state, b.latencyMs, b.lastSync.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'"))
+      """, b.id, b.name, $b.state, b.latencyMs, formatStatusTime(b.lastSync))
     
     db.exec(sql"DELETE FROM folder_state")
     for f in folderStatuses:
       db.exec(sql"""
-        INSERT INTO folder_state (name, total_bytes, synced_bytes, file_count, synced_files, status)
-        VALUES (?, ?, ?, ?, ?, ?)
-      """, f.folder, f.totalBytes, f.syncedBytes, f.fileCount, f.syncedFiles, f.status)
+        INSERT INTO folder_state (name, total_bytes, synced_bytes, file_count, synced_files, status, detail, last_sync)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      """, f.folder, f.totalBytes, f.syncedBytes, f.fileCount, f.syncedFiles, f.status, f.detail, formatStatusTime(f.lastSync))
   finally:
     db.close()
 
@@ -224,6 +265,10 @@ proc statusJson(): JsonNode =
   }
 
 proc buddiesJson(): JsonNode =
+  var syncTimes = initTable[string, string]()
+  if config.configExists():
+    for buddy in config.loadConfig().buddies:
+      syncTimes[buddy.id.uuid] = buddy.syncTime
   let statePath = config.getDataDir() / "state.db"
   if fileExists(statePath):
     let db = getStateDb()
@@ -235,7 +280,8 @@ proc buddiesJson(): JsonNode =
           "name": row[1],
           "state": row[2],
           "latencyMs": row[3].parseInt(),
-          "lastSync": row[4]
+          "lastSync": row[4],
+          "syncTime": syncTimes.getOrDefault(row[0])
         })
       if buddies.len > 0:
         return %*{"buddies": buddies}
@@ -253,7 +299,7 @@ proc buddiesJson(): JsonNode =
       "pairingCode": buddy.pairingCode,
       "state": "disconnected",
       "latencyMs": -1,
-      "lastSync": buddy.addedAt.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+      "lastSync": "",
       "syncTime": buddy.syncTime
     })
   %*{"buddies": buddies}
@@ -298,13 +344,15 @@ proc foldersJson(): JsonNode =
   if fileExists(statePath):
     let db = getStateDb()
     try:
-      for row in db.rows(sql"SELECT name, total_bytes, synced_bytes, file_count, synced_files, status FROM folder_state"):
+      for row in db.rows(sql"SELECT name, total_bytes, synced_bytes, file_count, synced_files, status, detail, last_sync FROM folder_state"):
         liveFolders[row[0]] = %*{
           "totalBytes": row[1].parseInt(),
           "syncedBytes": row[2].parseInt(),
           "fileCount": row[3].parseInt(),
           "syncedFiles": row[4].parseInt(),
-          "status": row[5]
+          "status": row[5],
+          "detail": row[6],
+          "lastSync": row[7]
         }
     finally:
       db.close()
@@ -326,7 +374,9 @@ proc foldersJson(): JsonNode =
         "syncedBytes": 0,
         "fileCount": 0,
         "syncedFiles": 0,
-        "status": "idle"
+        "status": "idle",
+        "detail": "",
+        "lastSync": ""
       }
     }
     if liveFolders.hasKey(folder.name):
@@ -650,6 +700,16 @@ proc exportRecoveryHandler(): tuple[status: int, response: JsonNode] =
     "enabled": cfg.recovery.enabled
   })
 
+proc syncFolderByName(name: string): tuple[status: int, response: JsonNode] =
+  if not config.configExists():
+    return (404, %*{"error": "Folder not found", "code": "NOT_FOUND"})
+  let cfg = config.loadConfig()
+  for folder in cfg.folders:
+    if folder.name == name:
+      requestFolderSync(name)
+      return (200, %*{"ok": true, "message": "Sync requested", "folder": name})
+  (404, %*{"error": "Folder not found", "code": "NOT_FOUND"})
+
 proc syncConfigHandler(): tuple[status: int, response: JsonNode] =
   if not config.configExists():
     return (400, %*{"error": "No config found", "code": "NO_CONFIG"})
@@ -723,7 +783,8 @@ proc handleRequest*(raw: string): string =
         jsonResponse(200, %*{"ok": true, "message": "Daemon stop requested"})
       else:
         if req.path.startsWith("/sync/"):
-          jsonResponse(200, %*{"ok": true, "message": "Sync started", "folder": req.path[6 .. ^1]})
+          let resp = syncFolderByName(req.path[6 .. ^1])
+          jsonResponse(resp.status, resp.response)
         else:
           jsonResponse(404, %*{"error": "Not found", "code": "NOT_FOUND"})
     of "DELETE":

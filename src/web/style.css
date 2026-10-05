@@ -154,6 +154,27 @@ main {
   color: var(--text-dim);
 }
 
+.folder-status-synced {
+  color: var(--success);
+}
+
+.folder-status-skipped,
+.folder-status-refused,
+.folder-status-failed {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.folder-problem {
+  color: var(--danger);
+}
+
+.dialog-note {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin: 8px 0;
+}
+
 .list-item-right {
   display: flex;
   align-items: center;

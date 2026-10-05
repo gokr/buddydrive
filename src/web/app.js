@@ -83,6 +83,28 @@ const sharingText = (folder) => {
   return `Backed up to ${target} · ${traits.join(", ")}`;
 };
 
+const FOLDER_STATUS_TEXT = {
+  idle: "Not synced yet",
+  syncing: "Syncing",
+  synced: "Synced",
+  skipped: "Skipped",
+  refused: "Refused",
+  failed: "Sync did not finish",
+};
+
+const folderStatusLine = (status) => {
+  const syncStatus = status.status || "idle";
+  const parts = [FOLDER_STATUS_TEXT[syncStatus] || syncStatus];
+  if (status.lastSync) {
+    parts.push(`last synced ${new Date(status.lastSync).toLocaleString()}`);
+  }
+  const totalBytes = status.totalBytes || 0;
+  if (totalBytes > 0) {
+    parts.push(`${formatBytes(status.syncedBytes || 0)} / ${formatBytes(totalBytes)} (${status.fileCount || 0} files)`);
+  }
+  return parts.join(" · ");
+};
+
 const renderFolders = (folders) => {
   latestFolders = folders;
   dom.foldersList.innerHTML = "";
@@ -92,8 +114,8 @@ const renderFolders = (folders) => {
     const status = folder.status || {};
     const totalBytes = status.totalBytes || 0;
     const syncedBytes = status.syncedBytes || 0;
-    const fileCount = status.fileCount || 0;
     const syncStatus = status.status || "idle";
+    const problem = ["skipped", "refused", "failed"].includes(syncStatus);
     const fraction = totalBytes > 0 ? (syncedBytes / totalBytes) * 100 : 0;
 
     const item = document.createElement("div");
@@ -103,14 +125,11 @@ const renderFolders = (folders) => {
         <div class="list-item-name">${escHtml(folder.name)}</div>
         <div class="list-item-detail">${escHtml(folder.path)}</div>
         <div class="list-item-detail">${escHtml(sharingText(folder))}</div>
-        <div class="list-item-detail">
-          ${escHtml(syncStatus)} &mdash;
-          ${formatBytes(syncedBytes)} / ${formatBytes(totalBytes)}
-          (${fileCount} files)
-        </div>
+        <div class="list-item-detail folder-status folder-status-${escAttr(syncStatus)}">${escHtml(folderStatusLine(status))}</div>
+        ${problem && status.detail ? `<div class="list-item-detail folder-problem">${escHtml(status.detail)}</div>` : ""}
       </div>
       <div class="list-item-right">
-        ${syncStatus === "syncing" ? `
+        ${syncStatus === "syncing" && totalBytes > 0 ? `
           <div class="progress-bar">
             <div class="progress-bar-fill" style="width:${fraction}%"></div>
           </div>
@@ -145,7 +164,7 @@ const renderBuddies = (buddies, storage = []) => {
     item.innerHTML = `
       <div class="list-item-info">
         <div class="list-item-name">${escHtml(buddy.name || "Unknown")}</div>
-        <div class="list-item-detail">${escHtml(shortId)}</div>
+        <div class="list-item-detail">${escHtml(shortId)} · syncs ${buddy.syncTime ? `around ${escHtml(buddy.syncTime)}` : "any time"}</div>
         ${storedText ? `<div class="list-item-detail">${escHtml(storedText)}</div>` : ""}
       </div>
       <div class="list-item-right">
@@ -252,8 +271,6 @@ const initEvents = () => {
       document.getElementById("settings-announce").value = net.announce_addr || "";
       document.getElementById("settings-relay-url").value = net.api_base_url || "";
       document.getElementById("settings-relay-region").value = net.relay_region || "";
-      document.getElementById("settings-sync-start").value = net.sync_window_start || "";
-      document.getElementById("settings-sync-end").value = net.sync_window_end || "";
     } catch (e) {
       // leave empty
     }
@@ -265,7 +282,7 @@ const initEvents = () => {
     try {
       const data = await api.get("/folders");
       const folders = data.folders || [];
-      await Promise.all(folders.map((f) => api.post(`/sync/${f.name}`)));
+      await Promise.all(folders.map((f) => api.post(`/sync/${encodeURIComponent(f.name)}`)));
       await refresh();
     } catch (e) {
       console.error("Sync all failed:", e);
@@ -379,6 +396,7 @@ const initEvents = () => {
   document.getElementById("btn-pair-buddy").addEventListener("click", () => {
     document.getElementById("buddy-id").value = "";
     document.getElementById("buddy-pair-name").value = "";
+    document.getElementById("buddy-sync-time").value = "";
     document.getElementById("buddy-code").value = "";
     document.getElementById("pair-hint").textContent =
       "Enter the code your buddy sent you, or generate one and send it to them. Both of you must use the same code.";
@@ -402,9 +420,12 @@ const initEvents = () => {
     const buddyId = document.getElementById("buddy-id").value.trim();
     const buddyName = document.getElementById("buddy-pair-name").value.trim();
     const code = document.getElementById("buddy-code").value.trim();
+    const syncTime = document.getElementById("buddy-sync-time").value.trim();
     if (!buddyId || !code) return;
 
-    await api.post("/buddies/pair", { buddyId, buddyName, code });
+    const body = { buddyId, buddyName, code };
+    if (syncTime) body.sync_time = syncTime;
+    await api.post("/buddies/pair", body);
     closeDialog("dialog-pair-buddy");
     await refresh();
   });
@@ -432,9 +453,6 @@ const initEvents = () => {
 
     const relayRegion = document.getElementById("settings-relay-region").value.trim();
     if (relayRegion) body.network.relay_region = relayRegion;
-
-    body.network.sync_window_start = document.getElementById("settings-sync-start").value.trim();
-    body.network.sync_window_end = document.getElementById("settings-sync-end").value.trim();
 
     const result = await api.post("/config", body);
     closeDialog("dialog-settings");

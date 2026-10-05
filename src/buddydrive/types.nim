@@ -83,6 +83,8 @@ type
     fileCount*: int
     syncedFiles*: int
     status*: string
+    detail*: string
+    lastSync*: Time
   
   BuddyStatus* = object
     id*: string

@@ -10,19 +10,19 @@ import ../../support/sync_fixtures
 
 useIsolatedDataDir("session")
 
-proc runBridgeSync(cfg1: AppConfig, cfg2: AppConfig): Future[tuple[leftOk: bool, rightOk: bool]] {.async.} =
+proc runBridgeSync(cfg1: AppConfig, cfg2: AppConfig, report: SessionReport = nil): Future[tuple[leftOk: bool, rightOk: bool]] {.async.} =
   let (left, right) = bridgedConnections(closeTogether = false)
   defer:
     await left.close()
     await right.close()
 
-  let fut1 = syncBuddyFolders(cfg1, cfg1.buddies[0].id.uuid, left, newSyncProtocol())
+  let fut1 = syncBuddyFolders(cfg1, cfg1.buddies[0].id.uuid, left, newSyncProtocol(), report = report)
   let fut2 = syncBuddyFolders(cfg2, cfg2.buddies[0].id.uuid, right, newSyncProtocol())
   result.leftOk = await fut1
   result.rightOk = await fut2
 
-proc syncBoth(cfg1, cfg2: AppConfig) =
-  let outcome = waitFor runBridgeSync(cfg1, cfg2)
+proc syncBoth(cfg1, cfg2: AppConfig, report: SessionReport = nil) =
+  let outcome = waitFor runBridgeSync(cfg1, cfg2, report)
   check outcome.leftOk
   check outcome.rightOk
 
@@ -239,8 +239,12 @@ suite "Session sync":
 
       moveDir(setup.one, testDir / "unplugged")
       writeFile(setup.two / "new.txt", "new\n")
-      syncBoth(setup.cfgA, setup.cfgB)
+      let report = SessionReport()
+      syncBoth(setup.cfgA, setup.cfgB, report)
 
+      check report.folders.len == 2
+      check report.folders.anyIt(it.folderName == "one" and it.outcome == foSkipped and it.reason.len > 0)
+      check report.folders.anyIt(it.folderName == "two" and it.outcome == foSynced)
       check readBlobs(storedOne) == before
       check storedFiles(testDir / "b-stores" / "folder-two", ".blob").len == 2
 
@@ -435,14 +439,14 @@ suite "Session sync":
       check storedFiles(testDir / "b-stores" / "folder-a", ".blob").len == 0
       check storedFiles(testDir / "c-stores" / "folder-a", ".blob").len == 0
 
-  proc syncAs(owner: AppConfig, buddy: AppConfig, machine: string, takeover = false) =
+  proc syncAs(owner: AppConfig, buddy: AppConfig, machine: string, takeover = false, report: SessionReport = nil) =
     proc run(): Future[tuple[leftOk: bool, rightOk: bool]] {.async.} =
       let (left, right) = bridgedConnections(closeTogether = false)
       defer:
         await left.close()
         await right.close()
       let fut1 = syncBuddyFolders(owner, owner.buddies[0].id.uuid, left, newSyncProtocol(),
-        ownerMachine = machine, takeover = takeover)
+        ownerMachine = machine, takeover = takeover, report = report)
       let fut2 = syncBuddyFolders(buddy, buddy.buddies[0].id.uuid, right, newSyncProtocol())
       result.leftOk = await fut1
       result.rightOk = await fut2
@@ -475,8 +479,12 @@ suite "Session sync":
       check before.len == 1
 
       writeFile(m.newDir / "from-new.txt", "new\n")
-      syncAs(m.new, m.buddy, "machine-new")
+      let report = SessionReport()
+      syncAs(m.new, m.buddy, "machine-new", report = report)
 
+      check report.folders.len == 1
+      check report.folders[0].outcome == foRefused
+      check report.folders[0].reason.len > 0
       check readBlobs(stored) == before
       check not fileExists(m.newDir / "from-old.txt")
       check fileExists(m.newDir / "from-new.txt")

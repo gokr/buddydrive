@@ -1,4 +1,5 @@
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, times, unittest]
+import db_connector/db_sqlite
 import ../../../src/buddydrive/config as buddyconfig
 import ../../../src/buddydrive/control
 import ../../../src/buddydrive/types
@@ -63,10 +64,6 @@ suite "handleRequest routing":
   test "response contains JSON content type":
     let resp = handleRequest("GET /status HTTP/1.1\r\n\r\n")
     check "Content-Type: application/json" in resp
-
-  test "POST /sync/ triggers sync endpoint":
-    let resp = handleRequest("POST /sync/photos HTTP/1.1\r\n\r\n")
-    check "200" in resp
 
 suite "control API handlers":
   test "POST /buddies/pair stores pairing code":
@@ -278,3 +275,45 @@ suite "Folder endpoints":
       let response = handleRequest("DELETE /folders/Okrypterade%20filer HTTP/1.1\r\n\r\n")
       check responseStatus(response) == 200
       check buddyconfig.loadConfig().folders.len == 0
+
+  test "a sync request for a folder is queued for the daemon":
+    withTestDir("control_sync_request"):
+      initTestConfig(testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      discard post("/folders", %*{"name": "My photos", "path": testDir})
+      check responseStatus(handleRequest("POST /sync/My%20photos HTTP/1.1\r\n\r\n")) == 200
+      check responseStatus(handleRequest("POST /sync/My%20photos HTTP/1.1\r\n\r\n")) == 200
+      check takeSyncRequests() == @["My photos"]
+      check takeSyncRequests().len == 0
+
+  test "a sync request for an unknown folder is refused":
+    withTestDir("control_sync_unknown"):
+      initTestConfig(testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      check responseStatus(handleRequest("POST /sync/nope HTTP/1.1\r\n\r\n")) == 404
+      check takeSyncRequests().len == 0
+
+  test "folder problems and the last sync reach GET /folders":
+    withTestDir("control_folder_status"):
+      initTestConfig(testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      # A state.db from before the detail columns existed.
+      let old = open(testDir / "state.db", "", "", "")
+      old.exec(sql"CREATE TABLE folder_state (name TEXT PRIMARY KEY, total_bytes INTEGER, synced_bytes INTEGER, file_count INTEGER, synced_files INTEGER, status TEXT)")
+      old.close()
+      discard post("/folders", %*{"name": "docs", "path": testDir})
+      let synced = initTime(1_800_000_000, 0)
+      writeLiveStatus(@[], @[SyncStatus(folder: "docs", status: "refused",
+        detail: "Bob refused it: owned by another machine", lastSync: synced)])
+      let folders = responseJson(handleRequest("GET /folders HTTP/1.1\r\n\r\n"))["folders"]
+      check folders.len == 1
+      let status = folders[0]["status"]
+      check status["status"].getStr() == "refused"
+      check status["detail"].getStr() == "Bob refused it: owned by another machine"
+      check status["lastSync"].getStr() == synced.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
