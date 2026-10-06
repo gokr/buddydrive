@@ -322,8 +322,12 @@ proc ensureFolderIdentities*(config: var AppConfig): seq[string] =
       result.add("folder " & folder.name & " had no id; assigned " & folder.id)
     if not folder.hasUsableKey():
       folder.folderKey = generateKey()
-      result.add("folder " & folder.name & " had no encryption key; generated one" &
-        (if folder.encrypted: ". Files already sent to a buddy from it were not encrypted" else: ""))
+      if folder.encrypted:
+        result.add("folder " & folder.name & " had no encryption key; generated one. " &
+          "Files already sent to a buddy from it were not encrypted")
+      else:
+        result.add("folder " & folder.name & " had no folder key; generated one " &
+          "(unused while the folder is not encrypted)")
 
 proc storageBaseDir*(config: AppConfig): string =
   if config.storageBasePath.len > 0:

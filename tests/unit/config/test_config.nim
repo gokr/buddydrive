@@ -1,5 +1,5 @@
 import std/unittest
-import std/[os, times, strutils]
+import std/[os, sequtils, times, strutils]
 import ../../../src/buddydrive/types
 import ../../../src/buddydrive/config as buddyconfig
 import ../../../src/buddydrive/crypto
@@ -250,6 +250,17 @@ suite "Folder identity":
     check cfg.folders[0].hasUsableKey()
     check cfg.folders[1] == untouched
     check cfg.ensureFolderIdentities().len == 0
+
+  test "a repaired unencrypted folder is not said to have lost encryption":
+    var cfg = newAppConfig(newBuddyId("hh", "heidi"))
+    var plain = newFolderConfig("shared", "/tmp/c")
+    plain.encrypted = false
+    var sealed = newFolderConfig("private", "/tmp/d")
+    sealed.encrypted = true
+    cfg.folders = @[plain, sealed]
+    let changes = cfg.ensureFolderIdentities()
+    check changes.anyIt("shared had no folder key" in it and "not encrypted)" in it)
+    check changes.anyIt("private had no encryption key" in it and "were not encrypted" in it)
 
 suite "Buddy management":
   test "addBuddy adds and persists buddy":
