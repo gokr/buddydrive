@@ -65,6 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation was consolidated under `docs/`, the website is deployed via
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script.
+- Integration tests are now self-contained and fail loudly: an in-process TCP
+  relay and a KV API stub (which verifies Ed25519 signatures for real) replace
+  the network tests that previously turned failures into skips, and each test
+  process gets an isolated config and index directory. New coverage includes
+  bidirectional sync in one session, deletion propagation, append-only folders
+  ignoring a remote delete, and mismatched pairing codes not meeting on the
+  relay.
+- Added `docs/architecture.md` describing the sync session and sync protocol.
 
 ### Fixed
 
@@ -78,5 +86,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DNS relay resolution: `/dns4/` and `/dns6/` multiaddresses are now resolved
   to IP addresses before dialing, as the raw TCP transport requires wire
   addresses.
-- macOS build and runtime: `libsodium.dylib` loading and the missing
-  `liblz4-dev` dependency.
+- macOS build and runtime: `libsodium.dylib` loading, the missing
+  `liblz4-dev` dependency, and the Homebrew `/opt/homebrew/lib` link path.
+- Sync no longer deletes a file that exists on only one side. A remote path is
+  now deleted only when the index shows the folder previously held it;
+  anything never seen locally stays in the projection and is pulled. Index rows
+  for vanished files are kept until deletions have propagated, so a failed
+  session can at worst resurrect a deleted file rather than lose a live one.
+- Deletion propagation now refuses to delete from append-only folders, which
+  previously only blocked remote overwrites.
+- Sync sessions end with an explicit session-end handshake, so neither peer
+  closes the connection while the buddy still has data in flight. Over the
+  public relay this previously truncated the stream and reported a failed sync
+  even though both sides had transferred everything.
+- Recovery now distinguishes "no config is stored for this recovery phrase"
+  from "the config service could not be reached", rather than reporting every
+  non-200 response as a missing backup.
