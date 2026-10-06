@@ -504,7 +504,17 @@ proc syncBuddyFolders*(
   defer:
     for folder in owned:
       folder.transfer.close()
+  var sentIds = initTable[string, string]()
   for folder in applicableFolders(config, buddyId):
+    let wireId = folderWireId(folder)
+    if wireId in sentIds:
+      # The buddy rejects a second list with the same id, which would end
+      # the session for every folder.
+      let reason = "it has the same id as folder " & sentIds[wireId] & " in config.toml"
+      logSession("skipping " & folder.name & ": " & reason)
+      report.note(folder.name, foSkipped, reason)
+      continue
+    sentIds[wireId] = folder.name
     let transfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
     try:
       owned.add(OwnedFolder(

@@ -196,6 +196,24 @@ suite "Session sync":
       syncBoth(peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[replacement]), cfgB)
       check readFile(restored / "old.txt") == "backed up long ago\n"
 
+  test "a folder with the same id as another is skipped, not fatal":
+    withTestDir("session_duplicate_id"):
+      createDir(testDir / "first")
+      createDir(testDir / "copy")
+      createDir(testDir / "b")
+      writeFile(testDir / "first" / "kept.txt", "kept\n")
+      writeFile(testDir / "copy" / "other.txt", "other\n")
+      let first = syncFolder("folder-a", testDir / "first", name = "first")
+      var copy = syncFolder("folder-a", testDir / "copy", name = "copy")
+      copy.folderKey = first.folderKey
+      let report = SessionReport()
+      syncBoth(peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[first, copy]),
+        peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")]), report)
+
+      check report.folders.anyIt(it.folderName == "copy" and it.outcome == foSkipped and "first" in it.reason)
+      check report.folders.anyIt(it.folderName == "first" and it.outcome == foSynced)
+      check storedFiles(testDir / "b-stores" / "folder-a", ".blob").len == 1
+
   test "renames move the stored blob instead of sending it again":
     withTestDir("session_move"):
       let folderA = testDir / "a"
