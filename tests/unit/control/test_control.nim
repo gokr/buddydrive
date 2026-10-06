@@ -127,6 +127,38 @@ suite "control API handlers":
       check responseStatus(response) == 400
       check buddyconfig.loadConfig().buddies.len == 0
 
+  test "the GUI locale is stored in config.toml and can be cleared":
+    withTestDir("controllocale"):
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      initTestConfig(testDir)
+      let setLocale = proc (locale: string): int =
+        responseStatus(handleRequest("POST /config HTTP/1.1\r\n\r\n" & $(%*{"gui": {"locale": locale}})))
+
+      check setLocale("sv-SE") == 200
+      check buddyconfig.loadConfig().guiLocale == "sv-SE"
+      check "[gui]\nlocale = \"sv-SE\"" in readFile(buddyconfig.getConfigPath())
+      check responseJson(handleRequest("GET /config HTTP/1.1\r\n\r\n"))["gui"]["locale"].getStr() == "sv-SE"
+
+      check setLocale("sv SE") == 400
+      check setLocale("\"; rm") == 400
+      check buddyconfig.loadConfig().guiLocale == "sv-SE"
+
+      check setLocale("") == 200
+      check buddyconfig.loadConfig().guiLocale == ""
+      check "[gui]" notin readFile(buddyconfig.getConfigPath())
+
+  test "isLocaleTag":
+    check isLocaleTag("")
+    check isLocaleTag("sv")
+    check isLocaleTag("sv-SE")
+    check isLocaleTag("zh-Hant-TW")
+    check not isLocaleTag("-SE")
+    check not isLocaleTag("sv--SE")
+    check not isLocaleTag("sv_SE")
+    check not isLocaleTag("1sv")
+
   test "POST /buddies/update renames a buddy and sets when to sync":
     withTestDir("controlbuddyupdate"):
       defer:

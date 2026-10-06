@@ -313,6 +313,9 @@ relay_region = "eu"
 storage_base_path = ""
 bandwidth_limit_kbps = 0
 
+[gui]
+locale = "sv-SE"   # optional: date and number format in the web GUI; empty = the browser's language
+
 [[folders]]
 id = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
 name = "docs"

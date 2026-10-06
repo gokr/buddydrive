@@ -173,6 +173,23 @@
         <input type="text" id="settings-relay-region" placeholder="eu">
       </fieldset>
 
+      <fieldset>
+        <legend>Display</legend>
+        <label for="settings-locale">Date and number format</label>
+        <input type="text" id="settings-locale" list="locale-suggestions" placeholder="Browser default">
+        <datalist id="locale-suggestions">
+          <option value="sv-SE">Svenska (Sverige)</option>
+          <option value="en-GB">English (UK)</option>
+          <option value="en-US">English (US)</option>
+          <option value="de-DE">Deutsch (Deutschland)</option>
+          <option value="fi-FI">Suomi (Suomi)</option>
+          <option value="nb-NO">Norsk bokmål (Norge)</option>
+          <option value="da-DK">Dansk (Danmark)</option>
+        </datalist>
+        <p class="dialog-note" id="settings-locale-preview"></p>
+        <p class="dialog-note">A language tag such as sv-SE. Empty uses the browser's language. Stored in config.toml, so every browser showing this daemon uses it.</p>
+      </fieldset>
+
       <p class="dialog-note">When to sync is set per buddy: use Edit on a buddy.</p>
 
       <div class="dialog-actions">

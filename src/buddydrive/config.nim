@@ -139,6 +139,10 @@ proc configToToml*(config: AppConfig, includeHeader = false): string =
   result.add("storage_base_path = \"" & escapeToml(config.storageBasePath) & "\"\n")
   result.add("bandwidth_limit_kbps = " & $config.bandwidthLimitKBps & "\n\n")
 
+  if config.guiLocale.len > 0:
+    result.add("[gui]\n")
+    result.add("locale = \"" & escapeToml(config.guiLocale) & "\"\n\n")
+
   if config.folders.len > 0:
     result.add("[[folders]]\n")
     for i, folder in config.folders:
@@ -204,6 +208,9 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
     result.relayRegion = toml["network"]{"relay_region"}.getStr("")
     result.storageBasePath = toml["network"]{"storage_base_path"}.getStr("")
     result.bandwidthLimitKBps = toml["network"]{"bandwidth_limit_kbps"}.getInt(0)
+
+  if "gui" in toml:
+    result.guiLocale = toml["gui"]{"locale"}.getStr("")
 
   result.folders = @[]
   if "folders" in toml:

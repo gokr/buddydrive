@@ -39,6 +39,8 @@ type
     relayRegion*: string
     storageBasePath*: string
     bandwidthLimitKBps*: int
+    guiLocale*: string
+      ## BCP 47 tag the GUIs format dates and numbers with; empty = the browser's.
     folders*: seq[FolderConfig]
     buddies*: seq[BuddyInfo]
   

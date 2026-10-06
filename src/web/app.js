@@ -62,13 +62,68 @@ const api = {
   },
 };
 
-// Formatting
-const formatBytes = (bytes) => {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.floor(bytes / 1024)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${Math.floor(bytes / (1024 * 1024))} MB`;
-  return `${Math.floor(bytes / (1024 * 1024 * 1024))} GB`;
+// Formatting. Dates arrive as UTC ISO 8601 and are shown in the browser's
+// time zone, in the locale from the [gui] locale setting, else the browser's.
+const makeFormatters = (locale) => {
+  const tag = locale || undefined;
+  return {
+    locale: new Intl.DateTimeFormat(tag).resolvedOptions().locale,
+    dateTime: new Intl.DateTimeFormat(tag, { dateStyle: "short", timeStyle: "medium" }),
+    decimal: new Intl.NumberFormat(tag, { maximumFractionDigits: 1 }),
+    integer: new Intl.NumberFormat(tag, { maximumFractionDigits: 0 }),
+    relative: new Intl.RelativeTimeFormat(tag, { numeric: "auto" }),
+  };
 };
+
+const isKnownLocale = (locale) => {
+  if (!locale) return true;
+  try {
+    return Intl.DateTimeFormat.supportedLocalesOf([locale]).length > 0;
+  } catch (e) {
+    return false;
+  }
+};
+
+let fmt = makeFormatters("");
+
+const setLocale = (locale) => {
+  fmt = makeFormatters(isKnownLocale(locale) ? locale : "");
+};
+
+const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];
+
+const formatBytes = (bytes, f = fmt) => {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${(unit === 0 ? f.integer : f.decimal).format(value)} ${BYTE_UNITS[unit]}`;
+};
+
+const formatCount = (n) => fmt.integer.format(n || 0);
+
+const formatTime = (iso, f = fmt) => (iso ? f.dateTime.format(new Date(iso)) : "");
+
+const RELATIVE_STEPS = [
+  ["second", 60],
+  ["minute", 60],
+  ["hour", 24],
+  ["day", 7],
+  ["week", Infinity],
+];
+
+const formatRelative = (iso, f = fmt) => {
+  let value = (new Date(iso).getTime() - Date.now()) / 1000;
+  for (const [unit, size] of RELATIVE_STEPS) {
+    if (Math.abs(value) < size) return f.relative.format(Math.round(value), unit);
+    value /= size;
+  }
+  return "";
+};
+
+const formatTimeAndAge = (iso) => (iso ? `${formatTime(iso)} (${formatRelative(iso)})` : "");
 
 const formatUptime = (seconds) => {
   const h = Math.floor(seconds / 3600);
@@ -106,11 +161,11 @@ const folderStatusLine = (status) => {
   const syncStatus = status.status || "idle";
   const parts = [FOLDER_STATUS_TEXT[syncStatus] || syncStatus];
   if (status.lastSync) {
-    parts.push(`last synced ${new Date(status.lastSync).toLocaleString()}`);
+    parts.push(`last synced ${formatTimeAndAge(status.lastSync)}`);
   }
   const totalBytes = status.totalBytes || 0;
   if (totalBytes > 0) {
-    parts.push(`${formatBytes(status.syncedBytes || 0)} / ${formatBytes(totalBytes)} (${status.fileCount || 0} files)`);
+    parts.push(`${formatBytes(status.syncedBytes || 0)} / ${formatBytes(totalBytes)} (${formatCount(status.fileCount)} files)`);
   }
   return parts.join(" · ");
 };
@@ -166,7 +221,7 @@ const renderBuddies = (buddies, storage = []) => {
     const latency = buddy.latencyMs >= 0 ? `${buddy.latencyMs}ms` : "";
     const stored = storageById[buddy.id];
     const storedText = stored
-      ? `Storing ${stored.files} files (${formatBytes(stored.bytes)}) in ${stored.path}`
+      ? `Storing ${formatCount(stored.files)} files (${formatBytes(stored.bytes)}) in ${stored.path}`
       : "";
 
     const item = document.createElement("div");
@@ -189,7 +244,6 @@ const renderBuddies = (buddies, storage = []) => {
   }
 };
 
-const formatTime = (iso) => (iso ? new Date(iso).toLocaleString() : "");
 
 const formatDuration = (startIso, endIso) => {
   const seconds = Math.max(0, Math.round((new Date(endIso) - new Date(startIso)) / 1000));
@@ -198,7 +252,7 @@ const formatDuration = (startIso, endIso) => {
   return `${Math.floor(seconds / 3600)} h ${Math.floor((seconds % 3600) / 60)} min`;
 };
 
-const fileCountText = (n) => `${n} file${n === 1 ? "" : "s"}`;
+const fileCountText = (n) => `${formatCount(n)} file${n === 1 ? "" : "s"}`;
 
 const sessionBuddy = (s) => s.buddyName || (s.buddyId || "").substring(0, 8) || "a buddy";
 
@@ -261,7 +315,7 @@ const renderActivity = (sessions) => {
 
   if (last) {
     lines.push(activityLine("",
-      `<strong>Last sync</strong> with ${escHtml(sessionBuddy(last))}: ${escHtml(formatTime(last.startedAt))}` +
+      `<strong>Last sync</strong> with ${escHtml(sessionBuddy(last))}: ${escHtml(formatTimeAndAge(last.startedAt))}` +
       `${escHtml(durationText(last))} · ${escHtml(dialText(last))} · ${outcomeSpan(last)}`));
     lines.push(activityLine("activity-detail", escHtml(transferText(last))));
   } else if (running.length === 0) {
@@ -511,11 +565,27 @@ const initEvents = () => {
       document.getElementById("settings-announce").value = net.announce_addr || "";
       document.getElementById("settings-relay-url").value = net.api_base_url || "";
       document.getElementById("settings-relay-region").value = net.relay_region || "";
+      document.getElementById("settings-locale").value = data.gui?.locale || "";
     } catch (e) {
       // leave empty
     }
+    updateLocalePreview();
     openDialog("dialog-settings");
   });
+
+  const updateLocalePreview = () => {
+    const value = document.getElementById("settings-locale").value.trim();
+    const preview = document.getElementById("settings-locale-preview");
+    if (!isKnownLocale(value)) {
+      preview.textContent = `This browser does not know the locale "${value}".`;
+      return;
+    }
+    const f = makeFormatters(value);
+    const example = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    preview.textContent = `${f.locale}: ${formatTime(example, f)} (${formatRelative(example, f)}) · ${formatBytes(1288490189, f)}`;
+  };
+
+  document.getElementById("settings-locale").addEventListener("input", updateLocalePreview);
 
   // Sync All
   document.getElementById("btn-sync-all").addEventListener("click", (e) => {
@@ -726,7 +796,12 @@ const initEvents = () => {
 
   document.getElementById("btn-submit-settings").addEventListener("click", async (e) => {
     e.preventDefault();
-    const body = { buddy: {}, network: {} };
+    const locale = document.getElementById("settings-locale").value.trim();
+    if (!isKnownLocale(locale)) {
+      updateLocalePreview();
+      return;
+    }
+    const body = { buddy: {}, network: {}, gui: { locale } };
 
     const name = document.getElementById("settings-name").value.trim();
     if (name) body.buddy.name = name;
@@ -744,6 +819,7 @@ const initEvents = () => {
     if (relayRegion) body.network.relay_region = relayRegion;
 
     const result = await api.post("/config", body);
+    setLocale(locale);
     closeDialog("dialog-settings");
     await refresh();
     if (result.restartRequired) {
@@ -756,8 +832,17 @@ const initEvents = () => {
 };
 
 // Init
+const loadLocale = async () => {
+  try {
+    const data = await api.get("/config");
+    setLocale(data.gui?.locale || "");
+  } catch (e) {
+    setLocale("");
+  }
+};
+
 initEvents();
-refresh();
+loadLocale().then(refresh);
 refreshLogs();
 setInterval(refresh, REFRESH_INTERVAL);
 setInterval(() => {

@@ -584,6 +584,9 @@ proc configJson(): JsonNode =
       "storage_base_path": cfg.storageBasePath,
       "bandwidth_limit_kbps": cfg.bandwidthLimitKBps
     },
+    "gui": {
+      "locale": cfg.guiLocale
+    },
     "folders": folders,
     "buddies": buddies
   }
@@ -668,6 +671,20 @@ proc removeBuddyById(uuid: string): tuple[status: int, response: JsonNode] =
     return (404, %*{"error": "Buddy not found", "code": "BUDDY_NOT_FOUND"})
   (200, %*{"ok": true})
 
+proc isLocaleTag*(value: string): bool =
+  ## A loose BCP 47 check: the browser decides whether it knows the tag.
+  if value.len == 0:
+    return true
+  if value.len > 35:
+    return false
+  for part in value.split('-'):
+    if part.len == 0 or part.len > 8:
+      return false
+    for c in part:
+      if not c.isAlphaNumeric():
+        return false
+  value[0].isAlphaAscii()
+
 proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] =
   let parsed = parseJson(body)
   let oldCfg = config.loadConfig()
@@ -677,6 +694,12 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
     let buddy = parsed["buddy"]
     if buddy.hasKey("name"):
       cfg.buddy.name = buddy["name"].getStr(cfg.buddy.name)
+
+  if parsed.hasKey("gui") and parsed["gui"].hasKey("locale"):
+    let locale = parsed["gui"]["locale"].getStr("").strip()
+    if not isLocaleTag(locale):
+      return (400, %*{"error": "Locale must be a language tag such as sv-SE, or empty for the browser's", "code": "INVALID_LOCALE"})
+    cfg.guiLocale = locale
 
   if parsed.hasKey("network"):
     let net = parsed["network"]

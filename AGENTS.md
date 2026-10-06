@@ -198,6 +198,7 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **Opaque blobs**: encrypted folders are stored as `<hh>/<hash>.blob` (sealed chunk frames as sent) plus a `.meta` JSON sidecar. Unencrypted folders are stored as plain files.
 - **Paths from a buddy go through `safeJoin`** (`scanner.nim`) before touching disk.
 - **Per-buddy sync_window + sync_interval**: `sync_window = "HH:MM-HH:MM"` (empty = any time; legacy `sync_time = "HH:MM"` is read as ±15 min) and `sync_interval = "30m"/"2h"` (empty = 5m until first contact, then 30m). Control when to initiate, not when to accept. A buddy that dials us is still looked up every 10 min (`RelayStandbyMinutes`) so relay rendezvous keeps working.
+- **GUI locale**: `[gui] locale` (BCP 47, e.g. `sv-SE`; empty = browser's) set in the web GUI Settings. The API always sends UTC ISO 8601; `app.js` formats dates, sizes, counts and relative times with `Intl` in that locale (`makeFormatters`).
 - **GUI sync requests**: `POST /sync` (all) and `POST /sync/<folder>` queue a request; the daemon's progress per buddy (`SyncRequestState`) is written to `state.db` `sync_requests` and returned by `GET /sessions` as `requests`.
 - **Always accept incoming**: sync time controls initiation only. Incoming connections from known buddies are always accepted.
 - **Deterministic initiator**: CGNAT side initiates (dials the public side). If both public, lower UUID initiates.
