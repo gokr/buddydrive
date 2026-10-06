@@ -3,252 +3,425 @@ import std/os except FileInfo
 import chronos
 import libp2p/stream/connection
 import ../types
+import ../crypto
+import ../config
 import ../p2p/messages
 import ../p2p/protocol
 import transfer
+import storage
+import ../logutils
 
-proc folderAppliesToBuddy(folder: FolderConfig, buddyId: string): bool =
-  folder.buddies.len == 0 or buddyId in folder.buddies
+## A sync session between two buddies is two backups over one connection:
+## each side's folders are stored, encrypted, on the other side. The side that
+## owns a folder is the only authority on it; the storage side keeps what it is
+## told to keep and never deletes on its own.
+##
+## The conversation is strictly alternating, which an unbuffered transport
+## needs. After the owner lists are exchanged, the folders of the buddy with
+## the lower UUID are handled first, then those of the other.
+
+proc backupBuddies(config: AppConfig, folder: FolderConfig): seq[string] =
+  ## Every configured buddy this folder is backed up to.
+  for buddy in config.buddies:
+    if folderAppliesToBuddy(folder, buddy.id.uuid):
+      result.add(buddy.id.uuid)
 
 proc applicableFolders(config: AppConfig, buddyId: string): seq[FolderConfig] =
+  ## An encrypted folder without a usable key is left out rather than sent in
+  ## plain form; the daemon gives such folders a key at startup.
   for folder in config.folders:
+    if folder.encrypted and folder.folderKey.len != KeySize:
+      continue
     if folderAppliesToBuddy(folder, buddyId):
       result.add(folder)
+  result.sort(proc(a, b: FolderConfig): int = cmp(folderWireId(a), folderWireId(b)))
 
-proc incomingFolderForBuddy(config: AppConfig, buddyId: string, folder: FolderConfig): FolderConfig =
-  result = folder
-  if config.storageBasePath.len > 0:
-    result.path = config.storageBasePath / buddyId / folder.name
+proc logSession(message: string) =
+  {.cast(gcsafe).}:
+    try:
+      logWarn("Sync: " & message)
+    except Exception:
+      discard
 
-proc sendLocalFolderLists(
-    config: AppConfig,
-    buddyId: string,
-    conn: Connection,
-    protocol: SyncProtocol,
-): Future[bool] {.async.} =
-  for folder in applicableFolders(config, buddyId):
-    let transfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
-    defer: transfer.close()
-    if not await transfer.sendFileList(conn):
-      return false
-
-  try:
-    await protocol.sendMessage(conn, newSyncDone())
-    true
-  except CatchableError:
-    false
-
-proc receiveRemoteFolderLists(
-    conn: Connection,
-    protocol: SyncProtocol,
-): Future[Table[string, seq[FileInfo]]] {.async.} =
-  result = initTable[string, seq[FileInfo]]()
-
-  while true:
-    let msgOpt = await protocol.receiveMessage(conn)
-    if msgOpt.isNone():
-      raise newException(CatchableError, "failed to receive remote folder list")
-
-    let msg = msgOpt.get()
-    case msg.kind
-    of msgFileList:
-      var files: seq[FileInfo] = @[]
-      for entry in msg.files:
-        var info: FileInfo
-        info.path = entry.path
-        info.encryptedPath = entry.encryptedPath
-        info.size = entry.size
-        info.mtime = entry.mtime
-        info.hash = stringToHash(entry.hash)
-        info.mode = entry.mode
-        info.symlinkTarget = entry.symlinkTarget
-        files.add(info)
-      result[msg.folderName] = files
-    of msgSyncDone:
-      return
-    else:
-      raise newException(CatchableError, "unexpected message while receiving folder lists")
+proc sessionFailed(reason: string): bool =
+  ## Every way a session can give up says why; a bare "failed" is useless
+  ## when two machines are involved.
+  logSession("stopped: " & reason)
+  false
 
 const
   SessionEndTimeout = chronos.seconds(10)
   SessionEndLingerTimeout = chronos.seconds(2)
 
 type
+  FolderOutcome* = enum
+    foSynced
+    foSkipped
+    foRefused
+
+  FolderReport* = object
+    folderName*: string
+    outcome*: FolderOutcome
+    reason*: string
+
+  SessionReport* = ref object
+    ## What became of each of our folders in one session, for the GUIs.
+    ## Folders not listed did not get their turn: the session ended first.
+    folders*: seq[FolderReport]
+
+  OwnedFolder = object
+    transfer: FileTransfer
+    files: seq[FileInfo]
+    backupBuddies: seq[string]
+
   MoveInstruction = tuple[oldPath: string, newPath: string, hash: string]
 
-proc sameMoveCandidate(remote: FileInfo, local: FileInfo): bool =
-  remote.hash == local.hash and
-  remote.size == local.size and
-  remote.mode == local.mode and
-  remote.symlinkTarget == local.symlinkTarget
+  OwnerPlan = object
+    moves: seq[MoveInstruction]
+    deletes: seq[string]
+    restores: seq[FileInfo]
 
-proc computeOutboundDelta(
-    transfer: FileTransfer,
-    remoteFiles: seq[FileInfo],
-): tuple[moves: seq[MoveInstruction], deletes: seq[string], projectedRemote: seq[FileInfo]] =
-  ## Works out what the remote should change to match us, and what is left for
-  ## us to pull. A remote path we do not have is only deleted when the index
-  ## shows we used to hold it; otherwise it is a file we have never seen and
-  ## belongs in projectedRemote so it gets fetched.
-  let localFiles = transfer.scanner.scanDirectory()
-  let knownPaths = transfer.knownIndexPaths()
+proc note(report: SessionReport, folderName: string, outcome: FolderOutcome, reason = "") =
+  if report != nil:
+    report.folders.add(FolderReport(folderName: folderName, outcome: outcome, reason: reason))
 
-  var localByPath = initTable[string, FileInfo]()
-  var remoteByPath = initTable[string, FileInfo]()
-  var localByHash = initTable[string, FileInfo]()
-  var projectedByPath = initTable[string, FileInfo]()
-
-  for fileInfo in localFiles:
-    localByPath[fileInfo.path] = fileInfo
-    let key = hashToString(fileInfo.hash)
-    if key notin localByHash:
-      localByHash[key] = fileInfo
-
-  for fileInfo in remoteFiles:
-    remoteByPath[fileInfo.path] = fileInfo
-    projectedByPath[fileInfo.path] = fileInfo
-
-  var remotePaths: seq[string] = @[]
-  for path in remoteByPath.keys:
-    remotePaths.add(path)
-  remotePaths.sort(cmp)
-
-  for remotePath in remotePaths:
-    let remoteFile = remoteByPath[remotePath]
-    if remotePath in localByPath:
-      continue
-
-    let key = hashToString(remoteFile.hash)
-    let wasHeldLocally = remotePath in knownPaths
-
-    if key in localByHash and not (localByHash[key].path in remoteByPath) and
-        sameMoveCandidate(remoteFile, localByHash[key]):
-      # Same content sits at a different path here and the remote does not have
-      # that path yet: a rename, not a deletion.
-      let localFile = localByHash[key]
-      result.moves.add((remotePath, localFile.path, key))
-      projectedByPath.del(remotePath)
-      projectedByPath[localFile.path] = localFile
-    elif wasHeldLocally:
-      result.deletes.add(remotePath)
-      projectedByPath.del(remotePath)
-    else:
-      # Never seen here — leave it in the projection so we pull it.
-      discard
-
-  for path in projectedByPath.keys:
-    result.projectedRemote.add(projectedByPath[path])
-
-  result.projectedRemote.sort(proc(a, b: FileInfo): int = cmp(a.path, b.path))
-  result.moves.sort(proc(a, b: MoveInstruction): int = cmp((a.oldPath, a.newPath), (b.oldPath, b.newPath)))
-  result.deletes.sort(cmp)
-
-proc sendDeltaPhase(
-    sendTransfer: FileTransfer,
-    receiveTransfer: FileTransfer,
+proc sendOwnerLists(
+    owned: seq[OwnedFolder],
     conn: Connection,
-    remoteFiles: seq[FileInfo],
+    protocol: SyncProtocol,
+    ownerMachine: string,
+    takeover: bool,
 ): Future[bool] {.async.} =
-  let localReceiveFiles = receiveTransfer.scanner.scanDirectory()
-  var effectiveRemoteFiles = remoteFiles
-  if localReceiveFiles.len == 0 and remoteFiles.len > 0:
-    let refreshed = await receiveTransfer.requestListPaths(conn)
-    if refreshed.isSome:
-      effectiveRemoteFiles = refreshed.get()
-
-  let delta = sendTransfer.computeOutboundDelta(effectiveRemoteFiles)
-  let filesNeeded = receiveTransfer.compareWithRemote(delta.projectedRemote)
-
-  for move in delta.moves:
-    if move.oldPath == move.newPath:
-      continue
-    try:
-      await sendTransfer.protocol.sendMessage(conn, newMoveFile(move.oldPath, move.newPath, move.hash))
-    except CatchableError:
-      return false
-
-  for path in delta.deletes:
-    try:
-      await sendTransfer.protocol.sendMessage(conn, newFileDelete(path))
-    except CatchableError:
-      return false
-
-  for fileInfo in filesNeeded:
-    if not await receiveTransfer.syncFile(conn, fileInfo):
-      return false
-
+  for folder in owned:
+    if not await folder.transfer.sendFileList(conn, folder.files, ownerMachine, takeover):
+      return sessionFailed("could not send the file list of " & folder.transfer.scanner.folder.name)
   try:
-    await sendTransfer.protocol.sendMessage(conn, newSyncDone())
+    await protocol.sendMessage(conn, newSyncDone())
     true
-  except CatchableError:
-    false
+  except CatchableError as e:
+    sessionFailed("could not finish sending file lists: " & e.msg)
 
-proc servePhase(sendTransfer: FileTransfer, receiveTransfer: FileTransfer, conn: Connection): Future[bool] {.async.} =
+proc receiveOwnerLists(conn: Connection, protocol: SyncProtocol): Future[seq[ProtocolMessage]] {.async.} =
+  var seen = initHashSet[string]()
   while true:
-    let msgOpt = await sendTransfer.protocol.receiveMessage(conn)
+    let msgOpt = await protocol.receiveMessage(conn, folderListTimeout)
     if msgOpt.isNone():
-      return false
+      raise newException(CatchableError, "failed to receive buddy folder lists")
+
+    let msg = msgOpt.get()
+    case msg.kind
+    of msgFileList:
+      if msg.folderId.len == 0 or msg.folderId in seen:
+        raise newException(CatchableError, "buddy sent an unusable folder list")
+      seen.incl(msg.folderId)
+      result.add(msg)
+    of msgSyncDone:
+      result.sort(proc(a, b: ProtocolMessage): int = cmp(a.folderId, b.folderId))
+      return
+    else:
+      raise newException(CatchableError, "unexpected message while receiving folder lists")
+
+proc sameMoveCandidate(stored: FileInfo, local: FileInfo): bool =
+  stored.hash == local.hash and
+  stored.size == local.size and
+  stored.mode == local.mode and
+  stored.symlinkTarget == local.symlinkTarget
+
+proc readableStored(transfer: FileTransfer, stored: seq[FileInfo]): seq[FileInfo] =
+  ## Fills in the plaintext path and symlink target of what the storage buddy
+  ## holds. Entries we cannot open are not ours to act on and are dropped.
+  let folder = transfer.scanner.folder
+  for entry in stored:
+    var info = entry
+    if transfer.isEncryptedOnWire():
+      try:
+        info.path = decryptPath(entry.encryptedPath, folder.folderKey)
+        if entry.symlinkTarget.len > 0:
+          info.symlinkTarget = decryptSymlinkTarget(entry.symlinkTarget, folder.folderKey)
+      except CatchableError:
+        continue
+    else:
+      info.path = entry.encryptedPath
+    result.add(info)
+
+proc wireView(transfer: FileTransfer, files: seq[FileInfo]): seq[FileInfo] =
+  ## Our files with their content hashes as the storage buddy knows them, so
+  ## the two lists can be compared.
+  for info in files:
+    var wired = info
+    wired.hash = transfer.wireHash(info.hash)
+    result.add(wired)
+
+proc adoptPlainHashes(transfer: FileTransfer, localFiles: seq[FileInfo], stored: var seq[FileInfo]): seq[tuple[path: string, hash: string]] =
+  ## Backups made before content hashes were keyed hold the plain hash. Where
+  ## one matches a file we have, the buddy is told the keyed hash instead,
+  ## which spares sending the file again.
+  if not transfer.isEncryptedOnWire():
+    return
+  var plainHashes = initHashSet[string]()
+  for info in localFiles:
+    plainHashes.incl(hashToString(info.hash))
+  for held in stored.mitems:
+    if hashToString(held.hash) in plainHashes:
+      held.hash = transfer.wireHash(held.hash)
+      result.add((held.encryptedPath, hashToString(held.hash)))
+
+proc computeOwnerPlan(transfer: FileTransfer, localFiles: seq[FileInfo], stored: seq[FileInfo]): OwnerPlan =
+  ## Works out what the storage buddy should change to match us, and what it
+  ## holds that we should take back. A stored path we do not have is only
+  ## deleted when our index shows we once held it; otherwise it is restored,
+  ## which is how a lost or new machine gets its files back.
+  var localByPath = initTable[string, FileInfo]()
+  var localByHash = initTable[string, FileInfo]()
+  var storedByPath = initTable[string, FileInfo]()
+  var knownPaths = initHashSet[string]()
+  var claimedTargets = initHashSet[string]()
+
+  for info in localFiles:
+    localByPath[info.encryptedPath] = info
+    let key = hashToString(info.hash)
+    if key notin localByHash:
+      localByHash[key] = info
+
+  for info in stored:
+    storedByPath[info.encryptedPath] = info
+
+  for info in transfer.index.getAllFiles():
+    knownPaths.incl(info.encryptedPath)
+
+  var storedPaths: seq[string] = @[]
+  for path in storedByPath.keys:
+    storedPaths.add(path)
+  storedPaths.sort(cmp)
+
+  let appendOnly = transfer.scanner.folder.appendOnly
+  for path in storedPaths:
+    if path in localByPath:
+      continue
+    let held = storedByPath[path]
+    let key = hashToString(held.hash)
+
+    if not appendOnly and key in localByHash:
+      let local = localByHash[key]
+      if local.encryptedPath notin storedByPath and local.encryptedPath notin claimedTargets and
+          sameMoveCandidate(held, local):
+        result.moves.add((path, local.encryptedPath, key))
+        claimedTargets.incl(local.encryptedPath)
+        continue
+
+    if path in knownPaths:
+      if not appendOnly:
+        result.deletes.add(path)
+    else:
+      result.restores.add(held)
+
+proc ownerServePhase(folder: OwnedFolder, conn: Connection): Future[bool] {.async.} =
+  ## Hands the storage buddy the files it asks for, by their encrypted path.
+  let transfer = folder.transfer
+  var pathsByWireName = initTable[string, string]()
+  for info in folder.files:
+    pathsByWireName[info.encryptedPath] = info.path
+
+  let folderName = transfer.scanner.folder.name
+  while true:
+    let msgOpt = await transfer.protocol.receiveMessage(conn)
+    if msgOpt.isNone():
+      return sessionFailed("connection lost while the buddy fetched " & folderName)
 
     let msg = msgOpt.get()
     case msg.kind
     of msgSyncDone:
       return true
-    of msgSessionEnd:
-      # Buddy ended the session early; nothing more will come.
-      return false
     of msgFileRequest:
-      if not await sendTransfer.sendFileData(conn, msg.requestPath, msg.requestOffset, msg.requestLength):
-        return false
-    of msgFileDelete:
-      if not receiveTransfer.deleteLocalFile(msg.deletedPath):
-        return false
-    of msgMoveFile:
-      if not receiveTransfer.moveLocalFile(msg.oldPath, msg.newPath):
-        return false
-    of msgListPathsRequest:
-      if not await receiveTransfer.sendListPathsResponse(conn):
-        return false
+      if msg.requestPath notin pathsByWireName:
+        try:
+          await transfer.protocol.sendMessage(conn, newFileAck(false))
+        except CatchableError:
+          return sessionFailed("connection lost while the buddy fetched " & folderName)
+      else:
+        let path = pathsByWireName[msg.requestPath]
+        if not await transfer.sendFileData(conn, path, msg.requestOffset, msg.requestLength):
+          logSession("could not send " & folderName & "/" & path & " to the buddy")
     else:
+      return sessionFailed("unexpected " & $msg.kind & " while the buddy fetched " & folderName)
+
+proc ownerSyncFolder(folder: OwnedFolder, buddyId: string, conn: Connection, report: SessionReport): Future[bool] {.async.} =
+  let transfer = folder.transfer
+  let folderName = transfer.scanner.folder.name
+  let folderId = folderWireId(transfer.scanner.folder)
+  try:
+    await transfer.protocol.sendMessage(conn, newListPathsRequest(folderId))
+  except CatchableError as e:
+    return sessionFailed("could not ask what the buddy stores of " & folderName & ": " & e.msg)
+  let answer = await transfer.protocol.receiveMessage(conn)
+  if answer.isNone():
+    return sessionFailed("the buddy did not say what it stores of " & folderName)
+  if answer.get().kind == msgFolderRefused:
+    # Nothing is changed on either side; the folder simply waits.
+    logSession("the buddy refused " & folderName & ": " & answer.get().refusedReason)
+    report.note(folderName, foRefused, answer.get().refusedReason)
+    return true
+  if answer.get().kind != msgListPathsResponse or answer.get().listResponseFolderId != folderId:
+    return sessionFailed("unexpected answer about what the buddy stores of " & folderName)
+  var listed: seq[FileInfo] = @[]
+  for entry in answer.get().listFiles:
+    listed.add(toFileInfo(entry))
+  var stored = readableStored(transfer, listed)
+
+  let rehashes =
+    try:
+      adoptPlainHashes(transfer, folder.files, stored)
+    except CatchableError as e:
+      return sessionFailed("could not compare " & folderName & " with the buddy's copy: " & e.msg)
+  let plan =
+    try:
+      computeOwnerPlan(transfer, wireView(transfer, folder.files), stored)
+    except CatchableError as e:
+      return sessionFailed("could not compare " & folderName & " with the buddy's copy: " & e.msg)
+
+  for rehash in rehashes:
+    try:
+      await transfer.protocol.sendMessage(conn, newRehash(rehash.path, rehash.hash))
+    except CatchableError:
       return false
 
-proc syncFolder(
+  for move in plan.moves:
+    try:
+      await transfer.protocol.sendMessage(conn, newMoveFile(move.oldPath, move.newPath, move.hash))
+    except CatchableError:
+      return false
+
+  for path in plan.deletes:
+    try:
+      await transfer.protocol.sendMessage(conn, newFileDelete(path))
+    except CatchableError:
+      return false
+
+  for held in plan.restores:
+    let target = safeJoin(transfer.scanner.rootPath, held.path)
+    if target.isNone or fileExists(target.get()) or symlinkExists(target.get()):
+      continue
+    if not await transfer.syncFile(conn, held, held.encryptedPath):
+      logSession("could not restore " & folderName & "/" & held.path & " from the buddy")
+
+  try:
+    await transfer.protocol.sendMessage(conn, newSyncDone())
+  except CatchableError:
+    return false
+
+  if not await ownerServePhase(folder, conn):
+    return false
+
+  # This buddy has now been told about every deletion. A tombstone goes once
+  # all the folder's buddies have been. An append-only folder keeps them: they
+  # are what stops a file we deleted here from being restored from the
+  # archive again.
+  if not transfer.scanner.folder.appendOnly:
+    transfer.pruneConfirmedDeletes(buddyId, folder.backupBuddies)
+  report.note(folderName, foSynced)
+  true
+
+proc storageOwnerPhase(storage: StorageFolder, conn: Connection): Future[bool] {.async.} =
+  ## Carries out the owner's instructions and answers its restore requests.
+  let folderName = storage.folderName
+  while true:
+    let msgOpt = await storage.protocol.receiveMessage(conn)
+    if msgOpt.isNone():
+      return sessionFailed("connection lost while the buddy updated its " & folderName)
+
+    let msg = msgOpt.get()
+    case msg.kind
+    of msgSyncDone:
+      return true
+    of msgListPathsRequest:
+      if msg.listFolderId != storage.folderId:
+        return sessionFailed("the buddy asked about folder " & msg.listFolderId & " while syncing " & folderName)
+      var entries: seq[FileEntry] = @[]
+      for info in storage.listStored():
+        entries.add(toFileEntry(info))
+      try:
+        await storage.protocol.sendMessage(conn, newListPathsResponse(storage.folderId, entries))
+      except CatchableError as e:
+        return sessionFailed("could not list what we store of " & folderName & ": " & e.msg)
+    of msgMoveFile:
+      if not storage.applyMove(msg.oldPath, msg.newPath):
+        logSession("could not rename a stored file of the buddy's " & folderName &
+          "; it will be fetched again under its new name")
+    of msgRehash:
+      if not storage.applyRehash(msg.rehashPath, msg.rehashHash):
+        logSession("could not update a stored hash of the buddy's " & folderName &
+          "; the file will be fetched again")
+    of msgFileDelete:
+      if not storage.applyDelete(msg.deletedPath):
+        logSession("could not delete a stored file of the buddy's " & folderName)
+    of msgFileRequest:
+      if not await storage.serveRestore(conn, msg.requestPath, msg.requestOffset, msg.requestLength):
+        logSession("could not send a stored file of " & folderName & " back to the buddy")
+    else:
+      return sessionFailed("unexpected " & $msg.kind & " while the buddy updated its " & folderName)
+
+proc storageFetchPhase(storage: StorageFolder, conn: Connection, ownerFiles: seq[FileInfo]): Future[bool] {.async.} =
+  let work = storage.filesToFetch(ownerFiles)
+  var failures = 0
+  for info in work.fetch:
+    if not await storage.storeFromOwner(conn, info):
+      inc failures
+  if failures > 0:
+    logSession("could not store " & $failures & " of " & $work.fetch.len & " files of the buddy's " & storage.folderName)
+  for info in work.metadata:
+    if not storage.updateMetadata(info):
+      logSession("could not update the stored mode or time of a file of the buddy's " & storage.folderName)
+
+  try:
+    await storage.protocol.sendMessage(conn, newSyncDone())
+    true
+  except CatchableError as e:
+    sessionFailed("connection lost after storing the buddy's " & storage.folderName & ": " & e.msg)
+
+proc runOwnerRound(owned: seq[OwnedFolder], buddyId: string, conn: Connection, report: SessionReport): Future[bool] {.async.} =
+  for folder in owned:
+    if not await ownerSyncFolder(folder, buddyId, conn, report):
+      return false
+  true
+
+proc runStorageRound(
     config: AppConfig,
     buddyId: string,
-    remoteBuddyId: string,
-    folder: FolderConfig,
-    remoteFiles: seq[FileInfo],
+    listings: seq[ProtocolMessage],
     conn: Connection,
     protocol: SyncProtocol,
 ): Future[bool] {.async.} =
-  let sendTransfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
-  let receiveFolder = incomingFolderForBuddy(config, buddyId, folder)
-  let receiveTransfer = newFileTransfer(receiveFolder, protocol, config.bandwidthLimitKBps)
-  defer:
-    sendTransfer.close()
-    receiveTransfer.close()
+  for listing in listings:
+    let ownership = decideOwnership(config, buddyId, listing)
+    if ownership.note.len > 0:
+      logSession(ownership.note)
+    if not ownership.accepted:
+      # Answer the owner's first question with a refusal and move on together.
+      let request = await protocol.receiveMessage(conn)
+      if request.isNone() or request.get().kind != msgListPathsRequest or
+          request.get().listFolderId != listing.folderId:
+        return sessionFailed("unexpected message while refusing the buddy's " & listing.folderName)
+      try:
+        await protocol.sendMessage(conn, newFolderRefused(listing.folderId, ownership.note))
+      except CatchableError as e:
+        return sessionFailed("could not refuse the buddy's " & listing.folderName & ": " & e.msg)
+      continue
 
-  sendTransfer.rebuildIndexFromDisk()
-  receiveTransfer.rebuildIndexFromDisk()
+    let storage =
+      try:
+        newStorageFolder(config, buddyId, listing, protocol)
+      except CatchableError as e:
+        return sessionFailed("could not prepare storage for the buddy's " & listing.folderName & ": " & e.msg)
+    defer: storage.close()
 
-  let requestFirst = config.buddy.uuid < remoteBuddyId
+    var ownerFiles: seq[FileInfo] = @[]
+    for entry in listing.files:
+      ownerFiles.add(toFileInfo(entry))
 
-  if requestFirst:
-    if not await sendDeltaPhase(sendTransfer, receiveTransfer, conn, remoteFiles):
+    if not await storageOwnerPhase(storage, conn):
       return false
-    if not await servePhase(sendTransfer, receiveTransfer, conn):
+    if not await storageFetchPhase(storage, conn, ownerFiles):
       return false
-  else:
-    if not await servePhase(sendTransfer, receiveTransfer, conn):
-      return false
-    if not await sendDeltaPhase(sendTransfer, receiveTransfer, conn, remoteFiles):
-      return false
-
-  # Deletions have been propagated by now, so stale index rows can go. On a
-  # failed session they are kept, which at worst resurrects a deleted file
-  # next time instead of losing a live one.
-  sendTransfer.pruneIndexOfMissingFiles()
-  receiveTransfer.pruneIndexOfMissingFiles()
-
   true
 
 proc receiveSessionEnd(conn: Connection, protocol: SyncProtocol, timeout: Duration): Future[bool] {.async.} =
@@ -303,27 +476,72 @@ proc awaitSessionEnd(conn: Connection, protocol: SyncProtocol, endsFirst: bool) 
     # Wait for the initiator to hang up before we do.
     discard await receiveSessionEnd(conn, protocol, SessionEndLingerTimeout)
 
+
 proc syncBuddyFolders*(
     config: AppConfig,
     buddyId: string,
     conn: Connection,
     protocol: SyncProtocol,
+    ownerMachine = "",
+    takeover = false,
+    report: SessionReport = nil,
 ): Future[bool] {.async.} =
-  let sendListsFut = sendLocalFolderLists(config, buddyId, conn, protocol)
-  let remoteLists = await receiveRemoteFolderLists(conn, protocol)
+  ## ownerMachine defaults to this installation's machine id. takeover claims
+  ## our folders at this buddy even if another machine owns them there.
+  ## report, when given, collects the outcome of each of our folders.
+  let machine =
+    if ownerMachine.len > 0: ownerMachine
+    else:
+      try:
+        {.cast(gcsafe).}:
+          machineId()
+      except Exception:
+        ""
+  var owned: seq[OwnedFolder] = @[]
+  defer:
+    for folder in owned:
+      folder.transfer.close()
+  var sentIds = initTable[string, string]()
+  for folder in applicableFolders(config, buddyId):
+    let wireId = folderWireId(folder)
+    if wireId in sentIds:
+      # The buddy rejects a second list with the same id, which would end
+      # the session for every folder.
+      let reason = "it has the same id as folder " & sentIds[wireId] & " in config.toml"
+      logSession("skipping " & folder.name & ": " & reason)
+      report.note(folder.name, foSkipped, reason)
+      continue
+    sentIds[wireId] = folder.name
+    let transfer = newFileTransfer(folder, protocol, config.bandwidthLimitKBps)
+    try:
+      owned.add(OwnedFolder(
+        transfer: transfer,
+        files: transfer.scanner.scanDirectoryStrict(),
+        backupBuddies: backupBuddies(config, folder),
+      ))
+    except CatchableError as e:
+      # Left out of this session entirely, so the buddy keeps its copy as is.
+      transfer.close()
+      logSession("skipping " & folder.name & " this time: " & e.msg)
+      report.note(folder.name, foSkipped, e.msg)
+
+  let sendListsFut = sendOwnerLists(owned, conn, protocol, machine, takeover)
+  let listings = await receiveOwnerLists(conn, protocol)
   if not await sendListsFut:
     return false
 
-  var localFolders = applicableFolders(config, buddyId)
-  localFolders.sort(proc(a, b: FolderConfig): int = cmp(a.name, b.name))
+  let ownFoldersFirst = config.buddy.uuid < buddyId
+  var allOk =
+    if ownFoldersFirst:
+      await runOwnerRound(owned, buddyId, conn, report)
+    else:
+      await runStorageRound(config, buddyId, listings, conn, protocol)
+  if allOk:
+    allOk =
+      if ownFoldersFirst:
+        await runStorageRound(config, buddyId, listings, conn, protocol)
+      else:
+        await runOwnerRound(owned, buddyId, conn, report)
 
-  var allOk = true
-  for folder in localFolders:
-    if folder.name notin remoteLists:
-      continue
-    if not await syncFolder(config, buddyId, buddyId, folder, remoteLists[folder.name], conn, protocol):
-      allOk = false
-      break
-
-  await awaitSessionEnd(conn, protocol, config.buddy.uuid < buddyId)
+  await awaitSessionEnd(conn, protocol, ownFoldersFirst)
   allOk

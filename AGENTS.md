@@ -40,6 +40,7 @@ nimble testConfig
 nimble testCrypto
 nimble testRecovery
 nimble testPolicy
+nimble testAddrs
 nimble testScanner
 nimble testIndex
 nimble testMessages
@@ -92,7 +93,8 @@ src/
     ├── nat.nim                 # NAT traversal (UPnP, CGNAT detection)
     ├── p2p/
     │   ├── node.nim            # libp2p node setup
-    │   ├── discovery.nim       # KV-store relay discovery (publish/lookup via relay, HMAC auth)
+    │   ├── addrs.nim           # Address selection: what to publish, what to dial
+    │   ├── discovery.nim       # Relay API discovery: per-buddy record keys, owner token (X-BD-Discovery-Token)
     │   ├── protocol.nim        # BuddyDrive sync protocol
     │   ├── pairing.nim         # Buddy pairing handshake
     │   ├── messages.nim        # Protocol message types
@@ -102,8 +104,9 @@ src/
         ├── scanner.nim         # Polling file scanner, chunk I/O, .buddytmp atomic writes
         ├── index.nim           # SQLite file index
         ├── transfer.nim        # Chunked file transfer (64KB, LZ4 compression)
-        ├── session.nim         # Sync sessions
-        ├── policy.nim          # Sync policy (sync window, append-only, shouldSyncRemoteFile)
+        ├── session.nim         # Sync sessions (owner round + storage round per buddy)
+        ├── storage.nim         # Storage side: a buddy's folders kept on our disk
+        ├── policy.nim          # Per-buddy sync time window
         └── config_sync.nim     # Config sync to relay/buddies, recovery logic
 ```
 
@@ -149,7 +152,7 @@ tests/
 
 - Default P2P port: `41721` (defined in `types.nim`)
 - Default control port: `17521` (defined in `control.nim`)
-- Discovery interval: 10 minutes (`BuddyDiscoveryInterval` in `daemon.nim`)
+- Scheduler tick: 1 minute (`BuddyScheduleTick` in `daemon.nim`); each buddy is dialed per its own sync interval (default 5m until first contact, then 30m; `policy.nim`)
 - Discovery record TTL: 6h (server-side), re-published every 4h
 - File chunk size: 64KB
 - Transfer files use LZ4 compression when it reduces size
@@ -190,19 +193,31 @@ tests/
 
 The new sync model is now **largely implemented**. See `docs/PLAN.md` for the full design and remaining work. Key implemented features:
 
-- **Encrypted backup model**: files stored encrypted on buddy's machine (filenames + content). Buddy is storage, not co-author.
-- **Per-buddy sync_time**: replaces global sync window. Controls when to initiate, not when to accept.
+- **Encrypted backup model**: files stored encrypted on buddy's machine (filenames + content). Buddy is storage, not co-author. Sync is never a mirror between same-named folders.
+- **Per-buddy storage root**: `[[buddies]] storage_path`, else `<storage_base_path or ~/.buddydrive/storage>/<buddy-uuid>`. Each shared folder lives in `<root>/<folder-id>/` (see `buddyStorageRoot` in `config.nim`, `sync/storage.nim`).
+- **Opaque blobs**: encrypted folders are stored as `<hh>/<hash>.blob` (sealed chunk frames as sent) plus a `.meta` JSON sidecar. Unencrypted folders are stored as plain files.
+- **Paths from a buddy go through `safeJoin`** (`scanner.nim`) before touching disk.
+- **Per-buddy sync_window + sync_interval**: `sync_window = "HH:MM-HH:MM"` (empty = any time; legacy `sync_time = "HH:MM"` is read as ±15 min) and `sync_interval = "30m"/"2h"` (empty = 5m until first contact, then 30m). Control when to initiate, not when to accept. A buddy that dials us is still looked up every 10 min (`RelayStandbyMinutes`) so relay rendezvous keeps working.
+- **Build ID**: `version.nim` takes the version from `buddydrive.nimble` and the git commit (`-dirty` if modified) at compile time; set `-d:buildCommit=<id>` where there is no git checkout. Printed at daemon start and returned by `GET /status` as `build`, with the wire protocol version.
+- **GUI locale**: `[gui] locale` (BCP 47, e.g. `sv-SE`; empty = browser's) set in the web GUI Settings. The API always sends UTC ISO 8601; `app.js` formats dates, sizes, counts and relative times with `Intl` in that locale (`makeFormatters`).
+- **GUI sync requests**: `POST /sync` (all) and `POST /sync/<folder>` queue a request; the daemon's progress per buddy (`SyncRequestState`) is written to `state.db` `sync_requests` and returned by `GET /sessions` as `requests`.
 - **Always accept incoming**: sync time controls initiation only. Incoming connections from known buddies are always accepted.
 - **Deterministic initiator**: CGNAT side initiates (dials the public side). If both public, lower UUID initiates.
 - **Streaming blake2b hash**: `crypto_generichash_init/update/final` — 64KB chunks, never full file in memory.
 - **Deterministic path encryption**: same path → same encrypted path. Enables move detection.
 - **Random content nonces**: each chunk encrypted with random nonce (prepended). Same file encrypted twice produces different ciphertext — prevents nonce reuse.
-- **Content-hash-based sync**: owner sends plaintext blake2b hash to storage buddy. Detects changes, moves, and deletes.
+- **Content-hash-based sync**: owner sends its blake2b content hash to the storage buddy, keyed with the folder key for encrypted folders (`keyedContentHash`, `wireHash` in `transfer.nim`) so the buddy cannot match it against known files. Detects changes, moves, and deletes. Older backups with plain hashes are rekeyed in place with `msgRehash`, not re-sent.
 - **Owner-authoritative moves**: A tells B "rename X to Y". B does not infer moves from ciphertext identity.
 - **Delete propagation**: `msgFileDelete` is sent and handled.
 - **Hash verification on restore**: `verifyRestoredFile` re-scans and checks hash after write.
 - **SQLite index is cache**: both sides maintain indexes for performance, but restore only needs the folder key + buddy's filesystem.
 - **Restore flow**: recover config from relay → connect to buddy → list encrypted paths → decrypt paths → request missing files → verify hashes → rebuild index
+- **Discovery records are per buddy**: key = pairing code + publishing buddy's id; writes carry a stable owner token so a restarted buddy can replace its record (needs the matching buddydrive-relay).
+- **Discovery publishes public addresses only** (plus `announce_addr`). LAN buddies are reached via per-buddy `addresses` in config, dialed first.
+- **Pairing codes** come from libsodium's CSPRNG (`generatePairingCode` in `crypto.nim`), never `std/random`.
+- **Create folders with `newSyncFolder`** (`config.nim`), never bare `newFolderConfig`: it sets the stable id and the folder key. An encrypted folder without a key is skipped by sync, and the daemon repairs such folders at startup (`ensureFolderIdentities`).
+- **One owning machine per stored folder**: owners send `config.machineId()` (data dir, not config.toml); the storage side records it in `<buddy root>/<folder dir>.owner` and answers another machine with `msgFolderRefused`, unless it takes over (`requestTakeover`, set by `recover` and `buddydrive takeover`, cleared per buddy after a successful session).
+- **Wire protocol version 7** (`ProtocolVersion` in `messages.nim`): older peers are rejected at the handshake.
 
 ### Remaining Work
 

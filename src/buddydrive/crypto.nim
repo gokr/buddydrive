@@ -60,6 +60,16 @@ proc initCrypto*(): bool =
 proc generateKey*(): string =
   crypto_secretbox_keygen()
 
+const PairingCodeAlphabet* = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+proc generatePairingCode*(): string =
+  ## Eight characters from libsodium's CSPRNG, formatted XXXX-XXXX. The code
+  ## is the only secret behind the discovery record and the relay rendezvous.
+  for i in 0 .. 7:
+    if i == 4:
+      result.add('-')
+    result.add(PairingCodeAlphabet[int(randombytes_uniform(uint32(PairingCodeAlphabet.len)))])
+
 proc generateNonce*(): string =
   randombytes(crypto_secretbox_noncebytes())
 
@@ -181,6 +191,20 @@ proc hashBytes*(data: openArray[byte]): array[32, byte] =
     s[i] = char(data[i])
   let hash = crypto_generichash(s, HashSize)
   for i in 0 ..< min(HashSize, hash.len):
+    result[i] = byte(hash[i])
+
+proc keyedContentHash*(contentHash: array[32, byte], folderKey: string): array[32, byte] =
+  ## What a storage buddy is told of a file's content. Without the folder key
+  ## it cannot be matched against the hash of a file the buddy already knows.
+  var data = "/content/"
+  for b in contentHash:
+    data.add(char(b))
+  let hash =
+    try:
+      crypto_generichash(data, HashSize, folderKey)
+    except SodiumError as e:
+      raise newException(CryptoError, "keyed content hash failed: " & e.msg)
+  for i in 0 ..< HashSize:
     result[i] = byte(hash[i])
 
 proc deriveFolderKey*(masterKey: string, folderId: string): string =

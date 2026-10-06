@@ -1,9 +1,10 @@
 import std/os except FileInfo
 import std/options
-import std/tables
 import std/sets
 import std/sequtils
+import std/tables
 import std/times
+import std/base64
 import results
 import chronos
 import lz4
@@ -14,7 +15,6 @@ import ../crypto
 import ../types
 import scanner
 import index
-import policy
 
 export results
 export scanner
@@ -91,39 +91,73 @@ proc rebuildIndexFromDisk*(transfer: FileTransfer) =
   ## disappeared are deliberately kept: they are the only evidence that we
   ## once held a path, which is what lets the delta tell a local deletion
   ## apart from a file we have simply never seen. Call
-  ## pruneIndexOfMissingFiles once those deletions have been propagated.
+  ## pruneConfirmedDeletes once those deletions have been propagated.
   for fileInfo in transfer.scanner.scanDirectory():
     transfer.index.addFile(fileInfo, synced = true)
 
-proc pruneIndexOfMissingFiles*(transfer: FileTransfer) =
-  var onDisk: HashSet[string]
-  for fileInfo in transfer.scanner.scanDirectory():
-    onDisk.incl(fileInfo.path)
+proc pruneConfirmedDeletes*(transfer: FileTransfer, buddyId: string, backupBuddies: seq[string]) =
+  ## Called after a successful session with buddyId, which by then has been
+  ## told about every file that is gone from disk. An index row of a deleted
+  ## file is its tombstone: it is what makes the next session send the delete
+  ## instead of restoring the file. It may only go once every buddy the folder
+  ## is backed up to has heard of the delete; otherwise a buddy that has not
+  ## would hand the file back.
+  let onDisk =
+    try:
+      transfer.scanner.scanDirectoryStrict().mapIt(it.path).toHashSet()
+    except CatchableError:
+      return
+
+  let confirmations = transfer.index.deleteConfirmations()
+  for path in confirmations.keys:
+    if path in onDisk:
+      # The file is back; earlier confirmations were for a delete that no
+      # longer applies.
+      transfer.index.clearDeleteConfirmations(path)
 
   for existing in transfer.index.getAllFiles():
-    if existing.path notin onDisk:
+    if existing.path in onDisk:
+      continue
+    transfer.index.confirmDelete(existing.path, buddyId)
+    var confirmed =
+      if existing.path in confirmations: confirmations[existing.path]
+      else: initHashSet[string]()
+    confirmed.incl(buddyId)
+    if backupBuddies.allIt(it in confirmed):
       transfer.index.removeFile(existing.path)
+      transfer.index.clearDeleteConfirmations(existing.path)
 
 proc knownIndexPaths*(transfer: FileTransfer): HashSet[string] =
   ## Paths this folder has held at some point, according to the index.
   for existing in transfer.index.getAllFiles():
     result.incl(existing.path)
 
+proc useEncryptedChunks(transfer: FileTransfer): bool =
+  transfer.scanner.folder.encrypted and transfer.scanner.folder.folderKey.len == KeySize
+
+proc wireHash*(transfer: FileTransfer, hash: array[32, byte]): array[32, byte] =
+  ## A content hash as the storage buddy knows it: keyed with the folder key
+  ## for encrypted folders, as is for plain ones.
+  if transfer.useEncryptedChunks():
+    keyedContentHash(hash, transfer.scanner.folder.folderKey)
+  else:
+    hash
+
 proc verifyRestoredFile(transfer: FileTransfer, path: string, expected: FileInfo): bool =
+  ## The expected hash comes from the storage buddy. Backups made before
+  ## hashes were keyed still hold the plain one, so either is accepted.
   if not fileExists(path) and not symlinkExists(path):
     return false
 
   let actual = transfer.scanner.scanFile(path)
-  if hasExpectedHash(expected) and actual.hash != expected.hash:
+  if hasExpectedHash(expected) and actual.hash != expected.hash and
+      transfer.wireHash(actual.hash) != expected.hash:
     return false
   if expected.symlinkTarget.len > 0 and actual.symlinkTarget != expected.symlinkTarget:
     return false
   if expected.mode != 0 and actual.mode != expected.mode:
     return false
   true
-
-proc useEncryptedChunks(transfer: FileTransfer): bool =
-  transfer.scanner.folder.encrypted and transfer.scanner.folder.folderKey.len == KeySize
 
 proc modeToPermissions(mode: int): set[FilePermission] =
   if (mode and 0o400) != 0:
@@ -145,7 +179,7 @@ proc modeToPermissions(mode: int): set[FilePermission] =
   if (mode and 0o001) != 0:
     result.incl(fpOthersExec)
 
-proc applyFileMetadata(path: string, fileInfo: FileInfo) {.raises: [].} =
+proc applyFileMetadata*(path: string, fileInfo: FileInfo) {.raises: [].} =
   if fileInfo.symlinkTarget.len == 0 and fileInfo.mode != 0:
     try:
       setFilePermissions(path, modeToPermissions(fileInfo.mode))
@@ -172,48 +206,105 @@ proc createSymlinkFile(path: string, fileInfo: FileInfo): bool {.raises: [].} =
   except:
     false
 
-proc sendFileList*(transfer: FileTransfer, conn: Connection): Future[bool] {.async.} =
-  let files = transfer.scanner.scanDirectory()
-  
-  let entries = files.map(proc(f: FileInfo): FileEntry =
-    FileEntry(
-      path: f.path,
-      encryptedPath: f.encryptedPath,
-      size: f.size,
-      mtime: f.mtime,
-      hash: hashToString(f.hash),
-      mode: f.mode,
-      symlinkTarget: f.symlinkTarget,
-    )
+proc folderWireId*(folder: FolderConfig): string =
+  ## Identifies a folder to the buddy. The stable id survives renames; the
+  ## name is only a fallback for configs that predate folder ids.
+  if folder.id.len > 0: folder.id else: folder.name
+
+proc toFileEntry*(f: FileInfo): FileEntry =
+  FileEntry(
+    path: f.path,
+    encryptedPath: f.encryptedPath,
+    size: f.size,
+    mtime: f.mtime,
+    hash: hashToString(f.hash),
+    mode: f.mode,
+    symlinkTarget: f.symlinkTarget,
   )
-  
-  let msg = newFileList(transfer.scanner.folder.name, entries)
-  
+
+proc toFileInfo*(entry: FileEntry): FileInfo =
+  result.path = entry.path
+  result.encryptedPath = entry.encryptedPath
+  result.size = entry.size
+  result.mtime = entry.mtime
+  result.hash = stringToHash(entry.hash)
+  result.mode = entry.mode
+  result.symlinkTarget = entry.symlinkTarget
+
+proc encryptSymlinkTarget(target: string, folderKey: string): string =
+  var plain = newSeq[byte](target.len)
+  for i, c in target:
+    plain[i] = byte(c)
+  let sealed = encryptChunk(plain, folderKey)
+  var raw = newString(sealed.len)
+  for i, b in sealed:
+    raw[i] = char(b)
+  base64.encode(raw)
+
+proc decryptSymlinkTarget*(encrypted: string, folderKey: string): string =
+  let raw = base64.decode(encrypted)
+  var sealed = newSeq[byte](raw.len)
+  for i, c in raw:
+    sealed[i] = byte(c)
+  let plain = decryptChunk(sealed, folderKey)
+  result = newString(plain.len)
+  for i, b in plain:
+    result[i] = char(b)
+
+proc isEncryptedOnWire*(transfer: FileTransfer): bool =
+  transfer.useEncryptedChunks()
+
+proc ownerFileEntries*(transfer: FileTransfer, files: seq[FileInfo]): seq[FileEntry] =
+  ## What the storage buddy gets to see of our files. For encrypted folders
+  ## that is the encrypted path, the keyed content hash, size and metadata;
+  ## the plaintext path is left out and symlink targets are sealed.
+  for f in files:
+    var entry = toFileEntry(f)
+    if transfer.useEncryptedChunks():
+      entry.path = ""
+      try:
+        entry.hash = hashToString(transfer.wireHash(f.hash))
+        if f.symlinkTarget.len > 0:
+          entry.symlinkTarget = encryptSymlinkTarget(f.symlinkTarget, transfer.scanner.folder.folderKey)
+      except CatchableError:
+        continue
+    result.add(entry)
+
+proc sendFileList*(
+    transfer: FileTransfer,
+    conn: Connection,
+    files: seq[FileInfo],
+    ownerMachine = "",
+    takeover = false,
+): Future[bool] {.async.} =
+  let folder = transfer.scanner.folder
+  let msg = newFileList(
+    folder.name,
+    transfer.ownerFileEntries(files),
+    folderWireId(folder),
+    transfer.useEncryptedChunks(),
+    folder.appendOnly,
+    ownerMachine,
+    takeover,
+  )
+
   try:
     await transfer.protocol.sendMessage(conn, msg)
     return true
   except:
     return false
 
+proc sendFileList*(transfer: FileTransfer, conn: Connection): Future[bool] {.async.} =
+  return await transfer.sendFileList(conn, transfer.scanner.scanDirectory())
+
 proc receiveFileList*(transfer: FileTransfer, conn: Connection): Future[Option[seq[FileInfo]]] {.async.} =
   let msgOpt = await transfer.protocol.receiveMessage(conn)
   if msgOpt.isNone or msgOpt.get().kind != msgFileList:
     return none(seq[FileInfo])
-  
-  let msg = msgOpt.get()
-  
+
   var files: seq[FileInfo] = @[]
-  for entry in msg.files:
-    var info: FileInfo
-    info.path = entry.path
-    info.encryptedPath = entry.encryptedPath
-    info.size = entry.size
-    info.mtime = entry.mtime
-    info.hash = stringToHash(entry.hash)
-    info.mode = entry.mode
-    info.symlinkTarget = entry.symlinkTarget
-    files.add(info)
-  
+  for entry in msgOpt.get().files:
+    files.add(toFileInfo(entry))
   return some(files)
 
 proc requestFile*(transfer: FileTransfer, conn: Connection, path: string, offset: int64 = 0, length: int = -1): Future[bool] {.async.} =
@@ -234,8 +325,10 @@ proc receiveFileRequest*(transfer: FileTransfer, conn: Connection): Future[Optio
   return some((msg.requestPath, msg.requestOffset, msg.requestLength))
 
 proc requestListPaths*(transfer: FileTransfer, conn: Connection): Future[Option[seq[FileInfo]]] {.async.} =
+  ## Asks the storage buddy what it holds of this folder.
+  let folderId = folderWireId(transfer.scanner.folder)
   try:
-    await transfer.protocol.sendMessage(conn, newListPathsRequest(transfer.scanner.folder.name))
+    await transfer.protocol.sendMessage(conn, newListPathsRequest(folderId))
   except CatchableError:
     return none(seq[FileInfo])
 
@@ -244,100 +337,81 @@ proc requestListPaths*(transfer: FileTransfer, conn: Connection): Future[Option[
     return none(seq[FileInfo])
 
   let msg = msgOpt.get()
-  if msg.listResponseFolderName != transfer.scanner.folder.name:
+  if msg.listResponseFolderId != folderId:
     return none(seq[FileInfo])
 
   var files: seq[FileInfo] = @[]
   for entry in msg.listFiles:
-    var info: FileInfo
-    info.path = entry.path
-    info.encryptedPath = entry.encryptedPath
-    info.size = entry.size
-    info.mtime = entry.mtime
-    info.hash = stringToHash(entry.hash)
-    info.mode = entry.mode
-    info.symlinkTarget = entry.symlinkTarget
-    files.add(info)
-
+    files.add(toFileInfo(entry))
   return some(files)
 
-proc sendListPathsResponse*(transfer: FileTransfer, conn: Connection): Future[bool] {.async.} =
-  let files = transfer.scanner.scanDirectory()
-  let entries = files.map(proc(f: FileInfo): FileEntry =
-    FileEntry(
-      path: f.path,
-      encryptedPath: f.encryptedPath,
-      size: f.size,
-      mtime: f.mtime,
-      hash: hashToString(f.hash),
-      mode: f.mode,
-      symlinkTarget: f.symlinkTarget,
-    )
-  )
-
-  try:
-    await transfer.protocol.sendMessage(conn, newListPathsResponse(transfer.scanner.folder.name, entries))
-    return true
-  except CatchableError:
-    return false
-
 proc sendFileData*(transfer: FileTransfer, conn: Connection, path: string, offset: int64, length: int): Future[bool] {.async.} =
-  let fullPath = transfer.scanner.rootPath / path
-  
-  if not fileExists(fullPath):
-    let ack = newFileAck(false)
-    await transfer.protocol.sendMessage(conn, ack)
+  let fullPathOpt = safeJoin(transfer.scanner.rootPath, path)
+  if fullPathOpt.isNone or not fileExists(fullPathOpt.get()) or symlinkExists(fullPathOpt.get()):
+    await transfer.protocol.sendMessage(conn, newFileAck(false))
     return false
-  
-  let fileSize = getFileSize(fullPath)
-  let actualLength = if length < 0: int(fileSize - offset) else: min(length, int(fileSize - offset))
-  
-  if actualLength <= 0:
-    let ack = newFileAck(false)
-    await transfer.protocol.sendMessage(conn, ack)
-    return false
-  
-  var currentOffset = offset
-  var remaining = actualLength
-  
-  while remaining > 0:
-    let chunkSize = min(remaining, TransferChunkSize)
-    let data = readFileChunk(fullPath, currentOffset, chunkSize)
-    
-    if data.len == 0:
-      let ack = newFileAck(false)
-      await transfer.protocol.sendMessage(conn, ack)
-      return false
-    
-    let isDone = remaining <= chunkSize
-    var payload = data
-    var compression = ckNone
-    try:
-      let compressed = compress(data)
-      if compressed.len > 0 and compressed.len < data.len:
-        payload = compressed
-        compression = ckLz4
-    except CatchableError:
-      discard
+  let fullPath = fullPathOpt.get()
 
+  let fileSize = getFileSize(fullPath)
+
+  if fileSize == 0 and offset == 0:
+    var payload: seq[byte] = @[]
     if transfer.useEncryptedChunks():
       try:
         payload = encryptChunk(payload, transfer.scanner.folder.folderKey)
       except CatchableError:
-        let ack = newFileAck(false)
-        await transfer.protocol.sendMessage(conn, ack)
+        await transfer.protocol.sendMessage(conn, newFileAck(false))
         return false
-
-    let msg = newFileData(payload, currentOffset, fileSize, isDone, compression, data.len)
-    
     try:
-      await transfer.protocol.sendMessage(conn, msg)
-      await transfer.throttler.throttle(data.len)
+      await transfer.protocol.sendMessage(conn, newFileData(payload, 0, 0, true, ckNone, 0))
     except:
       return false
-    
-    currentOffset += chunkSize
-    remaining -= chunkSize
+  else:
+    let actualLength = if length < 0: int(fileSize - offset) else: min(length, int(fileSize - offset))
+
+    if actualLength <= 0:
+      await transfer.protocol.sendMessage(conn, newFileAck(false))
+      return false
+
+    var currentOffset = offset
+    var remaining = actualLength
+
+    while remaining > 0:
+      let chunkSize = min(remaining, TransferChunkSize)
+      let data = readFileChunk(fullPath, currentOffset, chunkSize)
+
+      if data.len == 0:
+        await transfer.protocol.sendMessage(conn, newFileAck(false))
+        return false
+
+      let isDone = remaining <= chunkSize
+      var payload = data
+      var compression = ckNone
+      try:
+        let compressed = compress(data)
+        if compressed.len > 0 and compressed.len < data.len:
+          payload = compressed
+          compression = ckLz4
+      except CatchableError:
+        discard
+
+      if transfer.useEncryptedChunks():
+        try:
+          payload = encryptChunk(payload, transfer.scanner.folder.folderKey)
+        except CatchableError:
+          await transfer.protocol.sendMessage(conn, newFileAck(false))
+          return false
+
+      let msg = newFileData(payload, currentOffset, fileSize, isDone, compression, data.len)
+
+      try:
+        await transfer.protocol.sendMessage(conn, msg)
+        await transfer.throttler.throttle(data.len)
+      except:
+        return false
+
+      currentOffset += chunkSize
+      remaining -= chunkSize
 
   let ackOpt = await transfer.protocol.receiveMessage(conn)
   if ackOpt.isNone or ackOpt.get().kind != msgFileAck:
@@ -346,53 +420,76 @@ proc sendFileData*(transfer: FileTransfer, conn: Connection, path: string, offse
   ackOpt.get().success
 
 proc receiveFileData*(transfer: FileTransfer, conn: Connection, fileInfo: FileInfo): Future[bool] {.async.} =
-  let fullPath = transfer.scanner.rootPath / fileInfo.path
+  ## Receives one file and acknowledges it. A chunk that cannot be used fails
+  ## the file but the rest of its chunks are still read, so the stream stays in
+  ## step with the sender. A sender that gives up with an ack of its own gets
+  ## no ack back.
+  let fullPathOpt = safeJoin(transfer.scanner.rootPath, fileInfo.path)
+  let fullPath = if fullPathOpt.isSome: fullPathOpt.get() else: ""
   let tmpPath = fullPath & TempSuffix
-
-  createDir(fullPath.parentDir())
 
   var totalReceived: int64 = 0
   var expectedSize = int64(-1)
-  var success = true
+  var success = fullPathOpt.isSome
+  var senderAborted = false
+
+  if success:
+    try:
+      createDir(fullPath.parentDir())
+    except CatchableError:
+      success = false
 
   while true:
     let msgOpt = await transfer.protocol.receiveMessage(conn)
-    if msgOpt.isNone or msgOpt.get().kind != msgFileData:
+    if msgOpt.isNone:
       success = false
       break
 
     let msg = msgOpt.get()
-
-    if msg.dataOffset != totalReceived:
+    if msg.kind == msgFileAck:
+      senderAborted = true
+      success = false
+      break
+    if msg.kind != msgFileData:
       success = false
       break
 
-    if expectedSize < 0:
-      expectedSize = msg.totalSize
-    elif msg.totalSize != expectedSize:
-      success = false
-      break
-
-    var payload = msg.data
-    if transfer.useEncryptedChunks():
-      try:
-        payload = decryptChunk(payload, transfer.scanner.folder.folderKey)
-      except CatchableError:
-        success = false
+    if not success:
+      if msg.done:
         break
+      continue
 
-    if msg.dataCompression == ckLz4:
-      try:
-        payload = decompress(payload, msg.dataOriginalLen)
-      except CatchableError:
+    block chunk:
+      if msg.dataOffset != totalReceived:
         success = false
-        break
+        break chunk
 
-    if not writeFileChunk(tmpPath, msg.dataOffset, payload):
-      success = false
-      break
+      if expectedSize < 0:
+        expectedSize = msg.totalSize
+      elif msg.totalSize != expectedSize:
+        success = false
+        break chunk
 
-    totalReceived += payload.len
+      var payload = msg.data
+      if transfer.useEncryptedChunks():
+        try:
+          payload = decryptChunk(payload, transfer.scanner.folder.folderKey)
+        except CatchableError:
+          success = false
+          break chunk
+
+      if msg.dataCompression == ckLz4:
+        try:
+          payload = decompress(payload, msg.dataOriginalLen)
+        except CatchableError:
+          success = false
+          break chunk
+
+      if not writeFileChunk(tmpPath, msg.dataOffset, payload):
+        success = false
+        break chunk
+
+      totalReceived += payload.len
 
     if msg.done:
       break
@@ -409,7 +506,7 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, fileInfo: FileIn
     except:
       success = false
 
-  if not success:
+  if not success and fullPath.len > 0:
     try:
       removeFile(tmpPath)
     except:
@@ -425,11 +522,11 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, fileInfo: FileIn
       except:
         discard
 
-  let ack = newFileAck(success, totalReceived)
-  try:
-    await transfer.protocol.sendMessage(conn, ack)
-  except:
-    discard
+  if not senderAborted:
+    try:
+      await transfer.protocol.sendMessage(conn, newFileAck(success, totalReceived))
+    except:
+      discard
 
   return success
 
@@ -438,23 +535,34 @@ proc receiveFileData*(transfer: FileTransfer, conn: Connection, path: string): F
   fileInfo.path = path
   return await transfer.receiveFileData(conn, fileInfo)
 
-proc syncFile*(transfer: FileTransfer, conn: Connection, fileInfo: FileInfo): Future[bool] {.async.} =
-  let fullPath = transfer.scanner.rootPath / fileInfo.path
+proc restoreSymlink*(transfer: FileTransfer, fileInfo: FileInfo): bool =
+  let fullPathOpt = safeJoin(transfer.scanner.rootPath, fileInfo.path)
+  if fullPathOpt.isNone:
+    return false
+  let fullPath = fullPathOpt.get()
+  if not createSymlinkFile(fullPath, fileInfo):
+    return false
+  if symlinkExists(fullPath):
+    if transfer.verifyRestoredFile(fullPath, fileInfo):
+      transfer.index.addFile(transfer.scanner.scanFile(fullPath), synced = true)
+      return true
+    try:
+      removeFile(fullPath)
+    except:
+      discard
+  false
 
-  if fileInfo.symlinkTarget.len > 0:
-    if not createSymlinkFile(fullPath, fileInfo):
-      return false
-    if symlinkExists(fullPath):
-      if transfer.verifyRestoredFile(fullPath, fileInfo):
-        transfer.index.addFile(transfer.scanner.scanFile(fullPath), synced = true)
-        return true
-      try:
-        removeFile(fullPath)
-      except:
-        discard
+proc syncFile*(transfer: FileTransfer, conn: Connection, fileInfo: FileInfo, requestPath = ""): Future[bool] {.async.} =
+  ## Fetches one file from the buddy into this folder. requestPath is what the
+  ## buddy knows the file as, when that differs from our own path.
+  if safeJoin(transfer.scanner.rootPath, fileInfo.path).isNone:
     return false
 
-  if not await transfer.requestFile(conn, fileInfo.path):
+  if fileInfo.symlinkTarget.len > 0:
+    return transfer.restoreSymlink(fileInfo)
+
+  let wirePath = if requestPath.len > 0: requestPath else: fileInfo.path
+  if not await transfer.requestFile(conn, wirePath):
     return false
   
   return await transfer.receiveFileData(conn, fileInfo)
@@ -465,7 +573,10 @@ proc deleteLocalFile*(transfer: FileTransfer, path: string): bool {.raises: [].}
     # instruction. Report success so the session continues.
     return true
 
-  let fullPath = transfer.scanner.rootPath / path
+  let fullPathOpt = safeJoin(transfer.scanner.rootPath, path)
+  if fullPathOpt.isNone:
+    return false
+  let fullPath = fullPathOpt.get()
 
   try:
     if symlinkExists(fullPath) or fileExists(fullPath):
@@ -476,8 +587,16 @@ proc deleteLocalFile*(transfer: FileTransfer, path: string): bool {.raises: [].}
     return false
 
 proc moveLocalFile*(transfer: FileTransfer, oldPath: string, newPath: string): bool {.raises: [].} =
-  let oldFullPath = transfer.scanner.rootPath / oldPath
-  let newFullPath = transfer.scanner.rootPath / newPath
+  let oldFullPathOpt = safeJoin(transfer.scanner.rootPath, oldPath)
+  let newFullPathOpt = safeJoin(transfer.scanner.rootPath, newPath)
+  if oldFullPathOpt.isNone or newFullPathOpt.isNone:
+    return false
+  let oldFullPath = oldFullPathOpt.get()
+  let newFullPath = newFullPathOpt.get()
+
+  if not fileExists(oldFullPath) and not symlinkExists(oldFullPath):
+    # Nothing to move; the file will be fetched under its new name instead.
+    return true
 
   try:
     createDir(newFullPath.parentDir())
@@ -487,18 +606,3 @@ proc moveLocalFile*(transfer: FileTransfer, oldPath: string, newPath: string): b
     return true
   except:
     return false
-
-proc compareWithRemote*(transfer: FileTransfer, remoteFiles: seq[FileInfo]): seq[FileInfo] =
-  result = @[]
-  
-  let localFiles = transfer.scanner.scanDirectory()
-  
-  var localMap: Table[string, FileInfo]
-  for f in localFiles:
-    localMap[f.path] = f
-  
-  for remote in remoteFiles:
-    if remote.path notin localMap:
-      result.add(remote)
-    elif shouldSyncRemoteFile(transfer.scanner.folder, remote, true, localMap[remote.path]):
-      result.add(remote)

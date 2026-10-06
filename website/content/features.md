@@ -92,10 +92,10 @@ The CLI provides the same core configuration and recovery flow for headless syst
 
 Pairing uses a short code that you share with your buddy out-of-band:
 
-1. Generate a pairing code on your machine
+1. Generate a pairing code for your buddy; it is saved with them in your config
 2. Share it with your buddy
-3. They store it when adding you as a buddy
-4. The same stored code is reused for relay fallback
+3. They store the same code when adding you
+4. That one shared code keys discovery and relay fallback for the two of you
 
 ### Direct Transport Encryption
 
@@ -165,7 +165,6 @@ Run on servers, NAS boxes, or Raspberry Pi with the CLI only.
 ## Limitations
 
 - Background sync depends on peers connecting successfully
-- One buddy per folder today
 - `recover` restores config from the relay path today; buddy-backed config fetch is not implemented yet
 - `export-recovery` shows stored recovery metadata, not the original phrase
 - `init --with-recovery` is shown in help but returns an error if used; use `init` then `setup-recovery`
