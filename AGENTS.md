@@ -106,7 +106,7 @@ src/
         ├── transfer.nim        # Chunked file transfer (64KB, LZ4 compression)
         ├── session.nim         # Sync sessions (owner round + storage round per buddy)
         ├── storage.nim         # Storage side: a buddy's folders kept on our disk
-        ├── policy.nim          # Sync policy (sync window, append-only, shouldSyncRemoteFile)
+        ├── policy.nim          # Per-buddy sync time window
         └── config_sync.nim     # Config sync to relay/buddies, recovery logic
 ```
 

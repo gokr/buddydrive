@@ -61,14 +61,6 @@ type
     info*: FileInfo
     oldPath*: string
 
-  StorageFileInfo* = object
-    encryptedPath*: string
-    contentHash*: array[32, byte]
-    size*: int64
-    mode*: int
-    symlinkTarget*: string
-    ownerBuddy*: string
-  
   ConnectionState* = enum
     csDisconnected = "disconnected"
     csConnecting = "connecting"

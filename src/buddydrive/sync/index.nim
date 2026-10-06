@@ -5,7 +5,7 @@ import ../config
 
 export types
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 type
   IndexError* = object of CatchableError
@@ -41,25 +41,10 @@ proc migrate(index: FileIndex) =
   if currentVersion < 2:
     discard index.db.tryExec(sql"CREATE INDEX IF NOT EXISTS idx_folder_content_hash ON files(folder, hash)")
     discard index.db.tryExec(sql"CREATE INDEX IF NOT EXISTS idx_folder_encrypted_path ON files(folder, encrypted_path)")
-    
-    let createStorage = """
-      CREATE TABLE IF NOT EXISTS storage_files (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        encrypted_path TEXT NOT NULL,
-        content_hash BLOB NOT NULL,
-        size INTEGER NOT NULL,
-        owner_buddy TEXT NOT NULL,
-        UNIQUE(encrypted_path, owner_buddy)
-      );
-      CREATE INDEX IF NOT EXISTS idx_storage_content_hash ON storage_files(content_hash, owner_buddy);
-    """
-    discard index.db.tryExec(sql(createStorage))
 
   if currentVersion < 3:
     discard index.db.tryExec(sql"ALTER TABLE files ADD COLUMN mode INTEGER NOT NULL DEFAULT 0")
     discard index.db.tryExec(sql"ALTER TABLE files ADD COLUMN symlink_target TEXT NOT NULL DEFAULT ''")
-    discard index.db.tryExec(sql"ALTER TABLE storage_files ADD COLUMN mode INTEGER NOT NULL DEFAULT 0")
-    discard index.db.tryExec(sql"ALTER TABLE storage_files ADD COLUMN symlink_target TEXT NOT NULL DEFAULT ''")
   
   if currentVersion < 4:
     discard index.db.tryExec(sql"""
@@ -70,6 +55,10 @@ proc migrate(index: FileIndex) =
         UNIQUE(folder, path, buddy)
       )
     """)
+
+  if currentVersion < 5:
+    # The storage side keeps its own sidecar files now.
+    discard index.db.tryExec(sql"DROP TABLE IF EXISTS storage_files")
 
   discard index.db.tryExec(sql("PRAGMA user_version = " & $SchemaVersion))
 
@@ -222,48 +211,6 @@ proc getSyncStatus*(index: FileIndex): tuple[total: int, synced: int, pending: i
     result.synced = row[0].parseInt()
   
   result.pending = result.total - result.synced
-
-proc addStorageFile*(index: FileIndex, info: types.StorageFileInfo) =
-  let hashStr = hashToString(info.contentHash)
-  let query = """
-    INSERT OR REPLACE INTO storage_files (encrypted_path, content_hash, size, mode, symlink_target, owner_buddy)
-    VALUES (?, ?, ?, ?, ?, ?)
-  """
-  discard index.db.tryExec(sql(query), info.encryptedPath, hashStr, info.size, info.mode, info.symlinkTarget, info.ownerBuddy)
-
-proc removeStorageFile*(index: FileIndex, encryptedPath: string, ownerBuddy: string) =
-  let query = "DELETE FROM storage_files WHERE encrypted_path = ? AND owner_buddy = ?"
-  discard index.db.tryExec(sql(query), encryptedPath, ownerBuddy)
-
-proc getStorageFile*(index: FileIndex, encryptedPath: string, ownerBuddy: string): Option[types.StorageFileInfo] =
-  let query = "SELECT encrypted_path, content_hash, size, mode, symlink_target, owner_buddy FROM storage_files WHERE encrypted_path = ? AND owner_buddy = ?"
-  for row in index.db.rows(sql(query), encryptedPath, ownerBuddy):
-    var info: types.StorageFileInfo
-    info.encryptedPath = row[0]
-    info.contentHash = stringToHash(row[1])
-    info.size = row[2].parseInt()
-    info.mode = row[3].parseInt()
-    info.symlinkTarget = row[4]
-    info.ownerBuddy = row[5]
-    return some(info)
-  return none(types.StorageFileInfo)
-
-proc listByOwner*(index: FileIndex, ownerBuddy: string): seq[types.StorageFileInfo] =
-  result = @[]
-  let query = "SELECT encrypted_path, content_hash, size, mode, symlink_target, owner_buddy FROM storage_files WHERE owner_buddy = ?"
-  for row in index.db.rows(sql(query), ownerBuddy):
-    var info: types.StorageFileInfo
-    info.encryptedPath = row[0]
-    info.contentHash = stringToHash(row[1])
-    info.size = row[2].parseInt()
-    info.mode = row[3].parseInt()
-    info.symlinkTarget = row[4]
-    info.ownerBuddy = row[5]
-    result.add(info)
-
-proc updateStoragePath*(index: FileIndex, oldEncPath: string, newEncPath: string, ownerBuddy: string) =
-  let query = "UPDATE storage_files SET encrypted_path = ? WHERE encrypted_path = ? AND owner_buddy = ?"
-  discard index.db.tryExec(sql(query), newEncPath, oldEncPath, ownerBuddy)
 
 proc confirmDelete*(index: FileIndex, path: string, buddyId: string) =
   ## Records that a buddy has been told a file is gone.

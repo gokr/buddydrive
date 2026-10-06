@@ -244,7 +244,7 @@ Each folder that buddy shares lives under `<root>/<folder-id>/`. Folders are key
 
 Every path that arrives from a buddy goes through `safeJoin`, which refuses absolute paths, `.`/`..` components and parents that are symlinks.
 
-The storage side keeps no index: the sidecars are the record, so B's filesystem plus A's folder key is everything a restore needs. (The `storage_files` table in `index.db` is unused.)
+The storage side keeps no index: the sidecars are the record, so B's filesystem plus A's folder key is everything a restore needs. (The old `storage_files` table is dropped from `index.db` by schema v5.)
 
 B does not compute its own hash of the encrypted blob. Instead, B stores the `content_hash` as reported by A. This is the simplest model: A is the authority on content identity. B trusts A for the hash value. This avoids the problem of ciphertext being non-deterministic (random nonces), which would make any ciphertext-based hash useless for content comparison.
 
@@ -553,7 +553,7 @@ The relay verifies signatures using the verify key previously stored alongside t
 **Files**: `index.nim`, `types.nim`
 
 1. **New owner schema** — `files` table with `path`, `encrypted_path`, `hash` (content_hash), `size`, `mtime`, `synced`, `last_sync`, `mode`, `symlink_target`. Indexes on `content_hash` and `encrypted_path`. — DONE
-2. **New storage schema** — `storage_files` table with `encrypted_path`, `content_hash`, `size`, `mode`, `symlink_target`, `owner_buddy`. Index on `content_hash + owner_buddy`. — DONE
+2. **New storage schema** — `storage_files` table with `encrypted_path`, `content_hash`, `size`, `mode`, `symlink_target`, `owner_buddy`. Index on `content_hash + owner_buddy`. — DONE, later removed (schema v5): the storage side keeps sidecar files instead
 3. **Index API** — `getFileByHash`, `addStorageFile`, `getStorageFile`, `listByOwner`, `getFileByEncryptedPath`, `updateStoragePath` — DONE
 4. **Migration** — schema versioning with v1→v2→v3 upgrades — DONE
 

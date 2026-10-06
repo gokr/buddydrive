@@ -39,16 +39,3 @@ proc shouldAttemptBuddySync*(buddy: BuddyInfo, currentTime: DateTime = now(), to
 
 proc shouldInitiateBuddySync*(buddy: BuddyInfo, currentTime: DateTime = now(), toleranceMinutes = 15): bool =
   shouldAttemptBuddySync(buddy, currentTime, toleranceMinutes)
-
-proc shouldSyncRemoteFile*(folder: FolderConfig, remote: FileInfo, localFound: bool, local: FileInfo = default(FileInfo)): bool =
-  if not localFound:
-    return true
-  if folder.appendOnly:
-    return false
-  if remote.mtime != local.mtime or remote.size != local.size:
-    return true
-  if remote.hash != local.hash:
-    return true
-  if remote.mode != local.mode or remote.symlinkTarget != local.symlinkTarget:
-    return true
-  false
