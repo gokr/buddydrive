@@ -152,7 +152,7 @@ tests/
 
 - Default P2P port: `41721` (defined in `types.nim`)
 - Default control port: `17521` (defined in `control.nim`)
-- Discovery interval: 10 minutes (`BuddyDiscoveryInterval` in `daemon.nim`)
+- Scheduler tick: 1 minute (`BuddyScheduleTick` in `daemon.nim`); each buddy is dialed per its own sync interval (default 5m until first contact, then 30m; `policy.nim`)
 - Discovery record TTL: 6h (server-side), re-published every 4h
 - File chunk size: 64KB
 - Transfer files use LZ4 compression when it reduces size
@@ -197,7 +197,8 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **Per-buddy storage root**: `[[buddies]] storage_path`, else `<storage_base_path or ~/.buddydrive/storage>/<buddy-uuid>`. Each shared folder lives in `<root>/<folder-id>/` (see `buddyStorageRoot` in `config.nim`, `sync/storage.nim`).
 - **Opaque blobs**: encrypted folders are stored as `<hh>/<hash>.blob` (sealed chunk frames as sent) plus a `.meta` JSON sidecar. Unencrypted folders are stored as plain files.
 - **Paths from a buddy go through `safeJoin`** (`scanner.nim`) before touching disk.
-- **Per-buddy sync_time**: replaces global sync window. Controls when to initiate, not when to accept.
+- **Per-buddy sync_window + sync_interval**: `sync_window = "HH:MM-HH:MM"` (empty = any time; legacy `sync_time = "HH:MM"` is read as ±15 min) and `sync_interval = "30m"/"2h"` (empty = 5m until first contact, then 30m). Control when to initiate, not when to accept. A buddy that dials us is still looked up every 10 min (`RelayStandbyMinutes`) so relay rendezvous keeps working.
+- **GUI sync requests**: `POST /sync` (all) and `POST /sync/<folder>` queue a request; the daemon's progress per buddy (`SyncRequestState`) is written to `state.db` `sync_requests` and returned by `GET /sessions` as `requests`.
 - **Always accept incoming**: sync time controls initiation only. Incoming connections from known buddies are always accepted.
 - **Deterministic initiator**: CGNAT side initiates (dials the public side). If both public, lower UUID initiates.
 - **Streaming blake2b hash**: `crypto_generichash_init/update/final` — 64KB chunks, never full file in memory.

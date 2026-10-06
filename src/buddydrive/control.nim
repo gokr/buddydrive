@@ -7,6 +7,7 @@ import crypto
 import control_web
 import recovery
 import sync/config_sync
+import sync/policy
 
 const
   DefaultControlPort* = 17521
@@ -72,6 +73,16 @@ proc getStateDb(): DbConn =
       bytes_received INTEGER,
       files_sent INTEGER,
       files_received INTEGER
+    )
+  """)
+  result.exec(sql"""
+    CREATE TABLE IF NOT EXISTS sync_requests (
+      buddy_id TEXT PRIMARY KEY,
+      buddy_name TEXT,
+      requested_at INTEGER,
+      updated_at INTEGER,
+      state TEXT,
+      detail TEXT
     )
   """)
   result.exec(sql"""
@@ -183,6 +194,39 @@ proc writeSessions*(sessions: seq[SessionRecord]) =
   finally:
     db.close()
 
+proc writeSyncRequests*(requests: seq[SyncRequestState]) =
+  config.ensureDataDir()
+  let db = getStateDb()
+  try:
+    db.exec(sql"BEGIN")
+    db.exec(sql"DELETE FROM sync_requests")
+    for r in requests:
+      db.exec(sql"""
+        INSERT INTO sync_requests (buddy_id, buddy_name, requested_at, updated_at, state, detail)
+        VALUES (?, ?, ?, ?, ?, ?)
+      """, r.buddyId, r.buddyName, r.requestedAt.toUnix(), r.updatedAt.toUnix(), r.state, r.detail)
+    db.exec(sql"COMMIT")
+  finally:
+    db.close()
+
+proc readSyncRequests*(): seq[SyncRequestState] =
+  let statePath = config.getDataDir() / "state.db"
+  if not fileExists(statePath):
+    return @[]
+  let db = getStateDb()
+  try:
+    for row in db.rows(sql"SELECT buddy_id, buddy_name, requested_at, updated_at, state, detail FROM sync_requests ORDER BY requested_at DESC"):
+      result.add(SyncRequestState(
+        buddyId: row[0],
+        buddyName: row[1],
+        requestedAt: fromUnix(row[2].parseBiggestInt()),
+        updatedAt: fromUnix(row[3].parseBiggestInt()),
+        state: row[4],
+        detail: row[5],
+      ))
+  finally:
+    db.close()
+
 proc readSessions*(): seq[SessionRecord] =
   ## Oldest first.
   let statePath = config.getDataDir() / "state.db"
@@ -231,7 +275,17 @@ proc sessionsJson(): JsonNode =
       "filesSent": r.filesSent,
       "filesReceived": r.filesReceived,
     })
-  %*{"sessions": entries}
+  var requests: seq[JsonNode] = @[]
+  for r in readSyncRequests():
+    requests.add(%*{
+      "buddyId": r.buddyId,
+      "buddyName": r.buddyName,
+      "requestedAt": formatStatusTime(r.requestedAt),
+      "updatedAt": formatStatusTime(r.updatedAt),
+      "state": r.state,
+      "detail": r.detail,
+    })
+  %*{"sessions": entries, "requests": requests}
 
 type CachedBuddyAddr* = object
   peerId*: string
@@ -351,25 +405,37 @@ proc statusJson(): JsonNode =
     "addresses": []
   }
 
+proc buddyScheduleJson(buddy: BuddyInfo): JsonNode =
+  %*{
+    "syncWindow": buddy.syncWindow,
+    "syncInterval": buddy.syncInterval,
+    "syncIntervalText": syncIntervalDescription(buddy.syncInterval)
+  }
+
 proc buddiesJson(): JsonNode =
-  var syncTimes = initTable[string, string]()
+  var configured = initTable[string, BuddyInfo]()
   if config.configExists():
     for buddy in config.loadConfig().buddies:
-      syncTimes[buddy.id.uuid] = buddy.syncTime
+      configured[buddy.id.uuid] = buddy
   let statePath = config.getDataDir() / "state.db"
   if fileExists(statePath):
     let db = getStateDb()
     try:
       var buddies: seq[JsonNode] = @[]
       for row in db.rows(sql"SELECT id, name, state, latency_ms, last_activity FROM buddy_state"):
-        buddies.add(%*{
+        var entry = %*{
           "id": row[0],
           "name": row[1],
           "state": row[2],
           "latencyMs": row[3].parseInt(),
-          "lastSync": row[4],
-          "syncTime": syncTimes.getOrDefault(row[0])
-        })
+          "lastSync": row[4]
+        }
+        if row[0] in configured:
+          let buddy = configured[row[0]]
+          entry["name"] = %buddy.id.name
+          for key, value in buddyScheduleJson(buddy):
+            entry[key] = value
+        buddies.add(entry)
       if buddies.len > 0:
         return %*{"buddies": buddies}
     finally:
@@ -380,15 +446,17 @@ proc buddiesJson(): JsonNode =
   let cfg = config.loadConfig()
   var buddies: seq[JsonNode] = @[]
   for buddy in cfg.buddies:
-    buddies.add(%*{
+    var entry = %*{
       "id": buddy.id.uuid,
       "name": buddy.id.name,
       "pairingCode": buddy.pairingCode,
       "state": "disconnected",
       "latencyMs": -1,
-      "lastSync": "",
-      "syncTime": buddy.syncTime
-    })
+      "lastSync": ""
+    }
+    for key, value in buddyScheduleJson(buddy):
+      entry[key] = value
+    buddies.add(entry)
   %*{"buddies": buddies}
 
 proc storageUsage(root: string): tuple[files: int, bytes: int64] =
@@ -499,9 +567,9 @@ proc configJson(): JsonNode =
       "id": buddy.id.uuid,
       "name": buddy.id.name,
       "pairing_code": buddy.pairingCode,
-      "sync_time": buddy.syncTime,
-      "addedAt": buddy.addedAt.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'"),
-      "syncTime": buddy.syncTime
+      "sync_window": buddy.syncWindow,
+      "sync_interval": buddy.syncInterval,
+      "addedAt": buddy.addedAt.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
     })
   %*{
     "buddy": {
@@ -657,7 +725,8 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
       var buddy: BuddyInfo
       buddy.id = newBuddyId(buddyId, item{"name"}.getStr(""))
       buddy.pairingCode = item{"pairing_code"}.getStr("")
-      buddy.syncTime = item{"sync_time"}.getStr("")
+      buddy.syncWindow = item{"sync_window"}.getStr(item{"sync_time"}.getStr(""))
+      buddy.syncInterval = item{"sync_interval"}.getStr("")
       buddy.addedAt = getTime()
       for oldBuddy in oldCfg.buddies:
         if oldBuddy.id.uuid == buddyId:
@@ -685,16 +754,34 @@ proc updateConfigFromBody(body: string): tuple[status: int, response: JsonNode] 
 
   (200, %*{"ok": true, "restartRequired": restartRequired})
 
+proc readSchedule(parsed: JsonNode, buddy: var BuddyInfo): string =
+  ## Applies sync_window / sync_interval from a request; the error, if any.
+  if parsed.hasKey("sync_window") or parsed.hasKey("sync_time"):
+    let window = parsed{"sync_window"}.getStr(parsed{"sync_time"}.getStr("")).strip()
+    if not isValidSyncWindow(window):
+      return "Sync window must look like 22:00-06:00, or be empty for any time"
+    buddy.syncWindow = window
+  if parsed.hasKey("sync_interval"):
+    let interval = parsed{"sync_interval"}.getStr("").strip()
+    if not isValidSyncInterval(interval):
+      return "Sync interval must look like 30m, 2h or 1h30m, or be empty for the default"
+    buddy.syncInterval = interval
+  ""
+
 proc pairBuddyFromBody(body: string): tuple[status: int, response: JsonNode] =
   let parsed = parseJson(body)
-  let buddyId = parsed{"buddyId"}.getStr("")
-  let buddyName = parsed{"buddyName"}.getStr("")
-  let code = parsed{"code"}.getStr("")
+  let buddyId = parsed{"buddyId"}.getStr("").strip()
+  let buddyName = parsed{"buddyName"}.getStr("").strip()
+  let code = parsed{"code"}.getStr("").strip()
   
   if buddyId.len == 0 or code.len == 0:
     return (400, %*{"error": "buddyId and code are required", "code": "INVALID_REQUEST"})
+  if buddyName.len == 0:
+    return (400, %*{"error": "A name for the buddy is required", "code": "INVALID_REQUEST"})
   
   var cfg = config.loadConfig()
+  if buddyId == cfg.buddy.uuid:
+    return (400, %*{"error": "That is your own Buddy ID; enter your buddy's", "code": "INVALID_REQUEST"})
   var buddy: BuddyInfo
   let idx = cfg.getBuddy(buddyId)
   if idx >= 0:
@@ -702,13 +789,33 @@ proc pairBuddyFromBody(body: string): tuple[status: int, response: JsonNode] =
   else:
     buddy.id.uuid = buddyId
     buddy.addedAt = getTime()
-  if buddyName.len > 0 or idx < 0:
-    buddy.id.name = buddyName
+  buddy.id.name = buddyName
   buddy.pairingCode = code
-  if parsed.hasKey("sync_time"):
-    buddy.syncTime = parsed{"sync_time"}.getStr("")
+  let error = readSchedule(parsed, buddy)
+  if error.len > 0:
+    return (400, %*{"error": error, "code": "INVALID_SCHEDULE"})
   cfg.addBuddy(buddy)
   (200, %*{"ok": true, "message": "Buddy paired successfully"})
+
+proc updateBuddyFromBody(body: string): tuple[status: int, response: JsonNode] =
+  ## Changes a buddy's name and when we sync with it.
+  let parsed = parseJson(body)
+  var cfg = config.loadConfig()
+  let idx = cfg.getBuddy(parsed{"id"}.getStr(""))
+  if idx < 0:
+    return (404, %*{"error": "Buddy not found", "code": "BUDDY_NOT_FOUND"})
+  var buddy = cfg.buddies[idx]
+  if parsed.hasKey("name"):
+    let name = parsed["name"].getStr("").strip()
+    if name.len == 0:
+      return (400, %*{"error": "A name for the buddy is required", "code": "INVALID_REQUEST"})
+    buddy.id.name = name
+  let error = readSchedule(parsed, buddy)
+  if error.len > 0:
+    return (400, %*{"error": error, "code": "INVALID_SCHEDULE"})
+  cfg.buddies[idx] = buddy
+  config.saveConfig(cfg)
+  (200, %*{"ok": true})
 
 proc setupRecoveryHandler(): tuple[status: int, response: JsonNode] =
   if not config.configExists():
@@ -796,15 +903,50 @@ proc exportRecoveryHandler(): tuple[status: int, response: JsonNode] =
     "enabled": cfg.recovery.enabled
   })
 
+proc daemonRunning(): bool =
+  let statePath = config.getDataDir() / "state.db"
+  if not fileExists(statePath):
+    return false
+  let db = getStateDb()
+  try:
+    db.getValue(sql"SELECT running FROM runtime_status WHERE id = 1") == "1"
+  finally:
+    db.close()
+
+proc requestSyncFor(cfg: AppConfig, folders: seq[FolderConfig]): JsonNode =
+  ## Which buddies the daemon will dial for these folders.
+  var buddies: seq[JsonNode] = @[]
+  var seen: seq[string] = @[]
+  for folder in folders:
+    requestFolderSync(folder.name)
+    for buddy in cfg.buddies:
+      if folderAppliesToBuddy(folder, buddy.id.uuid) and buddy.id.uuid notin seen:
+        seen.add(buddy.id.uuid)
+        buddies.add(%*{"id": buddy.id.uuid, "name": buddy.id.name})
+  %*{
+    "ok": true,
+    "message": "Sync requested",
+    "folders": folders.len,
+    "buddies": buddies,
+    "daemonRunning": daemonRunning()
+  }
+
 proc syncFolderByName(name: string): tuple[status: int, response: JsonNode] =
   if not config.configExists():
     return (404, %*{"error": "Folder not found", "code": "NOT_FOUND"})
   let cfg = config.loadConfig()
   for folder in cfg.folders:
     if folder.name == name:
-      requestFolderSync(name)
-      return (200, %*{"ok": true, "message": "Sync requested", "folder": name})
+      var response = requestSyncFor(cfg, @[folder])
+      response["folder"] = %name
+      return (200, response)
   (404, %*{"error": "Folder not found", "code": "NOT_FOUND"})
+
+proc syncAllFolders(): tuple[status: int, response: JsonNode] =
+  if not config.configExists():
+    return (400, %*{"error": "No config found", "code": "NO_CONFIG"})
+  let cfg = config.loadConfig()
+  (200, requestSyncFor(cfg, cfg.folders))
 
 proc syncConfigHandler(): tuple[status: int, response: JsonNode] =
   if not config.configExists():
@@ -847,6 +989,12 @@ proc handleRequest*(raw: string): string =
       of "/buddies/pairing-code": jsonResponse(200, pairingCodeJson())
       of "/buddies/pair":
         let resp = pairBuddyFromBody(req.body)
+        jsonResponse(resp.status, resp.response)
+      of "/buddies/update":
+        let resp = updateBuddyFromBody(req.body)
+        jsonResponse(resp.status, resp.response)
+      of "/sync":
+        let resp = syncAllFolders()
         jsonResponse(resp.status, resp.response)
       of "/config":
         let resp = updateConfigFromBody(req.body)
@@ -904,12 +1052,6 @@ proc controlServerMain(port: int) {.thread.} =
   socket.bindAddr(Port(port), "0.0.0.0")
   socket.listen()
   echo "Control server started on port ", port
-  echo "Web GUI (localhost): http://127.0.0.1:", port, "/"
-  {.cast(gcsafe).}:
-    if config.configExists():
-      let cfg = config.loadConfig()
-      let secret = webSecret(cfg.buddy.uuid)
-      echo "Web GUI (LAN): http://<your-ip>:", port, "/w/", secret, "/"
   while true:
     var client: owned(Socket)
     socket.accept(client)
@@ -925,8 +1067,12 @@ proc controlServerMain(port: int) {.thread.} =
               if not config.configExists():
                 forbiddenResponse
               else:
-                let rewritten = rewriteLanRequest(raw, config.loadConfig().buddy.uuid)
-                if rewritten.len == 0:
+                let uuid = config.loadConfig().buddy.uuid
+                let redirect = lanRootRedirect(raw, uuid)
+                let rewritten = rewriteLanRequest(raw, uuid)
+                if redirect.len > 0:
+                  redirect
+                elif rewritten.len == 0:
                   forbiddenResponse
                 else:
                   handleRequest(rewritten)
@@ -936,13 +1082,27 @@ proc controlServerMain(port: int) {.thread.} =
     finally:
       client.close()
 
-proc startControlServer*(port: int = DefaultControlPort) =
+proc webGuiUrls*(port: int, buddyUuid: string, lanHosts: seq[string]): seq[string] =
+  result.add("http://127.0.0.1:" & $port & "/")
+  let secret = webSecret(buddyUuid)
+  for host in (if lanHosts.len > 0: lanHosts else: @["<your-ip>"]):
+    result.add("http://" & host & ":" & $port & "/w/" & secret & "/")
+
+proc startControlServer*(port: int = DefaultControlPort, lanHosts: seq[string] = @[]) =
   if controlStarted:
     return
   config.ensureDataDir()
   writeFile(config.getDataDir() / "port", $port)
   controlStarted = true
   createThread(controlThread, controlServerMain, port)
+  try:
+    if config.configExists():
+      let urls = webGuiUrls(port, config.loadConfig().buddy.uuid, lanHosts)
+      echo "Web GUI (localhost): ", urls[0]
+      for url in urls[1 .. ^1]:
+        echo "Web GUI (LAN): ", url
+  except Exception as e:
+    echo "Could not read the config to show the web GUI address: ", e.msg
 
 proc stopControlServer*() =
   markControlStopped()

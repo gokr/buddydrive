@@ -144,9 +144,9 @@ suite "Daemon sessions":
       writeFile(folderA / "file.txt", "content\n")
 
       # B would normally be the one to dial (lower UUID initiates), and is
-      # outside its sync time: a request from the GUI overrides both.
+      # outside its sync window: a request from the GUI overrides both.
       var cfgA = peerConfig(BuddyTwo, BuddyOne, testDir / "a-stores", @[syncFolder("folder-a", folderA, name = "docs")])
-      cfgA.buddies[0].syncTime = (now() + 12.hours).format("HH:mm")
+      cfgA.buddies[0].syncWindow = (now() + 12.hours).format("HH:mm")
       let cfgB = peerConfig(BuddyOne, BuddyTwo, testDir / "b-stores", @[syncFolder("folder-b", folderB)])
       let a = startedDaemon(cfgA)
       let b = startedDaemon(cfgB)

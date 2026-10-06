@@ -275,17 +275,36 @@ suite "Buddy management":
       var buddy: BuddyInfo
       buddy.id = newBuddyId("ii-uuid", "ivan")
       buddy.pairingCode = "swift-eagle"
-      buddy.syncTime = "03:00"
+      buddy.syncWindow = "22:00-06:00"
+      buddy.syncInterval = "2h"
       buddy.addedAt = getTime()
       cfg.addBuddy(buddy)
       check cfg.buddies.len == 1
       check cfg.buddies[0].id.uuid == "ii-uuid"
       check cfg.buddies[0].pairingCode == "swift-eagle"
-      check cfg.buddies[0].syncTime == "03:00"
+      check cfg.buddies[0].syncWindow == "22:00-06:00"
       let reloaded = buddyconfig.loadConfig()
       check reloaded.buddies.len == 1
       check reloaded.buddies[0].id.name == "ivan"
-      check reloaded.buddies[0].syncTime == "03:00"
+      check reloaded.buddies[0].syncWindow == "22:00-06:00"
+      check reloaded.buddies[0].syncInterval == "2h"
+
+  test "an older sync_time is read as the sync window":
+    withTestDir("legacysynctime"):
+      putEnv("BUDDYDRIVE_CONFIG_DIR", testDir)
+      putEnv("BUDDYDRIVE_DATA_DIR", testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      var cfg = newAppConfig(newBuddyId("hh", "heidi"))
+      buddyconfig.saveConfig(cfg)
+      writeFile(getConfigPath(), readFile(getConfigPath()) &
+        "\n[[buddies]]\nid = \"old-uuid\"\nname = \"olga\"\npairing_code = \"x\"\nsync_time = \"03:00\"\n")
+      let reloaded = buddyconfig.loadConfig()
+      check reloaded.buddies[0].syncWindow == "03:00"
+      check reloaded.buddies[0].syncInterval == ""
+      buddyconfig.saveConfig(reloaded)
+      check "sync_window = \"03:00\"" in readFile(getConfigPath())
 
   test "buddy storage folder persists and has a default":
     withTestDir("buddystorage"):

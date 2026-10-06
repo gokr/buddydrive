@@ -65,6 +65,14 @@ suite "handleRequest routing":
     let resp = handleRequest("GET /status HTTP/1.1\r\n\r\n")
     check "Content-Type: application/json" in resp
 
+suite "web GUI addresses":
+  test "one LAN URL per address, behind the secret":
+    check webGuiUrls(17521, "b2050a4c-06c5-4377-b7e8-fb00ef871d0e", @["192.168.1.101"]) == @[
+      "http://127.0.0.1:17521/", "http://192.168.1.101:17521/w/b2050a4c/"]
+
+  test "a placeholder when no LAN address is known":
+    check webGuiUrls(17521, "b2050a4c-06c5-4377-b7e8-fb00ef871d0e", @[])[1] == "http://<your-ip>:17521/w/b2050a4c/"
+
 suite "control API handlers":
   test "POST /buddies/pair stores pairing code":
     withTestDir("controlpair"):
@@ -103,6 +111,58 @@ suite "control API handlers":
       check responseStatus(response) == 400
       let body = responseJson(response)
       check body["code"].getStr() == "INVALID_REQUEST"
+
+  test "POST /buddies/pair requires a name for the buddy":
+    withTestDir("controlpairnoname"):
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      initTestConfig(testDir)
+
+      let response = handleRequest(
+        "POST /buddies/pair HTTP/1.1\r\nContent-Type: application/json\r\n\r\n" &
+        "{\"buddyId\":\"buddy-1\",\"buddyName\":\"  \",\"code\":\"swift-eagle\"}"
+      )
+
+      check responseStatus(response) == 400
+      check buddyconfig.loadConfig().buddies.len == 0
+
+  test "POST /buddies/update renames a buddy and sets when to sync":
+    withTestDir("controlbuddyupdate"):
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      initTestConfig(testDir)
+      discard handleRequest(
+        "POST /buddies/pair HTTP/1.1\r\n\r\n" &
+        "{\"buddyId\":\"buddy-1\",\"buddyName\":\"Alice\",\"code\":\"swift-eagle\"}"
+      )
+
+      let update = proc (body: JsonNode): string =
+        handleRequest("POST /buddies/update HTTP/1.1\r\n\r\n" & $body)
+
+      check responseStatus(update(%*{"id": "buddy-1", "name": "Alice B", "sync_window": "22:00-06:00", "sync_interval": "2h"})) == 200
+      var cfg = buddyconfig.loadConfig()
+      check cfg.buddies[0].id.name == "Alice B"
+      check cfg.buddies[0].syncWindow == "22:00-06:00"
+      check cfg.buddies[0].syncInterval == "2h"
+      check cfg.buddies[0].pairingCode == "swift-eagle"
+
+      let buddies = responseJson(handleRequest("GET /buddies HTTP/1.1\r\n\r\n"))["buddies"]
+      check buddies[0]["name"].getStr() == "Alice B"
+      check buddies[0]["syncWindow"].getStr() == "22:00-06:00"
+      check buddies[0]["syncIntervalText"].getStr() == "every 2h"
+
+      check responseStatus(update(%*{"id": "buddy-1", "name": ""})) == 400
+      check responseStatus(update(%*{"id": "buddy-1", "sync_window": "late"})) == 400
+      check responseStatus(update(%*{"id": "buddy-1", "sync_interval": "2 days"})) == 400
+      check responseStatus(update(%*{"id": "nobody", "name": "X"})) == 404
+      check buddyconfig.loadConfig().buddies[0].syncInterval == "2h"
+
+      check responseStatus(update(%*{"id": "buddy-1", "sync_window": "", "sync_interval": ""})) == 200
+      cfg = buddyconfig.loadConfig()
+      check cfg.buddies[0].syncWindow == ""
+      check cfg.buddies[0].syncInterval == ""
 
   test "POST /recovery/setup enables recovery and returns 12 words":
     withTestDir("controlrecoverysetup"):
@@ -287,6 +347,39 @@ suite "Folder endpoints":
       check responseStatus(handleRequest("POST /sync/My%20photos HTTP/1.1\r\n\r\n")) == 200
       check takeSyncRequests() == @["My photos"]
       check takeSyncRequests().len == 0
+
+  test "POST /sync asks for every folder and names the buddies it reaches":
+    withTestDir("control_sync_all"):
+      initTestConfig(testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      discard post("/folders", %*{"name": "docs", "path": testDir})
+      discard post("/folders", %*{"name": "photos", "path": testDir, "buddies": ["buddy-2"]})
+      discard post("/buddies/pair", %*{"buddyId": "buddy-1", "buddyName": "Alice", "code": "a"})
+      discard post("/buddies/pair", %*{"buddyId": "buddy-2", "buddyName": "Bob", "code": "b"})
+      let response = handleRequest("POST /sync HTTP/1.1\r\n\r\n")
+      check responseStatus(response) == 200
+      let body = responseJson(response)
+      check body["folders"].getInt() == 2
+      check body["buddies"].len == 2
+      check body["buddies"][0]["name"].getStr() == "Alice"
+      check not body["daemonRunning"].getBool()
+      check takeSyncRequests() == @["docs", "photos"]
+
+  test "sync request progress reaches GET /sessions":
+    withTestDir("control_sync_progress"):
+      initTestConfig(testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      let at = initTime(1_800_000_000, 0)
+      writeSyncRequests(@[SyncRequestState(buddyId: "b1", buddyName: "Bob", requestedAt: at,
+        updatedAt: at, state: "not found", detail: "not published")])
+      let requests = responseJson(handleRequest("GET /sessions HTTP/1.1\r\n\r\n"))["requests"]
+      check requests.len == 1
+      check requests[0]["state"].getStr() == "not found"
+      check requests[0]["buddyName"].getStr() == "Bob"
 
   test "a sync request for an unknown folder is refused":
     withTestDir("control_sync_unknown"):

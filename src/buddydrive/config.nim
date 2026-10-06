@@ -168,8 +168,10 @@ proc configToToml*(config: AppConfig, includeHeader = false): string =
       result.add("id = \"" & escapeToml(buddy.id.uuid) & "\"\n")
       result.add("name = \"" & escapeToml(buddy.id.name) & "\"\n")
       result.add("pairing_code = \"" & escapeToml(buddy.pairingCode) & "\"\n")
-      if buddy.syncTime.len > 0:
-        result.add("sync_time = \"" & escapeToml(buddy.syncTime) & "\"\n")
+      if buddy.syncWindow.len > 0:
+        result.add("sync_window = \"" & escapeToml(buddy.syncWindow) & "\"\n")
+      if buddy.syncInterval.len > 0:
+        result.add("sync_interval = \"" & escapeToml(buddy.syncInterval) & "\"\n")
       if buddy.storagePath.len > 0:
         result.add("storage_path = \"" & escapeToml(buddy.storagePath) & "\"\n")
       if buddy.addresses.len > 0:
@@ -226,7 +228,8 @@ proc parseConfigToml*(toml: TomlValueRef): AppConfig =
       buddy.id.uuid = buddyTbl["id"].getStr()
       buddy.id.name = buddyTbl{"name"}.getStr("")
       buddy.pairingCode = buddyTbl{"pairing_code"}.getStr("")
-      buddy.syncTime = buddyTbl{"sync_time"}.getStr("")
+      buddy.syncWindow = buddyTbl{"sync_window"}.getStr(buddyTbl{"sync_time"}.getStr(""))
+      buddy.syncInterval = buddyTbl{"sync_interval"}.getStr("")
       buddy.storagePath = buddyTbl{"storage_path"}.getStr("")
       buddy.addresses = @[]
       if "addresses" in buddyTbl:
@@ -334,6 +337,9 @@ proc storageBaseDir*(config: AppConfig): string =
     config.storageBasePath
   else:
     getDataDir() / "storage"
+
+proc folderAppliesToBuddy*(folder: FolderConfig, buddyId: string): bool =
+  folder.buddies.len == 0 or buddyId in folder.buddies
 
 proc buddyStorageRoot*(config: AppConfig, buddyId: string): string =
   for buddy in config.buddies:

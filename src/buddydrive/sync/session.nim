@@ -20,9 +20,6 @@ import ../logutils
 ## needs. After the owner lists are exchanged, the folders of the buddy with
 ## the lower UUID are handled first, then those of the other.
 
-proc folderAppliesToBuddy*(folder: FolderConfig, buddyId: string): bool =
-  folder.buddies.len == 0 or buddyId in folder.buddies
-
 proc backupBuddies(config: AppConfig, folder: FolderConfig): seq[string] =
   ## Every configured buddy this folder is backed up to.
   for buddy in config.buddies:

@@ -1,6 +1,11 @@
 "use strict";
 
 const REFRESH_INTERVAL = 5000;
+const FAST_REFRESH_INTERVAL = 1000;
+const FAST_REFRESH_PERIOD = 60 * 1000;
+const REQUEST_SHOWN_FOR = 10 * 60 * 1000;
+const PENDING_TIMEOUT = 20 * 1000;
+const NOTICE_SHOWN_FOR = 15 * 1000;
 
 // Detect base path: if loaded from /w/<secret>/, API calls use the same prefix
 const BASE_PATH = (() => {
@@ -23,6 +28,7 @@ const dom = {
   activityHistory: document.getElementById("activity-history"),
   activityHistoryTitle: document.getElementById("activity-history-title"),
   activityList: document.getElementById("activity-list"),
+  syncRequests: document.getElementById("sync-requests"),
 };
 
 // API helpers
@@ -168,12 +174,14 @@ const renderBuddies = (buddies, storage = []) => {
     item.innerHTML = `
       <div class="list-item-info">
         <div class="list-item-name">${escHtml(buddy.name || "Unknown")}</div>
-        <div class="list-item-detail">${escHtml(shortId)} · syncs ${buddy.syncTime ? `around ${escHtml(buddy.syncTime)}` : "any time"}</div>
+        <div class="list-item-detail">${escHtml(shortId)}</div>
+        <div class="list-item-detail">Syncs ${buddy.syncWindow ? `between ${escHtml(buddy.syncWindow)}` : "any time"}, ${escHtml(buddy.syncIntervalText || "")}</div>
         ${storedText ? `<div class="list-item-detail">${escHtml(storedText)}</div>` : ""}
       </div>
       <div class="list-item-right">
         ${latency ? `<span class="dim">${latency}</span>` : ""}
         <span class="state-${state === "connected" ? "connected" : "disconnected"}">${escHtml(state)}</span>
+        <button class="btn btn-small btn-edit-buddy" data-buddy="${escAttr(buddy.id)}">Edit</button>
         <button class="btn btn-small btn-danger btn-remove-buddy" data-buddy="${escAttr(buddy.id)}">Remove</button>
       </div>
     `;
@@ -304,6 +312,108 @@ const renderActivity = (sessions) => {
   }).join("");
 };
 
+// Sync requests from the GUI: what the daemon did with them
+let pendingRequest = null;
+let requestNotice = null;
+let fastRefreshUntil = 0;
+let latestRequests = [];
+
+const REQUEST_TEXT = {
+  "looking up": "looking up the buddy's address...",
+  "dialing": "connecting...",
+  "connected": "connected, syncing",
+  "already syncing": "a sync with this buddy is already running",
+  "not found": "could not find the buddy",
+  "unreachable": "could not connect",
+};
+
+const REQUEST_CLASS = {
+  "looking up": "request-pending",
+  "dialing": "request-pending",
+  "connected": "activity-outcome-ok",
+  "already syncing": "request-busy",
+  "not found": "request-failed",
+  "unreachable": "request-failed",
+};
+
+const showNotice = (text, cls) => {
+  requestNotice = { text, cls, at: Date.now() };
+  renderRequests(latestRequests);
+};
+
+const renderRequests = (requests) => {
+  latestRequests = requests;
+  const now = Date.now();
+  const lines = [];
+
+  if (requestNotice && now - requestNotice.at < NOTICE_SHOWN_FOR) {
+    lines.push(activityLine(requestNotice.cls, escHtml(requestNotice.text)));
+  }
+
+  if (pendingRequest) {
+    const picked = requests.some((r) =>
+      pendingRequest.ids.includes(r.buddyId) &&
+      (new Date(r.updatedAt).getTime() >= pendingRequest.at - 5000 || REQUEST_CLASS[r.state] === "request-pending"));
+    if (picked) {
+      pendingRequest = null;
+    } else if (now - pendingRequest.at > PENDING_TIMEOUT) {
+      lines.push(activityLine("request-failed",
+        `Sync requested with ${escHtml(pendingRequest.names.join(", "))}, but the daemon has not picked it up. Is it running?`));
+    } else {
+      lines.push(activityLine("request-pending",
+        `Sync requested with ${escHtml(pendingRequest.names.join(", "))}, waiting for the daemon...`));
+    }
+  }
+
+  for (const r of requests) {
+    const age = now - new Date(r.updatedAt).getTime();
+    if (age > REQUEST_SHOWN_FOR || (r.state === "connected" && age > 60 * 1000)) continue;
+    lines.push(activityLine(REQUEST_CLASS[r.state] || "",
+      `Sync requested with <strong>${escHtml(r.buddyName || buddyLabel(r.buddyId))}</strong> at ${escHtml(formatTime(r.requestedAt))} · ${escHtml(REQUEST_TEXT[r.state] || r.state)}`));
+    if (r.detail) lines.push(activityLine("activity-detail", escHtml(r.detail)));
+  }
+
+  dom.syncRequests.innerHTML = lines.join("");
+  dom.syncRequests.hidden = lines.length === 0;
+};
+
+const requestSync = async (endpoint, button) => {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Requesting...";
+  try {
+    const result = await api.postResult(endpoint);
+    const data = result.data || {};
+    const buddies = data.buddies || [];
+    if (!result.ok) {
+      showNotice(data.error || "Could not request a sync.", "request-failed");
+    } else if (!data.daemonRunning) {
+      showNotice("The daemon is not running, so nothing will sync until it is started.", "request-failed");
+    } else if (data.folders === 0) {
+      showNotice("There are no folders to sync. Add a folder first.", "request-busy");
+    } else if (buddies.length === 0) {
+      showNotice("No buddy to sync with. Pair with a buddy first.", "request-busy");
+    } else {
+      requestNotice = null;
+      pendingRequest = {
+        at: Date.now(),
+        ids: buddies.map((b) => b.id),
+        names: buddies.map((b) => b.name || b.id.substring(0, 8)),
+      };
+      fastRefreshUntil = Date.now() + FAST_REFRESH_PERIOD;
+      renderRequests(latestRequests);
+    }
+    await refresh();
+  } catch (e) {
+    showNotice(`Could not reach BuddyDrive: ${e.message}`, "request-failed");
+  } finally {
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = label;
+    }, 1500);
+  }
+};
+
 const renderStatus = (data) => {
   const running = data.running || false;
   const syncEnabled = data.syncEnabled !== false;
@@ -359,6 +469,7 @@ const refresh = async () => {
     renderActivity(sessions.sessions || []);
     renderFolders(folders.folders || []);
     renderBuddies(buddies.buddies || [], storage.storage || []);
+    renderRequests(sessions.requests || []);
   } catch (e) {
     console.error("Refresh failed:", e);
   }
@@ -407,24 +518,15 @@ const initEvents = () => {
   });
 
   // Sync All
-  document.getElementById("btn-sync-all").addEventListener("click", async () => {
-    try {
-      const data = await api.get("/folders");
-      const folders = data.folders || [];
-      await Promise.all(folders.map((f) => api.post(`/sync/${encodeURIComponent(f.name)}`)));
-      await refresh();
-    } catch (e) {
-      console.error("Sync all failed:", e);
-    }
+  document.getElementById("btn-sync-all").addEventListener("click", (e) => {
+    requestSync("/sync", e.currentTarget);
   });
 
   // Per-folder sync and remove (delegated)
   dom.foldersList.addEventListener("click", async (e) => {
     const syncBtn = e.target.closest(".btn-sync");
     if (syncBtn) {
-      const name = syncBtn.dataset.folder;
-      await api.post(`/sync/${encodeURIComponent(name)}`);
-      await refresh();
+      await requestSync(`/sync/${encodeURIComponent(syncBtn.dataset.folder)}`, syncBtn);
       return;
     }
 
@@ -445,8 +547,15 @@ const initEvents = () => {
     }
   });
 
-  // Per-buddy remove (delegated)
+  // Per-buddy edit and remove (delegated)
   dom.buddiesList.addEventListener("click", async (e) => {
+    const editBtn = e.target.closest(".btn-edit-buddy");
+    if (editBtn) {
+      const buddy = latestBuddies.find((b) => b.id === editBtn.dataset.buddy);
+      if (buddy) openEditBuddyDialog(buddy);
+      return;
+    }
+
     const removeBtn = e.target.closest(".btn-remove-buddy");
     if (removeBtn) {
       const id = removeBtn.dataset.buddy;
@@ -525,8 +634,8 @@ const initEvents = () => {
   document.getElementById("btn-pair-buddy").addEventListener("click", () => {
     document.getElementById("buddy-id").value = "";
     document.getElementById("buddy-pair-name").value = "";
-    document.getElementById("buddy-sync-time").value = "";
     document.getElementById("buddy-code").value = "";
+    document.getElementById("pair-error").hidden = true;
     document.getElementById("pair-hint").textContent =
       "Enter the code your buddy sent you, or generate one and send it to them. Both of you must use the same code.";
     openDialog("dialog-pair-buddy");
@@ -549,13 +658,64 @@ const initEvents = () => {
     const buddyId = document.getElementById("buddy-id").value.trim();
     const buddyName = document.getElementById("buddy-pair-name").value.trim();
     const code = document.getElementById("buddy-code").value.trim();
-    const syncTime = document.getElementById("buddy-sync-time").value.trim();
-    if (!buddyId || !code) return;
+    const error = document.getElementById("pair-error");
+    const missing = [];
+    if (!buddyId) missing.push("the buddy's ID");
+    if (!buddyName) missing.push("a name for the buddy");
+    if (!code) missing.push("a pairing code");
+    if (missing.length > 0) {
+      error.textContent = `Enter ${missing.join(", ")}.`;
+      error.hidden = false;
+      return;
+    }
 
-    const body = { buddyId, buddyName, code };
-    if (syncTime) body.sync_time = syncTime;
-    await api.post("/buddies/pair", body);
+    const result = await api.postResult("/buddies/pair", { buddyId, buddyName, code });
+    if (!result.ok) {
+      error.textContent = result.data.error || "Could not pair with the buddy.";
+      error.hidden = false;
+      return;
+    }
     closeDialog("dialog-pair-buddy");
+    await refresh();
+  });
+
+  // Edit Buddy dialog
+  const openEditBuddyDialog = (buddy) => {
+    document.getElementById("edit-buddy-id").value = buddy.id;
+    document.getElementById("edit-buddy-uuid").textContent = `Buddy ID ${buddy.id}`;
+    document.getElementById("edit-buddy-name").value = buddy.name || "";
+    document.getElementById("edit-buddy-window").value = buddy.syncWindow || "";
+    document.getElementById("edit-buddy-interval").value = buddy.syncInterval || "";
+    document.getElementById("edit-buddy-error").hidden = true;
+    openDialog("dialog-edit-buddy");
+  };
+
+  document.getElementById("btn-cancel-edit-buddy").addEventListener("click", () => {
+    closeDialog("dialog-edit-buddy");
+  });
+
+  document.getElementById("btn-submit-edit-buddy").addEventListener("click", async (e) => {
+    e.preventDefault();
+    const id = document.getElementById("edit-buddy-id").value;
+    const name = document.getElementById("edit-buddy-name").value.trim();
+    const error = document.getElementById("edit-buddy-error");
+    if (!name) {
+      error.textContent = "Enter a name for the buddy.";
+      error.hidden = false;
+      return;
+    }
+    const result = await api.postResult("/buddies/update", {
+      id,
+      name,
+      sync_window: document.getElementById("edit-buddy-window").value.trim(),
+      sync_interval: document.getElementById("edit-buddy-interval").value.trim(),
+    });
+    if (!result.ok) {
+      error.textContent = result.data.error || "Could not save the buddy.";
+      error.hidden = false;
+      return;
+    }
+    closeDialog("dialog-edit-buddy");
     await refresh();
   });
 
@@ -600,3 +760,6 @@ initEvents();
 refresh();
 refreshLogs();
 setInterval(refresh, REFRESH_INTERVAL);
+setInterval(() => {
+  if (Date.now() < fastRefreshUntil) refresh();
+}, FAST_REFRESH_INTERVAL);

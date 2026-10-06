@@ -446,7 +446,30 @@ dialog legend {
   margin-top: 6px !important;
 }
 
-#folder-error {
+#folder-error,
+.dialog-error {
   color: var(--danger);
   margin-top: 12px;
+  font-size: 0.85rem;
+}
+
+.sync-requests {
+  border-top: 1px solid var(--border);
+}
+
+.request-pending {
+  color: var(--primary);
+}
+
+.request-failed {
+  color: var(--danger);
+}
+
+.request-busy {
+  color: var(--warning);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }

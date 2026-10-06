@@ -16,7 +16,8 @@ type
     id*: BuddyId
     pairingCode*: string
     addresses*: seq[string]
-    syncTime*: string
+    syncWindow*: string
+    syncInterval*: string
     storagePath*: string
     addedAt*: Time
   
@@ -78,6 +79,16 @@ type
     detail*: string
     lastSync*: Time
   
+  SyncRequestState* = object
+    ## A sync asked for from a GUI, until it turns into a session or fails.
+    buddyId*: string
+    buddyName*: string
+    requestedAt*: Time
+    updatedAt*: Time
+    state*: string
+      ## "looking up", "dialing", "connected", "already syncing", "not found" or "unreachable"
+    detail*: string
+
   SessionRecord* = object
     ## One connection with a buddy, as shown in the GUI's sync activity.
     id*: int
