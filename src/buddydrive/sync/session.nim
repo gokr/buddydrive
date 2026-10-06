@@ -147,6 +147,28 @@ proc readableStored(transfer: FileTransfer, stored: seq[FileInfo]): seq[FileInfo
       info.path = entry.encryptedPath
     result.add(info)
 
+proc wireView(transfer: FileTransfer, files: seq[FileInfo]): seq[FileInfo] =
+  ## Our files with their content hashes as the storage buddy knows them, so
+  ## the two lists can be compared.
+  for info in files:
+    var wired = info
+    wired.hash = transfer.wireHash(info.hash)
+    result.add(wired)
+
+proc adoptPlainHashes(transfer: FileTransfer, localFiles: seq[FileInfo], stored: var seq[FileInfo]): seq[tuple[path: string, hash: string]] =
+  ## Backups made before content hashes were keyed hold the plain hash. Where
+  ## one matches a file we have, the buddy is told the keyed hash instead,
+  ## which spares sending the file again.
+  if not transfer.isEncryptedOnWire():
+    return
+  var plainHashes = initHashSet[string]()
+  for info in localFiles:
+    plainHashes.incl(hashToString(info.hash))
+  for held in stored.mitems:
+    if hashToString(held.hash) in plainHashes:
+      held.hash = transfer.wireHash(held.hash)
+      result.add((held.encryptedPath, hashToString(held.hash)))
+
 proc computeOwnerPlan(transfer: FileTransfer, localFiles: seq[FileInfo], stored: seq[FileInfo]): OwnerPlan =
   ## Works out what the storage buddy should change to match us, and what it
   ## holds that we should take back. A stored path we do not have is only
@@ -244,11 +266,27 @@ proc ownerSyncFolder(folder: OwnedFolder, buddyId: string, conn: Connection, rep
     return true
   if answer.get().kind != msgListPathsResponse or answer.get().listResponseFolderId != folderId:
     return sessionFailed("unexpected answer about what the buddy stores of " & folderName)
-  var stored: seq[FileInfo] = @[]
+  var listed: seq[FileInfo] = @[]
   for entry in answer.get().listFiles:
-    stored.add(toFileInfo(entry))
+    listed.add(toFileInfo(entry))
+  var stored = readableStored(transfer, listed)
 
-  let plan = computeOwnerPlan(transfer, folder.files, readableStored(transfer, stored))
+  let rehashes =
+    try:
+      adoptPlainHashes(transfer, folder.files, stored)
+    except CatchableError as e:
+      return sessionFailed("could not compare " & folderName & " with the buddy's copy: " & e.msg)
+  let plan =
+    try:
+      computeOwnerPlan(transfer, wireView(transfer, folder.files), stored)
+    except CatchableError as e:
+      return sessionFailed("could not compare " & folderName & " with the buddy's copy: " & e.msg)
+
+  for rehash in rehashes:
+    try:
+      await transfer.protocol.sendMessage(conn, newRehash(rehash.path, rehash.hash))
+    except CatchableError:
+      return false
 
   for move in plan.moves:
     try:
@@ -312,6 +350,10 @@ proc storageOwnerPhase(storage: StorageFolder, conn: Connection): Future[bool] {
       if not storage.applyMove(msg.oldPath, msg.newPath):
         logSession("could not rename a stored file of the buddy's " & folderName &
           "; it will be fetched again under its new name")
+    of msgRehash:
+      if not storage.applyRehash(msg.rehashPath, msg.rehashHash):
+        logSession("could not update a stored hash of the buddy's " & folderName &
+          "; the file will be fetched again")
     of msgFileDelete:
       if not storage.applyDelete(msg.deletedPath):
         logSession("could not delete a stored file of the buddy's " & folderName)

@@ -235,7 +235,7 @@ Each folder that buddy shares lives under `<root>/<folder-id>/`. Folders are key
 
 ```
 <root>/<folder-id>/<hh>/<h>.blob   -- the owner's chunks, still sealed
-<root>/<folder-id>/<hh>/<h>.meta   -- JSON: encryptedPath, content hash, size, mtime, mode, sealed symlink target
+<root>/<folder-id>/<hh>/<h>.meta   -- JSON: encryptedPath, keyed content hash, size, mtime, mode, sealed symlink target
 ```
 
 `<h>` is the first 32 hex characters of blake2b(encrypted path), so file names reveal nothing and stay short (an encrypted path can exceed the 255-byte file name limit). A blob is the sequence of `[u8 compression][u32 plaintext length][u32 payload length][nonce || ciphertext]` frames exactly as the owner sent them; restore streams them back unchanged. A move renames the blob and rewrites the small sidecar. Symlinks have a sidecar only.
@@ -273,7 +273,7 @@ Both sides send their file lists for shared folders. Each list carries the folde
 **Owner → Storage**: list of `(encrypted_path, content_hash, size)` per folder
 **Storage → Owner**: list of `(encrypted_path, content_hash, size)` per folder
 
-The owner sends encrypted paths and plaintext content hashes. B already knows the `content_hash` from the previous sync (stored in B's index). The content_hash lets B recognize "same content at a new encrypted path" for move detection.
+The owner sends encrypted paths and content hashes; for encrypted folders the hash is keyed with the folder key (`keyedContentHash`), so B cannot match it against files it already knows. Backups made before that hold the plain hash: the owner sends `msgRehash` with the keyed one for every file it still has, so nothing is uploaded again. B already knows the `content_hash` from the previous sync (stored in B's index). The content_hash lets B recognize "same content at a new encrypted path" for move detection.
 
 For unencrypted (sharing) folders, `encrypted_path == path` and no encryption is applied.
 

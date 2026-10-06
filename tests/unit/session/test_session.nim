@@ -5,6 +5,8 @@ import ../../../src/buddydrive/types
 import ../../../src/buddydrive/p2p/messages
 import ../../../src/buddydrive/p2p/protocol
 import ../../../src/buddydrive/sync/session
+import ../../../src/buddydrive/sync/index
+import ../../../src/buddydrive/crypto
 import ../../testutils
 import ../../support/sync_fixtures
 
@@ -25,6 +27,36 @@ proc syncBoth(cfg1, cfg2: AppConfig, report: SessionReport = nil) =
   let outcome = waitFor runBridgeSync(cfg1, cfg2, report)
   check outcome.leftOk
   check outcome.rightOk
+
+proc syncCounting(cfg1, cfg2: AppConfig): tuple[ok: bool, received: int64] =
+  ## Syncs once and returns how much file data the second side received.
+  proc run(): Future[tuple[ok: bool, received: int64]] {.async.} =
+    let (left, right) = bridgedConnections(closeTogether = false)
+    defer:
+      await left.close()
+      await right.close()
+    let storageSide = newSyncProtocol()
+    let fut1 = syncBuddyFolders(cfg1, cfg1.buddies[0].id.uuid, left, newSyncProtocol())
+    let fut2 = syncBuddyFolders(cfg2, cfg2.buddies[0].id.uuid, right, storageSide)
+    let ok1 = await fut1
+    let ok2 = await fut2
+    result = (ok1 and ok2, storageSide.fileBytesReceived)
+  waitFor run()
+
+proc storedHashes(root: string): seq[string] =
+  for path in storedFiles(root, ".meta"):
+    result.add(parseJson(readFile(root / path))["hash"].getStr())
+
+proc plainHash(path: string): string =
+  hashToString(hashFileStream(path))
+
+proc unkeyStoredHashes(root: string, folder: FolderConfig) =
+  ## Rewrites the sidecars the way a buddy kept them before hashes were keyed.
+  for path in storedFiles(root, ".meta"):
+    let node = parseJson(readFile(root / path))
+    let plainPath = decryptPath(node["encryptedPath"].getStr(), folder.folderKey)
+    node["hash"] = %plainHash(folder.path / plainPath)
+    writeFile(root / path, $node)
 
 proc readBlobs(root: string): seq[string] =
   for path in storedFiles(root, ".blob"):
@@ -107,6 +139,62 @@ suite "Session sync":
       when defined(posix):
         check symlinkExists(restored / "plan-link")
         check expandSymlink(restored / "plan-link") == "plan.txt"
+
+  test "the buddy is told a keyed content hash, never the plain one":
+    withTestDir("session_keyed_hash"):
+      let folderA = testDir / "a"
+      createDir(folderA)
+      createDir(testDir / "b")
+      writeFile(folderA / "known.txt", "a file the buddy might also have\n")
+      let folder = syncFolder("folder-a", folderA)
+      syncBoth(peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[folder]),
+        peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")]))
+
+      let hashes = storedHashes(testDir / "b-stores" / "folder-a")
+      let plain = hashFileStream(folderA / "known.txt")
+      check hashes == @[hashToString(keyedContentHash(plain, folder.folderKey))]
+      check hashToString(plain) notin hashes
+
+  test "a backup with plain hashes is rekeyed without sending the files again":
+    withTestDir("session_rekey"):
+      let folderA = testDir / "a"
+      createDir(folderA)
+      createDir(testDir / "b")
+      writeFile(folderA / "one.txt", "one\n")
+      writeFile(folderA / "two.txt", "two\n")
+      let folder = syncFolder("folder-a", folderA)
+      let cfgA = peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[folder])
+      let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")])
+      syncBoth(cfgA, cfgB)
+      let stored = testDir / "b-stores" / "folder-a"
+      let keyed = storedHashes(stored)
+      let blobs = readBlobs(stored)
+
+      unkeyStoredHashes(stored, folder)
+      check storedHashes(stored) != keyed
+      let outcome = syncCounting(cfgA, cfgB)
+      check outcome.ok
+      check outcome.received == 0
+      check storedHashes(stored) == keyed
+      check readBlobs(stored) == blobs
+
+  test "a file backed up with a plain hash can still be restored":
+    withTestDir("session_restore_plain_hash"):
+      let folderA = testDir / "a"
+      createDir(folderA)
+      createDir(testDir / "b")
+      writeFile(folderA / "old.txt", "backed up long ago\n")
+      let source = syncFolder("folder-a", folderA)
+      let cfgB = peerConfig(BuddyTwo, BuddyOne, testDir / "b-stores", @[syncFolder("folder-b", testDir / "b")])
+      syncBoth(peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[source]), cfgB)
+      unkeyStoredHashes(testDir / "b-stores" / "folder-a", source)
+
+      let restored = testDir / "restored"
+      createDir(restored)
+      var replacement = source
+      replacement.path = restored
+      syncBoth(peerConfig(BuddyOne, BuddyTwo, testDir / "a-stores", @[replacement]), cfgB)
+      check readFile(restored / "old.txt") == "backed up long ago\n"
 
   test "renames move the stored blob instead of sending it again":
     withTestDir("session_move"):

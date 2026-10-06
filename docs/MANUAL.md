@@ -462,6 +462,7 @@ When `encrypted = true` on a folder:
 - **File content** is split into 64KB chunks, each encrypted with a random 24-byte nonce prepended to the ciphertext. Random nonces prevent nonce reuse when the same file is modified across versions.
 - **Folder key** is derived from `crypto_generichash(masterKey + "/folder/" + folderId)` when recovery is enabled, or a random key stored in `folder_key` in config.toml otherwise.
 - Your buddy stores fully opaque encrypted blobs — they cannot read filenames or content.
+- The content hash your buddy keeps is keyed with the folder key, so it cannot be matched against files they know. They do see each file's size, mtime and permission bits.
 
 When `encrypted = false`:
 - Files are stored plaintext on the buddy's machine for collaboration.

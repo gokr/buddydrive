@@ -170,6 +170,14 @@ suite "FolderRefused message":
     check decoded.get().refusedFolderId == "id-1"
     check decoded.get().refusedReason == "owned by another machine"
 
+suite "Rehash message":
+  test "round-trip":
+    let decoded = decode(encode(newRehash("enc-path", "abc123")))
+    check decoded.isOk
+    check decoded.get().kind == msgRehash
+    check decoded.get().rehashPath == "enc-path"
+    check decoded.get().rehashHash == "abc123"
+
 suite "ListPaths messages":
   test "request round-trip":
     let msg = newListPathsRequest("folder")

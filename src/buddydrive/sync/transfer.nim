@@ -132,21 +132,32 @@ proc knownIndexPaths*(transfer: FileTransfer): HashSet[string] =
   for existing in transfer.index.getAllFiles():
     result.incl(existing.path)
 
+proc useEncryptedChunks(transfer: FileTransfer): bool =
+  transfer.scanner.folder.encrypted and transfer.scanner.folder.folderKey.len == KeySize
+
+proc wireHash*(transfer: FileTransfer, hash: array[32, byte]): array[32, byte] =
+  ## A content hash as the storage buddy knows it: keyed with the folder key
+  ## for encrypted folders, as is for plain ones.
+  if transfer.useEncryptedChunks():
+    keyedContentHash(hash, transfer.scanner.folder.folderKey)
+  else:
+    hash
+
 proc verifyRestoredFile(transfer: FileTransfer, path: string, expected: FileInfo): bool =
+  ## The expected hash comes from the storage buddy. Backups made before
+  ## hashes were keyed still hold the plain one, so either is accepted.
   if not fileExists(path) and not symlinkExists(path):
     return false
 
   let actual = transfer.scanner.scanFile(path)
-  if hasExpectedHash(expected) and actual.hash != expected.hash:
+  if hasExpectedHash(expected) and actual.hash != expected.hash and
+      transfer.wireHash(actual.hash) != expected.hash:
     return false
   if expected.symlinkTarget.len > 0 and actual.symlinkTarget != expected.symlinkTarget:
     return false
   if expected.mode != 0 and actual.mode != expected.mode:
     return false
   true
-
-proc useEncryptedChunks(transfer: FileTransfer): bool =
-  transfer.scanner.folder.encrypted and transfer.scanner.folder.folderKey.len == KeySize
 
 proc modeToPermissions(mode: int): set[FilePermission] =
   if (mode and 0o400) != 0:
@@ -245,17 +256,18 @@ proc isEncryptedOnWire*(transfer: FileTransfer): bool =
 
 proc ownerFileEntries*(transfer: FileTransfer, files: seq[FileInfo]): seq[FileEntry] =
   ## What the storage buddy gets to see of our files. For encrypted folders
-  ## that is the encrypted path, the content hash, size and metadata; the
-  ## plaintext path is left out and symlink targets are sealed.
+  ## that is the encrypted path, the keyed content hash, size and metadata;
+  ## the plaintext path is left out and symlink targets are sealed.
   for f in files:
     var entry = toFileEntry(f)
     if transfer.useEncryptedChunks():
       entry.path = ""
-      if f.symlinkTarget.len > 0:
-        try:
+      try:
+        entry.hash = hashToString(transfer.wireHash(f.hash))
+        if f.symlinkTarget.len > 0:
           entry.symlinkTarget = encryptSymlinkTarget(f.symlinkTarget, transfer.scanner.folder.folderKey)
-        except CatchableError:
-          continue
+      except CatchableError:
+        continue
     result.add(entry)
 
 proc sendFileList*(

@@ -21,6 +21,7 @@ type
     msgSyncDone
     msgSessionEnd
     msgFolderRefused
+    msgRehash
 
   CompressionKind* = enum
     ckNone = 0
@@ -72,6 +73,9 @@ type
     of msgFolderRefused:
       refusedFolderId*: string
       refusedReason*: string
+    of msgRehash:
+      rehashPath*: string
+      rehashHash*: string
   
   FileEntry* = object
     path*: string
@@ -83,7 +87,7 @@ type
     symlinkTarget*: string
 
 const
-  ProtocolVersion*: uint8 = 6
+  ProtocolVersion*: uint8 = 7
   MaxMessageSize*: int = 1024 * 1024 * 30  # 30MB max
   ChunkSize*: int = 64 * 1024  # 64KB chunks
 
@@ -225,6 +229,10 @@ proc encode*(msg: ProtocolMessage): seq[byte] =
   of msgFolderRefused:
     result.addString(msg.refusedFolderId)
     result.addString(msg.refusedReason)
+
+  of msgRehash:
+    result.addString(msg.rehashPath)
+    result.addString(msg.rehashHash)
 
 proc decode*(data: seq[byte]): Result[ProtocolMessage, string] =
   if data.len < 2:
@@ -458,6 +466,16 @@ proc decode*(data: seq[byte]): Result[ProtocolMessage, string] =
     if refusedReasonRes.isErr:
       return err(refusedReasonRes.error)
     msg.refusedReason = refusedReasonRes.get()
+
+  of msgRehash:
+    let rehashPathRes = readString(data, pos)
+    if rehashPathRes.isErr:
+      return err(rehashPathRes.error)
+    msg.rehashPath = rehashPathRes.get()
+    let rehashHashRes = readString(data, pos)
+    if rehashHashRes.isErr:
+      return err(rehashHashRes.error)
+    msg.rehashHash = rehashHashRes.get()
   
   ok(msg)
 
@@ -537,3 +555,8 @@ proc newFolderRefused*(folderId: string, reason: string): ProtocolMessage =
   ## The storage side will not take this folder from us in this session; both
   ## sides skip it, so nothing is changed on either.
   ProtocolMessage(kind: msgFolderRefused, refusedFolderId: folderId, refusedReason: reason)
+
+proc newRehash*(path: string, hash: string): ProtocolMessage =
+  ## Replaces the content hash the storage buddy recorded for a file, without
+  ## sending the file again.
+  ProtocolMessage(kind: msgRehash, rehashPath: path, rehashHash: hash)

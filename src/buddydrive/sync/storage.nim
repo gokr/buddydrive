@@ -258,6 +258,20 @@ proc applyMove*(storage: StorageFolder, oldPath: string, newPath: string): bool 
   except:
     false
 
+proc applyRehash*(storage: StorageFolder, path: string, hash: string): bool =
+  ## Records the owner's new content hash for a file we already hold.
+  if storage.plain != nil:
+    return true
+  try:
+    let stored = storage.readStoredMeta(path)
+    if stored.isNone:
+      return true
+    var info = stored.get()
+    info.hash = stringToHash(hash)
+    writeMeta(storage.metaPath(path), info)
+  except CatchableError:
+    false
+
 proc applyDelete*(storage: StorageFolder, path: string): bool =
   if storage.appendOnly:
     return true

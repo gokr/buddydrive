@@ -203,7 +203,7 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **Streaming blake2b hash**: `crypto_generichash_init/update/final` — 64KB chunks, never full file in memory.
 - **Deterministic path encryption**: same path → same encrypted path. Enables move detection.
 - **Random content nonces**: each chunk encrypted with random nonce (prepended). Same file encrypted twice produces different ciphertext — prevents nonce reuse.
-- **Content-hash-based sync**: owner sends plaintext blake2b hash to storage buddy. Detects changes, moves, and deletes.
+- **Content-hash-based sync**: owner sends its blake2b content hash to the storage buddy, keyed with the folder key for encrypted folders (`keyedContentHash`, `wireHash` in `transfer.nim`) so the buddy cannot match it against known files. Detects changes, moves, and deletes. Older backups with plain hashes are rekeyed in place with `msgRehash`, not re-sent.
 - **Owner-authoritative moves**: A tells B "rename X to Y". B does not infer moves from ciphertext identity.
 - **Delete propagation**: `msgFileDelete` is sent and handled.
 - **Hash verification on restore**: `verifyRestoredFile` re-scans and checks hash after write.
@@ -214,7 +214,7 @@ The new sync model is now **largely implemented**. See `docs/PLAN.md` for the fu
 - **Pairing codes** come from libsodium's CSPRNG (`generatePairingCode` in `crypto.nim`), never `std/random`.
 - **Create folders with `newSyncFolder`** (`config.nim`), never bare `newFolderConfig`: it sets the stable id and the folder key. An encrypted folder without a key is skipped by sync, and the daemon repairs such folders at startup (`ensureFolderIdentities`).
 - **One owning machine per stored folder**: owners send `config.machineId()` (data dir, not config.toml); the storage side records it in `<buddy root>/<folder dir>.owner` and answers another machine with `msgFolderRefused`, unless it takes over (`requestTakeover`, set by `recover` and `buddydrive takeover`, cleared per buddy after a successful session).
-- **Wire protocol version 6** (`ProtocolVersion` in `messages.nim`): older peers are rejected at the handshake.
+- **Wire protocol version 7** (`ProtocolVersion` in `messages.nim`): older peers are rejected at the handshake.
 
 ### Remaining Work
 
