@@ -18,6 +18,7 @@ const dom = {
   statusBadge: document.getElementById("status-badge"),
   buddyName: document.getElementById("buddy-name"),
   uptime: document.getElementById("uptime"),
+  build: document.getElementById("build"),
   foldersList: document.getElementById("folders-list"),
   foldersEmpty: document.getElementById("folders-empty"),
   buddiesList: document.getElementById("buddies-list"),
@@ -208,6 +209,31 @@ const renderFolders = (folders) => {
   }
 };
 
+let daemonRunning = false;
+
+const formatMinutes = (minutes) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h && m) return `${h}h ${m}m`;
+  return h ? `${h}h` : `${m}m`;
+};
+
+const scheduleText = (buddy) => {
+  const when = buddy.syncWindow ? `between ${buddy.syncWindow}` : "any time";
+  if (!daemonRunning || !buddy.intervalMinutes) {
+    return `Syncs ${when}, ${buddy.syncIntervalText || ""}`;
+  }
+  let next = "";
+  if (buddy.nextSync) {
+    const at = new Date(Math.max(Date.parse(buddy.nextSync), Date.now())).toISOString();
+    next = ` · next ${buddy.buddyDials ? "check" : "sync"} ${formatTimeAndAge(at)}`;
+  }
+  if (buddy.buddyDials) {
+    return `${buddy.name || "This buddy"} dials this machine; we meet it at the relay ${when}, every ${formatMinutes(buddy.intervalMinutes)}${next}`;
+  }
+  return `Syncs ${when}, every ${formatMinutes(buddy.intervalMinutes)}${next}`;
+};
+
 const renderBuddies = (buddies, storage = []) => {
   latestBuddies = buddies;
   const storageById = {};
@@ -230,7 +256,7 @@ const renderBuddies = (buddies, storage = []) => {
       <div class="list-item-info">
         <div class="list-item-name">${escHtml(buddy.name || "Unknown")}</div>
         <div class="list-item-detail">${escHtml(shortId)}</div>
-        <div class="list-item-detail">Syncs ${buddy.syncWindow ? `between ${escHtml(buddy.syncWindow)}` : "any time"}, ${escHtml(buddy.syncIntervalText || "")}</div>
+        <div class="list-item-detail">${escHtml(scheduleText(buddy))}</div>
         ${storedText ? `<div class="list-item-detail">${escHtml(storedText)}</div>` : ""}
       </div>
       <div class="list-item-right">
@@ -492,6 +518,11 @@ const renderStatus = (data) => {
 
   const uptime = data.uptime || 0;
   dom.uptime.textContent = running ? formatUptime(uptime) : "";
+  daemonRunning = running;
+
+  const build = data.build;
+  dom.build.textContent = build ? `v${build.version} · ${build.commit}` : "";
+  dom.build.title = build ? `Built ${formatTime(build.builtAt)} · wire protocol ${build.protocolVersion}` : "";
 };
 
 const renderLogs = (logs) => {

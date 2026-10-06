@@ -118,3 +118,17 @@ suite "shouldAttemptBuddySync":
     buddy.syncWindow = "22:00-06:00"
     check shouldAttemptBuddySync(buddy, dateTime(2026, mApr, 10, 2, 0, 0, 0, local()))
     check not shouldAttemptBuddySync(buddy, dateTime(2026, mApr, 10, 12, 0, 0, 0, local()))
+
+suite "nextSyncTime":
+  test "due inside the window, or with no window, is kept":
+    let due = dateTime(2026, mApr, 10, 23, 30, 0, 0, local())
+    check nextSyncTime("", due) == due
+    check nextSyncTime("22:00-06:00", due) == due
+
+  test "due before the window opens waits for it the same day":
+    let due = dateTime(2026, mApr, 10, 12, 10, 0, 0, local())
+    check nextSyncTime("18:00-23:00", due) == dateTime(2026, mApr, 10, 18, 0, 0, 0, local())
+
+  test "due after the window closed waits for the next day":
+    let due = dateTime(2026, mApr, 10, 23, 17, 0, 0, local())
+    check nextSyncTime("18:00-23:00", due) == dateTime(2026, mApr, 11, 18, 0, 0, 0, local())

@@ -115,6 +115,12 @@ type
     state*: ConnectionState
     latencyMs*: int
     lastSync*: Time
+    nextSync*: Time
+      ## When this machine next reaches out; the zero Time when it will not.
+    intervalMinutes*: int
+      ## The interval in effect, after defaults and the relay standby cap.
+    buddyDials*: bool
+      ## The buddy initiates; we only meet it at the relay.
 
 proc `$`*(id: BuddyId): string =
   if id.name.len > 0:

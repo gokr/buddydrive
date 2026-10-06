@@ -98,6 +98,15 @@ proc isWithinSyncWindow*(syncWindow: string, currentTime: DateTime = now()): boo
   else:
     currentMinute >= window.startMinute or currentMinute <= window.endMinute
 
+proc nextSyncTime*(syncWindow: string, due: DateTime): DateTime =
+  ## due, or the next opening of the window after it.
+  if isWithinSyncWindow(syncWindow, due):
+    return due
+  let start = parseSyncWindow(syncWindow).startMinute
+  result = dateTime(due.year, due.month, due.monthday, start div 60, start mod 60, 0, 0, due.timezone)
+  if result < due:
+    result = result + 1.days
+
 proc effectiveSyncIntervalMinutes*(buddy: BuddyInfo, everConnected: bool): int =
   let minutes = parseSyncInterval(buddy.syncInterval)
   if minutes > 0:

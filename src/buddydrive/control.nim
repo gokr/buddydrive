@@ -8,6 +8,8 @@ import control_web
 import recovery
 import sync/config_sync
 import sync/policy
+import version
+import p2p/messages
 
 const
   DefaultControlPort* = 17521
@@ -59,6 +61,12 @@ proc getStateDb(): DbConn =
   for column in ["detail", "last_sync"]:
     if column notin folderColumns:
       result.exec(sql("ALTER TABLE folder_state ADD COLUMN " & column & " TEXT"))
+  var buddyColumns: seq[string] = @[]
+  for row in result.rows(sql"PRAGMA table_info(buddy_state)"):
+    buddyColumns.add(row[1])
+  for (column, kind) in [("next_sync", "TEXT"), ("interval_minutes", "INTEGER"), ("buddy_dials", "INTEGER")]:
+    if column notin buddyColumns:
+      result.exec(sql("ALTER TABLE buddy_state ADD COLUMN " & column & " " & kind))
   result.exec(sql"""
     CREATE TABLE IF NOT EXISTS sync_sessions (
       id INTEGER PRIMARY KEY,
@@ -164,9 +172,10 @@ proc writeLiveStatus*(buddyStatuses: seq[BuddyStatus], folderStatuses: seq[SyncS
     db.exec(sql"DELETE FROM buddy_state")
     for b in buddyStatuses:
       db.exec(sql"""
-        INSERT INTO buddy_state (id, name, state, latency_ms, last_activity)
-        VALUES (?, ?, ?, ?, ?)
-      """, b.id, b.name, $b.state, b.latencyMs, formatStatusTime(b.lastSync))
+        INSERT INTO buddy_state (id, name, state, latency_ms, last_activity, next_sync, interval_minutes, buddy_dials)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      """, b.id, b.name, $b.state, b.latencyMs, formatStatusTime(b.lastSync), formatStatusTime(b.nextSync),
+        b.intervalMinutes, if b.buddyDials: 1 else: 0)
     
     db.exec(sql"DELETE FROM folder_state")
     for f in folderStatuses:
@@ -354,6 +363,15 @@ proc parseRequest*(raw: string): tuple[httpMethod: string, path: string, body: s
   if parts.len > 1:
     result.body = parts[1]
 
+proc buildJson*(): JsonNode =
+  ## The build of this process, which serves the API inside the daemon.
+  %*{
+    "version": BuddyDriveVersion,
+    "commit": BuildCommit,
+    "builtAt": BuildTime,
+    "protocolVersion": int(ProtocolVersion)
+  }
+
 proc statusJson(): JsonNode =
   let statePath = config.getDataDir() / "state.db"
   if fileExists(statePath):
@@ -378,7 +396,8 @@ proc statusJson(): JsonNode =
           "peerId": peerId,
           "addresses": addresses,
           "syncEnabled": true,
-          "syncWindow": "per-buddy"
+          "syncWindow": "per-buddy",
+          "build": buildJson()
         }
     finally:
       db.close()
@@ -395,7 +414,8 @@ proc statusJson(): JsonNode =
       "peerId": "",
       "addresses": [],
       "syncEnabled": true,
-      "syncWindow": "per-buddy"
+      "syncWindow": "per-buddy",
+      "build": buildJson()
     }
   %*{
     "buddy": {"name": "Unknown", "id": ""},
@@ -422,13 +442,16 @@ proc buddiesJson(): JsonNode =
     let db = getStateDb()
     try:
       var buddies: seq[JsonNode] = @[]
-      for row in db.rows(sql"SELECT id, name, state, latency_ms, last_activity FROM buddy_state"):
+      for row in db.rows(sql"SELECT id, name, state, latency_ms, last_activity, next_sync, interval_minutes, buddy_dials FROM buddy_state"):
         var entry = %*{
           "id": row[0],
           "name": row[1],
           "state": row[2],
           "latencyMs": row[3].parseInt(),
-          "lastSync": row[4]
+          "lastSync": row[4],
+          "nextSync": row[5],
+          "intervalMinutes": (if row[6].len > 0: row[6].parseInt() else: 0),
+          "buddyDials": row[7] == "1"
         }
         if row[0] in configured:
           let buddy = configured[row[0]]

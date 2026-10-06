@@ -13,6 +13,7 @@ import p2p/addrs
 import p2p/discovery
 import p2p/protocol
 import p2p/pairing
+import p2p/messages
 import p2p/rawrelay
 import sync/policy
 import sync/session
@@ -22,6 +23,7 @@ import sync/scanner
 import control
 import nat
 import recovery
+import version
 
 export results
 export node
@@ -125,6 +127,8 @@ proc startupReachabilityDiagnostic(daemon: Daemon) =
   )
 
 proc buddyDiagnosticKey(buddyId: string): string {.raises: [].}
+proc buddySyncIntervalMinutes(daemon: Daemon, buddy: BuddyInfo): int {.gcsafe.}
+proc nextBuddySync(daemon: Daemon, buddy: BuddyInfo): Time {.gcsafe.}
 proc statusUpdateLoop(daemon: Daemon) {.async: (raises: [CancelledError]).}
 proc updateLiveStatus*(daemon: Daemon) {.gcsafe, raises: [].}
 proc connectToBuddyViaRelay(daemon: Daemon, buddyId: string): Future[bool] {.async: (raises: []).}
@@ -409,7 +413,7 @@ proc start*(daemon: Daemon, controlPort: int = DefaultControlPort): Future[void]
   if daemon.running:
     return
   
-  echo "Starting daemon..."
+  echo "Starting daemon... BuddyDrive ", BuildId, ", wire protocol ", ProtocolVersion
   # A stop asked for while no daemon ran must not stop this one.
   {.cast(gcsafe).}:
     if takeDaemonStopRequest():
@@ -579,6 +583,9 @@ proc getBuddyStatus*(daemon: Daemon): seq[BuddyStatus] =
     
     status.latencyMs = -1
     status.lastSync = daemon.lastSessionAt.getOrDefault(buddy.id.uuid)
+    status.intervalMinutes = daemon.buddySyncIntervalMinutes(buddy)
+    status.buddyDials = daemon.waitsForBuddy.getOrDefault(buddy.id.uuid, false)
+    status.nextSync = daemon.nextBuddySync(buddy)
     result.add(status)
 
 proc getFolderStatus*(daemon: Daemon): seq[SyncStatus] =
@@ -792,16 +799,31 @@ proc connectToBuddy*(daemon: Daemon, buddyId: string, peerId: PeerID, addrs: seq
   )
   return false
 
-proc isBuddySyncDue(daemon: Daemon, buddy: BuddyInfo): bool =
+proc lastBuddyActivity(daemon: Daemon, buddyId: string): Time =
+  max(daemon.lastContactAt.getOrDefault(buddyId), daemon.lastAttemptAt.getOrDefault(buddyId))
+
+proc buddySyncIntervalMinutes(daemon: Daemon, buddy: BuddyInfo): int =
   ## A buddy that dials us is still looked up and met at the relay every
   ## RelayStandbyMinutes, whatever our own interval, so its dial can land.
   let id = buddy.id.uuid
-  let contact = daemon.lastContactAt.getOrDefault(id)
-  let last = max(contact, daemon.lastAttemptAt.getOrDefault(id))
-  var interval = effectiveSyncIntervalMinutes(buddy, contact != Time())
+  result = effectiveSyncIntervalMinutes(buddy, daemon.lastContactAt.getOrDefault(id) != Time())
   if daemon.waitsForBuddy.getOrDefault(id, false):
-    interval = min(interval, RelayStandbyMinutes)
-  isSyncDue(last, interval)
+    result = min(result, RelayStandbyMinutes)
+
+proc isBuddySyncDue(daemon: Daemon, buddy: BuddyInfo): bool =
+  isSyncDue(daemon.lastBuddyActivity(buddy.id.uuid), daemon.buddySyncIntervalMinutes(buddy))
+
+proc nextBuddySync(daemon: Daemon, buddy: BuddyInfo): Time =
+  ## Approximate: the scheduler checks once a minute.
+  if buddy.pairingCode.len == 0:
+    return Time()
+  let now = getTime()
+  let last = daemon.lastBuddyActivity(buddy.id.uuid)
+  var due = now
+  if last != Time():
+    due = max(now, last + initDuration(minutes = daemon.buddySyncIntervalMinutes(buddy)))
+  {.cast(gcsafe).}:
+    result = nextSyncTime(buddy.syncWindow, due.local).toTime()
 
 proc connectToBuddies*(daemon: Daemon) {.async: (raises: []).} =
   if not daemon.running:

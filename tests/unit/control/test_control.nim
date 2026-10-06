@@ -422,6 +422,36 @@ suite "Folder endpoints":
       check responseStatus(handleRequest("POST /sync/nope HTTP/1.1\r\n\r\n")) == 404
       check takeSyncRequests().len == 0
 
+  test "the daemon's schedule for a buddy reaches GET /buddies":
+    withTestDir("control_buddy_schedule"):
+      initTestConfig(testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      # A state.db from before the schedule columns existed.
+      let old = open(testDir / "state.db", "", "", "")
+      old.exec(sql"CREATE TABLE buddy_state (id TEXT PRIMARY KEY, name TEXT, state TEXT, latency_ms INTEGER, last_activity TEXT)")
+      old.close()
+      let next = initTime(1_800_000_000, 0)
+      writeLiveStatus(@[BuddyStatus(id: "b1", name: "Bob", state: csDisconnected, latencyMs: -1,
+        nextSync: next, intervalMinutes: 30, buddyDials: true)], @[])
+      let buddy = responseJson(handleRequest("GET /buddies HTTP/1.1\r\n\r\n"))["buddies"][0]
+      check buddy["nextSync"].getStr() == next.utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+      check buddy["intervalMinutes"].getInt() == 30
+      check buddy["buddyDials"].getBool()
+
+  test "GET /status names the build":
+    withTestDir("control_build"):
+      initTestConfig(testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+      let build = responseJson(handleRequest("GET /status HTTP/1.1\r\n\r\n"))["build"]
+      check build["version"].getStr() == "0.1.0"
+      check build["commit"].getStr().len >= 7
+      check build["builtAt"].getStr().endsWith("Z")
+      check build["protocolVersion"].getInt() > 0
+
   test "folder problems and the last sync reach GET /folders":
     withTestDir("control_folder_status"):
       initTestConfig(testDir)
