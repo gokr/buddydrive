@@ -341,3 +341,27 @@ suite "Folder endpoints":
       check sessions[1]["bytesSent"].getInt() == 2048
       check sessions[1]["filesReceived"].getInt() == 1
       check sessions[1]["endedAt"].getStr() == (started + initDuration(seconds = 12)).utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+
+  test "storage totals are reused for a while instead of walked on every request":
+    withTestDir("control_storage_cache"):
+      initTestConfig(testDir)
+      defer:
+        delEnv("BUDDYDRIVE_CONFIG_DIR")
+        delEnv("BUDDYDRIVE_DATA_DIR")
+        storageUsageMaxAge = initDuration(seconds = 60)
+      var cfg = buddyconfig.loadConfig()
+      var buddy: BuddyInfo
+      buddy.id = newBuddyId("bb", "bob")
+      buddy.storagePath = testDir / "bob"
+      cfg.addBuddy(buddy)
+      createDir(testDir / "bob")
+      writeFile(testDir / "bob" / "one", "1")
+
+      proc storedFileCount(): int =
+        responseJson(handleRequest("GET /storage HTTP/1.1\r\n\r\n"))["storage"][0]["files"].getInt()
+
+      check storedFileCount() == 1
+      writeFile(testDir / "bob" / "two", "2")
+      check storedFileCount() == 1
+      storageUsageMaxAge = initDuration(seconds = 0)
+      check storedFileCount() == 2

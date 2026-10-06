@@ -14,6 +14,10 @@ const
 var controlStarted = false
 var controlThread: Thread[int]
 var pendingRecoveryWords: seq[string] = @[]
+var storageUsageMaxAge* = initDuration(seconds = 60)
+  ## How long /storage reuses a buddy's totals. The GUI asks every few
+  ## seconds, and counting means walking everything the buddy stores.
+var storageUsageCache = initTable[string, tuple[files: int, bytes: int64, at: Time]]()
 
 proc getStateDb(): DbConn =
   let path = config.getDataDir() / "state.db"
@@ -403,6 +407,15 @@ proc storageUsage(root: string): tuple[files: int, bytes: int64] =
     if not path.endsWith(".blob"):
       inc result.files
 
+proc cachedStorageUsage(root: string): tuple[files: int, bytes: int64] =
+  let now = getTime()
+  if root in storageUsageCache:
+    let cached = storageUsageCache[root]
+    if now - cached.at < storageUsageMaxAge:
+      return (cached.files, cached.bytes)
+  result = storageUsage(root)
+  storageUsageCache[root] = (result.files, result.bytes, now)
+
 proc storageJson(): JsonNode =
   if not config.configExists():
     return %*{"storage": []}
@@ -410,7 +423,7 @@ proc storageJson(): JsonNode =
   var entries: seq[JsonNode] = @[]
   for buddy in cfg.buddies:
     let root = cfg.buddyStorageRoot(buddy.id.uuid)
-    let usage = storageUsage(root)
+    let usage = cachedStorageUsage(root)
     entries.add(%*{
       "buddyId": buddy.id.uuid,
       "buddyName": buddy.id.name,
