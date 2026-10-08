@@ -65,6 +65,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation was consolidated under `docs/`, the website is deployed via
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script.
+- Integration tests are now self-contained and fail loudly: the
+  skip/except fallbacks that turned real failures into passes were removed,
+  and the suite gained an in-process TCP relay stand-in (resolved by region
+  `local`), a KV API stub that verifies Ed25519 signatures, and isolated
+  per-process config/index directories. New coverage includes bidirectional
+  sync in one session, deletion propagation, append-only ignoring a remote
+  delete, and mismatched pairing codes not meeting on the relay.
 
 ### Fixed
 
@@ -80,3 +87,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   addresses.
 - macOS build and runtime: `libsodium.dylib` loading and the missing
   `liblz4-dev` dependency.
+- Sync no longer deletes files that exist on only one side. A remote path is
+  deleted only when the index shows the local side previously held it;
+  anything never seen locally is pulled instead. Index rows for files that
+  disappeared from disk are now retained, with pruning moved to
+  `pruneIndexOfMissingFiles` after deletions have propagated, so the worst
+  case for a failed session is a deleted file reappearing rather than a live
+  file being lost. `deleteLocalFile` also now refuses on append-only folders,
+  which previously only blocked overwrites.
+- Sync sessions end with an explicit `msgSessionEnd` exchange so a relay
+  cannot tear down the connection while a peer still has data coming and
+  truncate the final stream. The peer that speaks first in the delta phase
+  sends the marker and waits for the buddy's; the other answers and then
+  waits for the buddy to hang up. `msgSessionEnd` is appended to `MessageKind`
+  so existing kind byte values are unchanged, and older buddies incur only a
+  timeout.
+- Recovery now distinguishes a missing config from an unreachable config
+  service. `fetchConfigFromRelayChecked` reports `fcFound`, `fcMissing`, or
+  `fcUnavailable`, and `attemptRecovery` tells the user whether no config is
+  stored for the phrase or the service could not be reached (in which case the
+  config may still be stored).
