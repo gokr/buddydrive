@@ -16,10 +16,13 @@ import control
 import recovery
 import sync/policy
 import sync/config_sync
+when defined(posix):
+  import std/posix
+
+export crypto.generatePairingCode
 
 proc generateBuddyName*(): string
 proc generateUuid*(): string
-proc generatePairingCode*(): string
 
 type
   CommandKind* = enum
@@ -41,6 +44,7 @@ type
     cmdRecover
     cmdSyncConfig
     cmdExportRecovery
+    cmdTakeover
     cmdHelp
   
   CommandLine* = object
@@ -80,9 +84,10 @@ Commands:
   remove-folder <name>      Remove a folder
   list-folders              List configured folders
   add-buddy                 Pair with a buddy
-    --generate-code         Generate a pairing code
     --id <buddy-id>         Buddy ID to pair with
-    --code <code>           Pairing code from buddy
+    --generate-code         Generate a pairing code, save it for this
+                            buddy and print the command to send them
+    --code <code>           Pairing code your buddy generated
   remove-buddy <id>         Remove a buddy
   list-buddies              List paired buddies
   connect <address>         Connect to a buddy manually
@@ -96,6 +101,8 @@ Commands:
   recover                   Restore from BIP39 mnemonic
   sync-config               Manually sync config to relay/buddies
   export-recovery           Show recovery phrase again
+  takeover                  Make this machine the owner of your folders at
+                            your buddies, replacing another machine
   help                      Show this help
 """
 
@@ -127,6 +134,11 @@ proc parseCli*(): CommandLine =
         result.buddyId = key
       of "code":
         result.pairingCode = key
+      of "port":
+        try:
+          result.controlPort = parseInt(key)
+        except ValueError:
+          result.showHelp = true
       pendingValue = ""
       continue
     
@@ -163,7 +175,12 @@ proc parseCli*(): CommandLine =
         result.generateCode = true
       of "port", "p":
         if val.len > 0:
-          result.controlPort = parseInt(val)
+          try:
+            result.controlPort = parseInt(val)
+          except ValueError:
+            result.showHelp = true
+        else:
+          pendingValue = "port"
       of "daemon", "d":
         result.daemon = true
       of "help", "h":
@@ -197,6 +214,7 @@ proc parseCli*(): CommandLine =
     of "recover": cmdRecover
     of "sync-config": cmdSyncConfig
     of "export-recovery": cmdExportRecovery
+    of "takeover": cmdTakeover
     of "help": cmdHelp
     else: cmdHelp
   
@@ -210,7 +228,7 @@ proc parseCli*(): CommandLine =
           case result.configKey
           of "api-base-url", "api_base_url", "relay-region", "relay_region", "storage-base-path", "storage_base_path", "bandwidth-limit", "bandwidth_limit":
             result.configValue = args[3]
-          of "buddy-pairing-code", "buddy_pairing_code", "buddy-name", "buddy_name", "buddy-sync-time", "buddy_sync_time", "sync-time", "sync_time", "folder-append-only", "folder_append_only":
+          of "buddy-pairing-code", "buddy_pairing_code", "buddy-name", "buddy_name", "buddy-sync-time", "buddy_sync_time", "sync-time", "sync_time", "buddy-sync-window", "buddy_sync_window", "sync-window", "sync_window", "buddy-sync-interval", "buddy_sync_interval", "sync-interval", "sync_interval", "buddy-storage-path", "buddy_storage_path", "buddy-addresses", "buddy_addresses", "folder-append-only", "folder_append_only":
             if args.len >= 5:
               result.configTarget = args[3]
               result.configValue = args[4]
@@ -259,11 +277,12 @@ proc handleInit*() =
   echo "  Announce addr: (set [network].announce_addr after forwarding this port on your router)"
   echo "  Relay base URL: (set with 'buddydrive config set api-base-url <url>')"
   echo "  Relay region: (set with 'buddydrive config set relay-region <region>')"
-  echo "  Buddy sync time: always (set per buddy with 'buddydrive config set buddy-sync-time <buddy-id> HH:MM')"
+  echo "  Buddy sync window: any time (set per buddy with 'buddydrive config set buddy-sync-window <buddy-id> HH:MM-HH:MM')"
+  echo "  Buddy sync interval: 5m until first contact, then 30m (set with 'buddydrive config set buddy-sync-interval <buddy-id> 2h')"
   echo ""
   echo "Next steps:"
   echo "  1. Add a folder: buddydrive add-folder <path> --name <name>"
-  echo "  2. Pair with a buddy: buddydrive add-buddy --generate-code"
+  echo "  2. Pair with a buddy: buddydrive add-buddy --generate-code --id <buddy-id>"
   echo "  3. Start syncing: buddydrive start"
 
 proc handleConfig*(cmd: CommandLine) =
@@ -303,20 +322,35 @@ proc handleConfig*(cmd: CommandLine) =
         let mbps = (kbps * 8) div 1000
         echo "Bandwidth limit set to: ", kbps, " KB/s (", mbps, " Mbps)"
       return
-    of "buddy-sync-time", "buddy_sync_time", "sync-time", "sync_time":
+    of "buddy-sync-time", "buddy_sync_time", "sync-time", "sync_time", "buddy-sync-window", "buddy_sync_window", "sync-window", "sync_window":
       let idx = cfg.getBuddy(cmd.configTarget)
       if idx < 0:
         echo "Buddy not found: ", cmd.configTarget.shortId()
         return
       if cmd.configValue.toLowerAscii() == "off":
-        cfg.buddies[idx].syncTime = ""
+        cfg.buddies[idx].syncWindow = ""
       else:
-        if parseClockMinutes(cmd.configValue) < 0:
-          echo "Invalid sync time. Use HH:MM or 'off'."
+        if not parseSyncWindow(cmd.configValue).ok:
+          echo "Invalid sync window. Use HH:MM-HH:MM or 'off'."
           return
-        cfg.buddies[idx].syncTime = cmd.configValue
+        cfg.buddies[idx].syncWindow = cmd.configValue.strip()
       saveConfig(cfg)
-      echo "Sync time for buddy ", cfg.buddies[idx].id.uuid.shortId(), " set to: ", syncTimeDescription(cfg.buddies[idx].syncTime)
+      echo "Sync window for buddy ", cfg.buddies[idx].id.uuid.shortId(), " set to: ", syncWindowDescription(cfg.buddies[idx].syncWindow)
+      return
+    of "buddy-sync-interval", "buddy_sync_interval", "sync-interval", "sync_interval":
+      let idx = cfg.getBuddy(cmd.configTarget)
+      if idx < 0:
+        echo "Buddy not found: ", cmd.configTarget.shortId()
+        return
+      if cmd.configValue.toLowerAscii() == "off":
+        cfg.buddies[idx].syncInterval = ""
+      else:
+        if parseSyncInterval(cmd.configValue) <= 0:
+          echo "Invalid sync interval. Use for example 30m, 2h or 1h30m, or 'off'."
+          return
+        cfg.buddies[idx].syncInterval = cmd.configValue.strip()
+      saveConfig(cfg)
+      echo "Sync interval for buddy ", cfg.buddies[idx].id.uuid.shortId(), " set to: ", syncIntervalDescription(cfg.buddies[idx].syncInterval)
       return
     of "buddy-pairing-code", "buddy_pairing_code", "pairing-code", "pairing_code":
       let idx = cfg.getBuddy(cmd.configTarget)
@@ -326,6 +360,36 @@ proc handleConfig*(cmd: CommandLine) =
       cfg.buddies[idx].pairingCode = cmd.configValue
       saveConfig(cfg)
       echo "Pairing code set for buddy: ", cfg.buddies[idx].id.uuid.shortId()
+      return
+    of "buddy-storage-path", "buddy_storage_path":
+      let idx = cfg.getBuddy(cmd.configTarget)
+      if idx < 0:
+        echo "Buddy not found: ", cmd.configTarget.shortId()
+        return
+      cfg.buddies[idx].storagePath =
+        if cmd.configValue.toLowerAscii() == "default": "" else: absolutePath(cmd.configValue)
+      saveConfig(cfg)
+      echo "Storage folder for buddy ", cfg.buddies[idx].id.uuid.shortId(), ": ", cfg.buddyStorageRoot(cfg.buddies[idx].id.uuid)
+      return
+    of "buddy-addresses", "buddy_addresses":
+      let idx = cfg.getBuddy(cmd.configTarget)
+      if idx < 0:
+        echo "Buddy not found: ", cmd.configTarget.shortId()
+        return
+      var addresses: seq[string] = @[]
+      if cmd.configValue.toLowerAscii() != "none":
+        for value in cmd.configValue.split(','):
+          let address = value.strip()
+          if MultiAddress.init(address).isErr:
+            echo "Invalid address: ", address, " (use /ip4/<ip>/tcp/<port>)"
+            return
+          addresses.add(address)
+      cfg.buddies[idx].addresses = addresses
+      saveConfig(cfg)
+      if addresses.len == 0:
+        echo "Known addresses cleared for buddy ", cfg.buddies[idx].id.uuid.shortId()
+      else:
+        echo "Known addresses for buddy ", cfg.buddies[idx].id.uuid.shortId(), ": ", addresses.join(", ")
       return
     of "buddy-name", "buddy_name":
       let idx = cfg.getBuddy(cmd.configTarget)
@@ -354,7 +418,7 @@ proc handleConfig*(cmd: CommandLine) =
       return
     else:
       echo "Unknown config key: ", cmd.configKey
-      echo "Supported keys: api-base-url, relay-region, storage-base-path, bandwidth-limit, buddy-pairing-code, buddy-name, buddy-sync-time, folder-append-only"
+      echo "Supported keys: api-base-url, relay-region, storage-base-path, bandwidth-limit, buddy-pairing-code, buddy-name, buddy-sync-window, buddy-sync-interval, buddy-storage-path, buddy-addresses, folder-append-only"
       return
 
   let cfg = loadConfig()
@@ -404,11 +468,12 @@ proc handleConfig*(cmd: CommandLine) =
       echo "    ID: ", buddy.id.uuid
       if buddy.pairingCode.len > 0:
         echo "    Pairing code: ", buddy.pairingCode
-      echo "    Sync time: ", syncTimeDescription(buddy.syncTime)
+      echo "    Sync window: ", syncWindowDescription(buddy.syncWindow)
+      echo "    Sync interval: ", syncIntervalDescription(buddy.syncInterval)
       echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired yet."
-    echo "Use 'buddydrive add-buddy --generate-code' to pair."
+    echo "Use 'buddydrive add-buddy --generate-code --id <buddy-id>' to pair."
 
 proc handleAddFolder*(cmd: CommandLine) =
   if not config.configExists():
@@ -436,9 +501,7 @@ proc handleAddFolder*(cmd: CommandLine) =
     echo "Error: Folder name already exists: ", cmd.folderName
     return
   
-  var folder = newFolderConfig(cmd.folderName, absPath, cmd.folderEncrypted)
-  folder.id = generateUuid()
-  folder.folderKey = crypto.generateKey()
+  var folder = newSyncFolder(cmd.folderName, absPath, cmd.folderEncrypted)
   folder.appendOnly = cmd.folderAppendOnly
   
   if cmd.buddyId.len > 0:
@@ -494,50 +557,55 @@ proc handleListFolders*() =
     if folder.buddies.len > 0:
       echo "    Buddies: ", folder.buddies.join(", ")
 
+proc storeBuddyCode(buddyId: string, code: string) =
+  ## Adds the buddy, or updates the code of one we already have without
+  ## losing its other settings.
+  var cfg = loadConfig()
+  var buddy: BuddyInfo
+  let idx = cfg.getBuddy(buddyId)
+  if idx >= 0:
+    buddy = cfg.buddies[idx]
+  else:
+    buddy.id.uuid = buddyId
+    buddy.addedAt = getTime()
+  buddy.pairingCode = code
+  cfg.addBuddy(buddy)
+
 proc handleAddBuddy*(cmd: CommandLine) =
+  ## Both buddies must store the same pairing code for each other: it keys the
+  ## discovery record and the relay rendezvous. One side generates it, the
+  ## other enters it.
   if not config.configExists():
     echo "No config found. Run 'buddydrive init' first."
     return
-  
+
+  let cfg = loadConfig()
+
   if cmd.generateCode:
-    echo "Generating pairing code..."
-    echo ""
+    if cmd.buddyId.len == 0:
+      echo "Error: Buddy ID required, so the code can be saved for that buddy"
+      echo "Usage: buddydrive add-buddy --generate-code --id <buddy-id>"
+      echo ""
+      echo "Your Buddy ID, to give to your buddy: ", cfg.buddy.uuid
+      return
     let code = generatePairingCode()
-    let cfg = loadConfig()
-    echo "Share this with your buddy:"
-    echo "  Your Buddy ID: ", cfg.buddy.uuid
-    echo "  Your Name: ", cfg.buddy.name
-    echo "  Pairing Code: ", code
+    storeBuddyCode(cmd.buddyId, code)
+    echo "Buddy added: ", cmd.buddyId.shortId(), " with pairing code ", code
     echo ""
-    echo "Your buddy should run:"
+    echo "Send your buddy this command:"
     echo "  buddydrive add-buddy --id ", cfg.buddy.uuid, " --code ", code
+    echo ""
+    echo "The code is a secret: anyone who has it can find your buddy's address."
     return
-  
-  if cmd.buddyId.len == 0:
-    echo "Error: Buddy ID required"
+
+  if cmd.buddyId.len == 0 or cmd.pairingCode.len == 0:
+    echo "Error: Buddy ID and pairing code required"
     echo "Usage: buddydrive add-buddy --id <buddy-id> --code <code>"
+    echo "   or: buddydrive add-buddy --generate-code --id <buddy-id>"
     return
-  
-  if cmd.pairingCode.len == 0:
-    echo "Error: Pairing code required"
-    echo "Usage: buddydrive add-buddy --id <buddy-id> --code <code>"
-    return
-  
-  echo "Pairing with buddy: ", cmd.buddyId.shortId()
-  echo "Pairing code: ", cmd.pairingCode
-  echo ""
-  
-  var cfg = loadConfig()
-  var buddy: BuddyInfo
-  buddy.id.uuid = cmd.buddyId
-  buddy.id.name = ""
-  buddy.pairingCode = cmd.pairingCode
-  buddy.addedAt = getTime()
-  
-  cfg.addBuddy(buddy)
-  
-  echo "Buddy added: ", cmd.buddyId.shortId()
-  echo "Pairing code stored for relay fallback."
+
+  storeBuddyCode(cmd.buddyId, cmd.pairingCode)
+  echo "Buddy added: ", cmd.buddyId.shortId(), " with pairing code ", cmd.pairingCode
   echo "Start the daemon with 'buddydrive start' to connect."
 
 proc handleRemoveBuddy*(cmd: CommandLine) =
@@ -565,7 +633,7 @@ proc handleListBuddies*() =
   
   if cfg.buddies.len == 0:
     echo "No buddies paired yet."
-    echo "Use 'buddydrive add-buddy --generate-code' to pair."
+    echo "Use 'buddydrive add-buddy --generate-code --id <buddy-id>' to pair."
     return
   
   echo "Buddies:"
@@ -574,6 +642,9 @@ proc handleListBuddies*() =
     echo "    ID: ", buddy.id.uuid
     if buddy.pairingCode.len > 0:
       echo "    Pairing code: ", buddy.pairingCode
+    echo "    Storage: ", cfg.buddyStorageRoot(buddy.id.uuid)
+    if buddy.addresses.len > 0:
+      echo "    Known addresses: ", buddy.addresses.join(", ")
     echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
 
 proc handleConnect*(cmd: CommandLine) =
@@ -589,6 +660,24 @@ proc handleConnect*(cmd: CommandLine) =
   
   echo "Note: Direct connection not yet implemented."
   echo "Use 'buddydrive start' to connect via relay discovery."
+
+var shutdownSignalled: bool
+
+when defined(posix):
+  proc onShutdownSignal(sig: cint) {.noconv.} =
+    ## Only sets a flag: the run loop does the actual shutdown, which cannot
+    ## happen inside a signal handler. A second signal exits at once, in case
+    ## the clean shutdown hangs.
+    if shutdownSignalled:
+      exitnow(128 + sig)
+    shutdownSignalled = true
+
+  proc installShutdownHandlers() =
+    discard signal(SIGINT, onShutdownSignal)
+    discard signal(SIGTERM, onShutdownSignal)
+else:
+  proc installShutdownHandlers() =
+    setControlCHook(proc() {.noconv.} = shutdownSignalled = true)
 
 proc handleStart*(cmd: CommandLine) =
   if not config.configExists():
@@ -637,19 +726,24 @@ proc handleStart*(cmd: CommandLine) =
         echo "  ", folder.name, " -> ", folder.path
       echo ""
       echo "Press Ctrl+C to stop..."
-      
-      while daemon.isRunning():
+
+      while daemon.isRunning() and not shutdownSignalled:
         await sleepAsync(chronos.seconds(1))
+      if shutdownSignalled:
+        echo "Shutdown requested, stopping cleanly..."
     except Exception as e:
       echo "Error: ", e.msg
     finally:
       await daemon.stop()
   
+  installShutdownHandlers()
   waitFor runDaemon()
 
 proc handleStop*() =
-  echo "Stopping BuddyDrive daemon..."
-  echo "Note: Daemon mode not implemented yet."
+  ## Asks a running daemon to shut down cleanly; it checks for the request
+  ## every couple of seconds.
+  requestDaemonStop()
+  echo "Stop requested. The daemon unpublishes itself and exits within a few seconds."
 
 proc handleStatus*() =
   if not config.configExists():
@@ -683,14 +777,15 @@ proc handleStatus*() =
     echo "Buddies:"
     for buddy in cfg.buddies:
       echo "  ", buddy.id.name, " (", buddy.id.uuid.shortId(), ")"
-      echo "    Sync time: ", syncTimeDescription(buddy.syncTime)
+      echo "    Sync window: ", syncWindowDescription(buddy.syncWindow)
+      echo "    Sync interval: ", syncIntervalDescription(buddy.syncInterval)
       echo "    Status: Offline"
       if buddy.pairingCode.len > 0:
         echo "    Pairing code: ", buddy.pairingCode
       echo "    Added: ", buddy.addedAt.format("yyyy-MM-dd HH:mm:ss")
   else:
     echo "No buddies paired."
-    echo "Use 'buddydrive add-buddy --generate-code' to pair."
+    echo "Use 'buddydrive add-buddy --generate-code --id <buddy-id>' to pair."
 
 proc handleLogs*() =
   let logPath = config.getLogPath()
@@ -790,6 +885,7 @@ proc handleRecover*() =
   if configOpt.isSome:
     let cfg = configOpt.get()
     saveConfig(cfg)
+    requestTakeover(cfg.buddies.mapIt(it.id.uuid))
     echo ""
     echo "Recovery successful!"
     echo ""
@@ -797,7 +893,9 @@ proc handleRecover*() =
     echo "Buddies: ", cfg.buddies.len
     echo "Folders: ", cfg.folders.len
     echo ""
-    echo "Run 'buddydrive start' to sync your folders."
+    echo "Run 'buddydrive start' to sync your folders. This machine takes over"
+    echo "your folders at each buddy on its first sync with it; the old machine"
+    echo "is refused from then on."
   else:
     echo ""
     echo "Could not recover from relay (see the reason above)."
@@ -839,6 +937,21 @@ proc handleSyncConfig*() =
   
   if cfg.buddies.len > 0:
     echo "Buddy config sync is not implemented yet."
+
+proc handleTakeover*() =
+  ## For when this machine replaces another one with the same identity, but
+  ## the config did not come from 'recover' (copied by hand, restored from a
+  ## backup).
+  if not config.configExists():
+    echo "No config found. Run 'buddydrive init' first."
+    return
+  let cfg = loadConfig()
+  if cfg.buddies.len == 0:
+    echo "No buddies configured; nothing to take over."
+    return
+  requestTakeover(cfg.buddies.mapIt(it.id.uuid))
+  echo "This machine will take over your folders at ", cfg.buddies.len, " buddies on its next sync with each."
+  echo "Only do this if the other machine is retired: from then on it is refused."
 
 proc handleExportRecovery*() =
   if not config.configExists():
@@ -898,12 +1011,3 @@ proc generateUuid*(): string =
   let uuid = genUuid()
   result = $uuid
 
-proc generatePairingCode*(): string =
-  randomize()
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-  result = ""
-  for i in 0..3:
-    result.add(chars[rand(chars.len - 1)])
-  result.add("-")
-  for i in 0..3:
-    result.add(chars[rand(chars.len - 1)])

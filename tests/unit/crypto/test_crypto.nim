@@ -14,6 +14,31 @@ suite "Crypto initialization":
   test "initCrypto succeeds":
     check initCrypto()
 
+suite "Pairing code":
+  test "format is XXXX-XXXX from the unambiguous alphabet":
+    for _ in 0 ..< 200:
+      let code = generatePairingCode()
+      check code.len == 9
+      check code[4] == '-'
+      for i, c in code:
+        if i != 4:
+          check c in PairingCodeAlphabet
+
+  test "codes do not repeat":
+    var seen: seq[string] = @[]
+    for _ in 0 ..< 1000:
+      let code = generatePairingCode()
+      check code notin seen
+      seen.add(code)
+
+  test "every alphabet character is used":
+    var counts: array[256, int]
+    for _ in 0 ..< 2000:
+      for c in generatePairingCode():
+        inc counts[ord(c)]
+    for c in PairingCodeAlphabet:
+      check counts[ord(c)] > 0
+
 suite "Key generation":
   test "generateKey returns 32 bytes":
     let key = generateKey()
@@ -197,6 +222,16 @@ suite "Encrypt/Decrypt API edge cases":
     let enc = EncryptedData(nonce: "x", ciphertext: "y")
     expect CryptoError:
       discard decrypt(enc, "shortkey")
+
+suite "Keyed content hash":
+  test "depends on the folder key and hides the plain hash":
+    var plain: array[32, byte]
+    for i in 0 ..< 32: plain[i] = byte(i)
+    let keyA = generateKey()
+    let keyB = generateKey()
+    check keyedContentHash(plain, keyA) == keyedContentHash(plain, keyA)
+    check keyedContentHash(plain, keyA) != keyedContentHash(plain, keyB)
+    check keyedContentHash(plain, keyA) != plain
 
 suite "Streaming hash":
   test "hashFileStream returns 32 bytes":

@@ -120,13 +120,14 @@ journalctl -u buddydrive -f
 | `buddydrive list-buddies` | List paired buddies |
 | `buddydrive connect <address>` | Manual connect placeholder |
 | `buddydrive start [--port <control-port>]` | Start sync daemon in the foreground |
-| `buddydrive stop` | Stop command (not yet implemented; use Ctrl+C) |
+| `buddydrive stop` | Ask the running daemon to shut down cleanly |
 | `buddydrive status` | Show configured folders, buddies, and sync time |
 | `buddydrive logs` | Show recent logs |
 | `buddydrive setup-recovery` | Generate and verify a 12-word recovery phrase, then sync encrypted config to the relay |
 | `buddydrive recover` | Restore config from a 12-word recovery phrase and then resync folders |
 | `buddydrive sync-config` | Manually push encrypted config to the relay and configured buddies |
 | `buddydrive export-recovery` | Show stored recovery public key and master key metadata |
+| `buddydrive takeover` | Make this machine the owner of your folders at your buddies, replacing another machine |
 
 ### config set Keys
 
@@ -134,11 +135,14 @@ journalctl -u buddydrive -f
 |-----|-----------|-------------|
 | `api-base-url` | `<url>` | Set API base URL for discovery and config sync |
 | `relay-region` | `<region>` | Set relay region (eu, us, local) |
-| `storage-base-path` | `<path>` | Set base path for storing buddy files |
+| `storage-base-path` | `<path>` | Base folder for buddies without their own `buddy-storage-path` (default `~/.buddydrive/storage`) |
 | `bandwidth-limit` | `<kbps>` | Set bandwidth limit (0 = unlimited) |
 | `buddy-pairing-code` | `<buddy-id> <code>` | Set pairing code for a buddy |
 | `buddy-name` | `<name>` | Update your buddy display name |
-| `buddy-sync-time` | `<buddy-id> <HH:MM>` | Set per-buddy sync time (empty = always) |
+| `buddy-sync-window` | `<buddy-id> <HH:MM-HH:MM\|off>` | When this machine may start a sync with the buddy (off = any time). `buddy-sync-time` is an alias |
+| `buddy-sync-interval` | `<buddy-id> <30m\|2h\|1h30m\|off>` | How often to sync with the buddy (off = every 5m until first contact, then 30m) |
+| `buddy-addresses` | `<buddy-id> <multiaddr[,multiaddr]\|none>` | Known addresses for a buddy, dialed before discovered ones (e.g. a buddy on your LAN) |
+| `buddy-storage-path` | `<buddy-id> <path\|default>` | Folder where this buddy's backups are kept on your machine |
 | `folder-append-only` | `<folder-name> <on\|off>` | Toggle folder append-only mode |
 
 ### add-folder Options
@@ -169,7 +173,7 @@ journalctl -u buddydrive -f
 
 - `buddydrive init --with-recovery` is shown in help but not implemented; use `init` then `setup-recovery` separately
 - `buddydrive start --daemon` currently prints a note and continues in the foreground
-- `buddydrive stop` is not implemented yet; use your process manager or `Ctrl+C`
+- `buddydrive stop`, `Ctrl+C` and SIGTERM (e.g. `systemctl stop`) all shut down cleanly: the daemon removes its discovery record and UPnP port mapping before exiting. A second `Ctrl+C` exits immediately
 - `buddydrive status` does not yet query the running daemon for live connection state
 - `buddydrive connect` does not perform a manual direct dial yet
 - `buddydrive recover` currently restores configuration from the relay path; the buddy fallback prompt is present, but that fetch path is not implemented yet
@@ -186,17 +190,15 @@ When you run `buddydrive init`, your instance gets:
 
 ### Pairing
 
-To sync folders with someone, both sides add each other:
+To sync folders with someone, you exchange Buddy IDs and then agree on **one** pairing code that both of you store:
 
-1. Generate a pairing code with `buddydrive add-buddy --generate-code`
-2. Share your Buddy ID and pairing code with your buddy
-3. Your buddy runs `buddydrive add-buddy --id <your-id> --code <pairing-code>`
-4. Repeat in reverse on the other side
+1. Exchange Buddy IDs (shown by `buddydrive config` or the GUI)
+2. One of you runs `buddydrive add-buddy --generate-code --id <their-id>`. This saves the buddy with a new code and prints the command to send them
+3. The other runs that command: `buddydrive add-buddy --id <your-id> --code <pairing-code>`
 
-The pairing code serves two purposes:
+In the GUIs, both of you use **Pair with Buddy**: one presses **Generate** and sends the code, the other enters it.
 
-- Confirms you are pairing with the right person
-- Acts as the shared secret for relay fallback
+Both sides must store the same code. It is the shared secret for the relationship: discovery records are stored and looked up under a key derived from it, and relay fallback uses it to match the two peers. Keep it private: anyone with the code can read your buddy's published address. It does not prove who is on the other end; only buddy IDs you have added can connect.
 
 ### Recovery and Restore
 
@@ -214,21 +216,28 @@ Restore happens in two layers:
 
 Append-only folders still protect existing local files from being overwritten or deleted by the remote side.
 
+### One Machine Per Identity
+
+Each buddy stores your folders for one machine at a time. Machines are told apart by a machine id kept in the data directory (`machine-id`), not in `config.toml`, so a recovered config does not carry it along. The first machine to back up a folder owns it there; another machine with the same identity is refused, and the log says so, rather than both overwriting each other's backup.
+
+When a machine replaces another one, it takes over: `buddydrive recover` does this automatically, and `buddydrive takeover` does it for a config you copied by hand. On its next sync with each buddy the new machine claims your folders, restores what they hold, and from then on the old machine is refused. Only take over from a machine you have retired.
+
 ### Folder Policies
 
 - **Encrypted** — folder encryption flag (default true). When enabled, filenames and content are encrypted before being stored on the buddy's machine. Path encryption uses deterministic nonces (same path always encrypts the same way, enabling move detection). Content encryption uses random nonces per chunk (prevents nonce reuse across versions).
 - **Append-only** — prevents remote overwrites and remote deletions of existing local files. Missing files are still created. Because the folder never drops a file, a file deleted on the other side is restored back to it from the append-only copy on a later sync
 - **Buddy-specific** — restrict a folder to sync with a specific buddy
 
-### Per-Buddy Sync Time
+### Per-Buddy Sync Window and Interval
 
-Each buddy can have an optional sync time that controls when to initiate a connection. Incoming connections from known buddies are always accepted regardless of sync time.
+Each buddy has an optional sync window and sync interval that control when this machine initiates a connection. Incoming connections from known buddies are always accepted regardless of either. Both can also be set with Edit on a buddy in the web GUI.
 
 ```bash
-buddydrive config set buddy-sync-time <buddy-id> 03:00
+buddydrive config set buddy-sync-window <buddy-id> 22:00-06:00
+buddydrive config set buddy-sync-interval <buddy-id> 2h
 ```
 
-When sync time is empty (default), the daemon initiates connections whenever it discovers a buddy address. When set to a time like `03:00`, the daemon only initiates within a 15-minute tolerance window around that time.
+An empty window means any time; a window may cross midnight. A single time such as `03:00` (the older `sync_time` form) means the half hour around it. An empty interval means every 5 minutes until the buddy has been reached once, then every 30 minutes. The interval counts from the last attempt or session, whoever dialed.
 
 ## How It Works
 
@@ -304,6 +313,9 @@ relay_region = "eu"
 storage_base_path = ""
 bandwidth_limit_kbps = 0
 
+[gui]
+locale = "sv-SE"   # optional: date and number format in the web GUI; empty = the browser's language
+
 [[folders]]
 id = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
 name = "docs"
@@ -317,9 +329,26 @@ buddies = ["buddy-id-here"]
 id = "buddy-id-here"
 name = "cranky-wrench"
 pairing_code = "ABCD-EFGH"
-sync_time = "03:00"
+sync_window = "22:00-06:00"   # optional; older configs with sync_time are still read
+sync_interval = "2h"          # optional
+storage_path = "/mnt/backup/cranky-wrench"
+addresses = ["/ip4/192.168.1.101/tcp/41721"]   # optional, see below
 added_at = "2026-04-10T12:00:00Z"
 ```
+
+### Buddies on the Same Network
+
+Discovery records only carry public addresses (plus any `announce_addr`); private LAN addresses are never published. If a buddy is on your own network, for example while testing, give each side the other's LAN address:
+
+```bash
+buddydrive config set buddy-addresses <buddy-id> /ip4/192.168.1.101/tcp/41721
+```
+
+Those addresses are dialed first. The buddy still has to be found through discovery once, since that is where its peer ID comes from.
+
+### Where a Buddy's Files Are Kept
+
+Every buddy gets a storage folder of its own on your machine: `storage_path` if you set one, otherwise `<storage_base_path>/<buddy-id>` (by default `~/.buddydrive/storage/<buddy-id>`). Each folder the buddy shares with you lives in a sub-folder named by its folder id, so a buddy's `docs` never mixes with your own `docs`. Encrypted folders hold only opaque `.blob` files and small `.meta` sidecars; you cannot read their names or contents. Unencrypted folders are stored as normal files you can browse.
 
 ### Data Files
 
@@ -439,6 +468,7 @@ When `encrypted = true` on a folder:
 - **File content** is split into 64KB chunks, each encrypted with a random 24-byte nonce prepended to the ciphertext. Random nonces prevent nonce reuse when the same file is modified across versions.
 - **Folder key** is derived from `crypto_generichash(masterKey + "/folder/" + folderId)` when recovery is enabled, or a random key stored in `folder_key` in config.toml otherwise.
 - Your buddy stores fully opaque encrypted blobs — they cannot read filenames or content.
+- The content hash your buddy keeps is keyed with the folder key, so it cannot be matched against files they know. They do see each file's size, mtime and permission bits.
 
 When `encrypted = false`:
 - Files are stored plaintext on the buddy's machine for collaboration.
