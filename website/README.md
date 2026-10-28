@@ -1,100 +1,81 @@
 # BuddyDrive Website
 
-This directory contains the static website for BuddyDrive.
-
-## Structure
-
-This website uses a **content-driven static site** approach:
+The static site published at **buddydrive.org** (GitHub Pages). It is generated:
+`website/dist/` is what gets served, and it is built from `website/content/`.
 
 ```
 website/
-├── content/           # Markdown content (edit these!)
-│   ├── index.md      # Home page content
-│   ├── features.md   # Features page
-│   ├── security.md   # Security and encryption details
-│   ├── how-it-works.md # Technical architecture
-│   └── docs.md       # Getting started guide
-└── dist/             # Generated HTML (do not edit directly)
+├── content/           # markdown sources — edit these
+│   ├── index.md       # landing page: hero, cards, steps, comparison, CTA
+│   ├── features.md
+│   ├── security.md
+│   ├── how-it-works.md
+│   └── docs.md
+├── pages.toml         # what markdown cannot express: <title>, meta description,
+│                      # page-header blurb, the landing page subtitle
+└── dist/              # GENERATED — do not edit by hand
     ├── index.html
     ├── features.html
     ├── security.html
     ├── how-it-works.html
     ├── docs.html
-    ├── styles.css
-    └── script.js
+    ├── sitemap.xml
+    ├── styles.css     # hand-written, never overwritten
+    ├── script.js      # hand-written, never overwritten
+    └── images/        # hand-written, never overwritten
 ```
 
-## How to Update Content
-
-1. **Edit the markdown files** in `content/` - these are the source of truth
-2. **Ask Claude to regenerate** the HTML site
-3. **The `dist/` folder** contains the generated site ready for deployment
-
-### Example Workflow
+## Editing
 
 ```bash
-# Edit content files
-vim content/features.md
+# edit the markdown, then regenerate dist/
+$EDITOR website/content/features.md
+scripts/build-website.py          # or: make website
 
-# Ask Claude: "Regenerate the website from the content files"
-# Claude updates the dist/ folder with new HTML
-
-# Preview locally:
-cd website/dist
-python -m http.server 8000
-# Open http://localhost:8000
+# verify dist/ is up to date without writing (what CI runs)
+scripts/build-website.py --check
 ```
 
-## Content Format
+Commit the change to `content/` **and** the regenerated `dist/` together. The
+Pages workflow runs `--check` before deploying, so a source change that was never
+rendered fails the build instead of quietly not shipping.
 
-Content files use YAML frontmatter for metadata:
+`styles.css`, `script.js` and `images/` are **not** generated — the script only
+writes the HTML pages and `sitemap.xml`, so restyling the site by hand is fine.
 
-```markdown
----
-title: Page Title
-tagline: Optional tagline
----
+## How the pages are built
 
-## Section Heading
+Four pages (`features`, `security`, `how-it-works`, `docs`) are plain markdown
+wrapped in the shared nav, page header and footer. Their header blurb and meta
+description come from `pages.toml`.
 
-Regular markdown content here.
-```
+The landing page is laid out specially, so it is assembled from named blocks of
+`index.md`:
 
-## Pages
+| Page block | Comes from |
+|---|---|
+| Hero | the `**Label:** value` lines under `## Hero Section` |
+| Feature cards | **every** `### Title {icon=X}` in the file, in order |
+| Steps | the ordered list under `## How It Works` |
+| Comparison table | the two-column table under `## The Problem With Cloud Backups` |
+| Who is this for | the list under `## Who Is This For?` |
+| Get started | the prose under `## Get Started` |
 
-- **Home** (`index.html`) - Hero, features overview, value proposition
-- **Features** (`features.html`) - Detailed feature list
-- **Security** (`security.html`) - Encryption and security details
-- **How It Works** (`how-it-works.html`) - Technical architecture
-- **Documentation** (`docs.html`) - Getting started guide
+To add a feature card, add a `###` heading with an `{icon=…}` attribute; the icon
+text is whatever short label you want in the card's corner.
 
-## Deployment
-
-The `dist/` folder contains a completely static website. Deploy it to any static hosting.
-
-To deploy:
+## Preview locally
 
 ```bash
-# The dist/ folder can be deployed directly
-# Copy contents to your web server, GitHub Pages, Netlify, etc.
+cd website/dist && python3 -m http.server 8000
+# open http://localhost:8000
 ```
 
 ## Design
 
-- Modern dark theme matching BuddyDrive brand
-- Accent colors from logo (blue/teal tones)
-- Inter font for text, JetBrains Mono for code
-- Fully responsive
-- Smooth animations and transitions
-
-## Brand Colors
-
-From BuddyDrive logo:
-- Primary: Deep blue
-- Accent: Teal/cyan
-- Background: Dark navy
-- Text: Light gray/white
+Dark theme, accent colours from the logo (deep blue / teal), Inter for text and
+JetBrains Mono for code. Styles live in `dist/styles.css`.
 
 ## License
 
-MIT (same as BuddyDrive)
+MIT (same as BuddyDrive).

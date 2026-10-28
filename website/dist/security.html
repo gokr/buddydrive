@@ -39,125 +39,161 @@
     </header>
 
     <main class="content-page">
+        <h2>Your Security Matters</h2>
+        <p>BuddyDrive is designed around a simple principle: you should understand exactly what is protected today, and what still depends on trusting your buddy.</p>
         <h2>What Exists Today</h2>
         <p>BuddyDrive currently has these security layers:</p>
-        <table class="comparison-table">
-            <thead>
-                <tr>
-                    <th>Component</th>
-                    <th>Algorithm</th>
-                    <th>Purpose</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr><td>Direct peer transport</td><td>libp2p Noise</td><td>Encrypt direct libp2p connections</td></tr>
-                <tr><td>Folder content encryption</td><td>libsodium <code>crypto_secretbox</code> (XSalsa20-Poly1305)</td><td>Encrypt filenames and file contents stored on buddy's machine</td></tr>
-                <tr><td>Path encryption</td><td>Deterministic nonce from folderKey + path</td><td>Same path always encrypts to same ciphertext (enables move detection)</td></tr>
-                <tr><td>Chunk encryption</td><td>Random nonce per 64KB chunk</td><td>Prevents nonce reuse across file versions</td></tr>
-                <tr><td>Recovery config backup</td><td>libsodium <code>crypto_secretbox</code></td><td>Encrypt config synced to relay</td></tr>
-                <tr><td>Pairing code</td><td>Shared secret</td><td>Match buddies, derive discovery keys, HMAC-authenticate relay records, and relay fallback sessions</td></tr>
-                <tr><td>Recovery mnemonic</td><td>Standard BIP39 (128-bit entropy + SHA-256 checksum)</td><td>Re-derive recovery metadata on a new machine; checksum catches transcription errors</td></tr>
-                <tr><td>Mnemonic-to-seed</td><td>Argon2i (moderate tier, 256 MB memory)</td><td>Key derivation from mnemonic (stronger than BIP39's PBKDF2)</td></tr>
-                <tr><td>Master key</td><td>BLAKE2b-256 of seed</td><td>Deterministic 32-byte key from 64-byte Argon2i output</td></tr>
-                <tr><td>Public key (lookup)</td><td>BLAKE2b-256 of master key + Base58</td><td>Relay API lookup key (not an asymmetric public key)</td></tr>
-                <tr><td>Relay API signing</td><td>Ed25519 (derived from master key)</td><td>Authenticate relay API mutations</td></tr>
-                <tr><td>Content hashing</td><td>BLAKE2b-256 (streaming, 64KB chunks)</td><td>File change detection, move detection, restore verification</td></tr>
-            </tbody>
+        <table>
+        <thead>
+        <tr>
+        <th>Component</th>
+        <th>Algorithm</th>
+        <th>Purpose</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+        <td>Direct peer transport</td>
+        <td>libp2p Noise</td>
+        <td>Encrypt direct libp2p connections</td>
+        </tr>
+        <tr>
+        <td>Folder content encryption</td>
+        <td>libsodium <code>crypto_secretbox</code> (XSalsa20-Poly1305)</td>
+        <td>Encrypt filenames and file contents stored on buddy's machine</td>
+        </tr>
+        <tr>
+        <td>Path encryption</td>
+        <td>Deterministic nonce from folderKey + path</td>
+        <td>Same path always encrypts to same ciphertext (enables move detection)</td>
+        </tr>
+        <tr>
+        <td>Chunk encryption</td>
+        <td>Random nonce per 64KB chunk</td>
+        <td>Prevents nonce reuse across file versions</td>
+        </tr>
+        <tr>
+        <td>Recovery config backup</td>
+        <td>libsodium <code>crypto_secretbox</code></td>
+        <td>Encrypt config synced to relay</td>
+        </tr>
+        <tr>
+        <td>Pairing code</td>
+        <td>Shared secret</td>
+        <td>Match buddies, derive discovery keys, HMAC-authenticate relay records, and relay fallback sessions</td>
+        </tr>
+        <tr>
+        <td>Recovery mnemonic</td>
+        <td>Standard BIP39 (128-bit entropy + SHA-256 checksum)</td>
+        <td>Re-derive recovery metadata on a new machine; checksum catches transcription errors</td>
+        </tr>
+        <tr>
+        <td>Mnemonic-to-seed</td>
+        <td>Argon2i (moderate tier, 256 MB memory)</td>
+        <td>Key derivation from mnemonic (stronger than BIP39's PBKDF2)</td>
+        </tr>
+        <tr>
+        <td>Master key</td>
+        <td>BLAKE2b-256 of seed</td>
+        <td>Deterministic 32-byte key from 64-byte Argon2i output</td>
+        </tr>
+        <tr>
+        <td>Public key (lookup)</td>
+        <td>BLAKE2b-256 of master key + Base58</td>
+        <td>Relay API lookup key (not an asymmetric public key)</td>
+        </tr>
+        <tr>
+        <td>Relay API signing</td>
+        <td>Ed25519 (derived from master key)</td>
+        <td>Authenticate relay API mutations</td>
+        </tr>
+        <tr>
+        <td>Content hashing</td>
+        <td>BLAKE2b-256 (streaming, 64KB chunks)</td>
+        <td>File change detection, move detection, restore verification</td>
+        </tr>
+        </tbody>
         </table>
-
         <h2>Recovery Phrase And Master Key</h2>
+        <p>When you run <code>buddydrive setup-recovery</code>:</p>
         <ol>
-            <li>BuddyDrive generates 128 bits of random entropy</li>
-            <li>A SHA-256 checksum (4 bits) is appended, and the 132 bits are encoded as a 12-word mnemonic using the BIP39 English wordlist &mdash; this follows the standard BIP39 specification</li>
-            <li>The mnemonic is fed through Argon2i (moderate tier, 256 MB memory) to produce a 64-byte seed</li>
-            <li>The seed is hashed with BLAKE2b to produce the 32-byte master key</li>
-            <li>Recovery metadata is stored in <code>config.toml</code></li>
-            <li>The serialized config is encrypted with the master key before syncing it to the relay</li>
+        <li>BuddyDrive generates 128 bits of random entropy</li>
+        <li>A SHA-256 checksum (4 bits) is appended, and the 132 bits are encoded as a 12-word mnemonic using the BIP39 English wordlist — this follows the standard BIP39 specification</li>
+        <li>The mnemonic is fed through Argon2i (moderate tier, 256 MB memory) to produce a 64-byte seed</li>
+        <li>The seed is hashed with BLAKE2b to produce the 32-byte master key</li>
+        <li>Recovery metadata is stored in <code>config.toml</code></li>
+        <li>The serialized config is encrypted with the master key before syncing it to the relay</li>
         </ol>
         <p>When you later run <code>buddydrive recover</code>, BuddyDrive uses the same 12 words to derive the same recovery material, fetches the encrypted config from the relay, decrypts it locally, and writes the restored config.</p>
-        <p>The checksum in the mnemonic catches most single-word transcription errors &mdash; if you write down one word incorrectly, validation fails rather than silently producing the wrong key.</p>
-        <p><strong>Key derivation divergence:</strong> BuddyDrive uses Argon2i for mnemonic-to-seed instead of BIP39's standard PBKDF2-HMAC-SHA512. Argon2i is more resistant to GPU and ASIC attacks. The consequence is that other BIP39 tools cannot derive the same master key from a BuddyDrive mnemonic.</p>
-
+        <p>The checksum in the mnemonic catches most single-word transcription errors — if you write down one word incorrectly, validation fails rather than silently producing the wrong key.</p>
+        <p><strong>Key derivation divergence</strong>: BuddyDrive uses Argon2i for mnemonic-to-seed instead of BIP39's standard PBKDF2-HMAC-SHA512. Argon2i is more resistant to GPU and ASIC attacks. The consequence is that other BIP39 tools cannot derive the same master key from a BuddyDrive mnemonic.</p>
         <h2>Control API Access</h2>
         <p>The control API binds to all interfaces (default port 17521):</p>
         <ul>
-            <li><strong>Localhost</strong> (<code>127.0.0.1</code>, <code>::1</code>): No authentication required</li>
-            <li><strong>LAN</strong>: Requests must use a secret path prefix <code>/w/&lt;secret&gt;/</code> derived from your buddy UUID (first 8 hex characters). Requests without the correct secret receive 403 Forbidden.</li>
+        <li><strong>Localhost</strong> (<code>127.0.0.1</code>, <code>::1</code>): No authentication required</li>
+        <li><strong>LAN</strong>: Requests must use a secret path prefix <code>/w/&lt;secret&gt;/</code> derived from your buddy UUID (first 8 hex characters). Requests without the correct secret receive 403 Forbidden</li>
         </ul>
         <p>The secret provides basic protection but is low-entropy (32 bits). Only access the web GUI on trusted networks or over localhost.</p>
-
         <h2>Pairing And Direct Connections</h2>
+        <p>The pairing code is a shared secret between buddies:</p>
         <ul>
-            <li>You share the pairing code out-of-band with someone you trust</li>
-            <li>Both sides store it for that buddy relationship</li>
-            <li>Relay fallback uses it to match the two peers</li>
-            <li>Direct libp2p connections use Noise transport encryption once connected</li>
+        <li>You share it out-of-band with someone you trust</li>
+        <li>Both sides store it for that buddy relationship</li>
+        <li>Relay fallback uses it to match the two peers</li>
+        <li>Direct libp2p connections use Noise transport encryption once connected</li>
         </ul>
-
         <h2>Current Scope And Limits</h2>
         <ul>
-            <li>Direct libp2p transport is encrypted by Noise</li>
-            <li>Folder contents (filenames and file data) are encrypted with XSalsa20-Poly1305 before being stored on the buddy's machine when <code>encrypted = true</code> (the default)</li>
-            <li>Recovery config blobs synced to the relay are encrypted with the recovery master key</li>
-            <li>Restore works by recovering config first and then letting normal sync recreate missing files</li>
-            <li>Restored files are hash-verified after write</li>
-            <li>Append-only protects existing local files from remote overwrite</li>
+        <li>Direct libp2p transport is encrypted by Noise</li>
+        <li>Folder contents (filenames and file data) are encrypted with XSalsa20-Poly1305 before being stored on the buddy's machine when <code>encrypted = true</code> (the default)</li>
+        <li>Recovery config blobs synced to the relay are encrypted with the recovery master key</li>
+        <li>Restore works by recovering config first and then letting normal sync recreate missing files</li>
+        <li>Restored files are hash-verified after write</li>
+        <li>Append-only protects existing local files from remote overwrite</li>
         </ul>
         <p>When <code>encrypted = false</code> (sharing mode), files are stored plaintext on the buddy's machine. Pair only with buddies you trust for unencrypted folders.</p>
-
         <h2>What Your Buddy Can See Today</h2>
         <p>When folder encryption is enabled (default):</p>
-        <p>Your buddy <strong>cannot</strong> see:</p>
-        <ul>
-            <li>Your original filenames (encrypted with deterministic path encryption)</li>
-            <li>Your file contents (encrypted with random nonces per chunk)</li>
-            <li>Whether you have a particular file: the content hashes it keeps are keyed with the folder key, so they cannot be matched against files your buddy already knows</li>
-            <li>The encrypted recovery config stored in the relay without your recovery phrase</li>
-            <li>Your other buddies' configuration unless you share it with them</li>
-        </ul>
-        <p>Your buddy <strong>can</strong> see:</p>
-        <ul>
-            <li>How many files you back up, and each file's size, modification time and permission bits</li>
-            <li>When a file's content changes (its keyed hash changes)</li>
-            <li>The total storage use and sync timing</li>
-        </ul>
-        <p>When folder encryption is disabled (<code>encrypted = false</code>):</p>
-        <ul>
-            <li>Your buddy can see folder and file names, and read file contents</li>
-        </ul>
-
+        <p>Your buddy <strong>cannot</strong> see:
+        - Your original filenames (encrypted with deterministic path encryption)
+        - Your file contents (encrypted with random nonces per chunk; the storage side keeps sealed frames it never opens)
+        - The names of those blobs on disk (hashes of the encrypted path, not of the plaintext name)
+        - Whether you have a particular file: the content hashes it keeps are keyed with the folder key, so they cannot be matched against files your buddy already knows
+        - The encrypted recovery config stored in the relay without your recovery phrase
+        - Your other buddies' configuration unless you share it with them</p>
+        <p>Your buddy <strong>can</strong> see:
+        - How many files you back up, and each file's size, modification time and permission bits
+        - When a file's content changes (its keyed hash changes)
+        - The total storage use and sync timing</p>
+        <p>When folder encryption is disabled (<code>encrypted = false</code>):
+        - Your buddy can see folder and file names, and read file contents</p>
         <h2>Threat Model</h2>
-
         <h3>What We Protect Against</h3>
-        <p><strong>Network interception on direct libp2p connections:</strong> Noise protects direct peer transport.</p>
-        <p><strong>Buddy reading your files:</strong> folder encryption (XSalsa20-Poly1305) makes filenames and content opaque to the storage buddy.</p>
-        <p><strong>Relay compromise for config backup:</strong> the relay stores an encrypted config blob; without the recovery phrase-derived master key it should not be readable.</p>
-        <p><strong>Lost machine:</strong> recovery lets you rebuild config on a replacement device and then resync missing files.</p>
-
+        <p><strong>Network interception on direct libp2p connections</strong>: Noise protects direct peer transport.</p>
+        <p><strong>Relay compromise for config backup</strong>: the relay stores an encrypted config blob; without the recovery phrase-derived master key it should not be readable.</p>
+        <p><strong>Lost machine</strong>: recovery lets you rebuild config on a replacement device and then resync missing files.</p>
         <h3>What We Do Not Protect Against</h3>
-        <p><strong>Untrusted buddies with unencrypted folders:</strong> if you pair with someone you do not trust and use <code>encrypted = false</code>, they can read your synced files.</p>
-        <p><strong>Your machine compromised:</strong> malware on your machine can read files before or during sync.</p>
-        <p><strong>Denial of service:</strong> an attacker can still prevent peers from connecting.</p>
-
+        <p><strong>Untrusted buddies with unencrypted folders</strong>: if you pair with someone you do not trust and use <code>encrypted = false</code>, they can read your synced files.</p>
+        <p><strong>Your machine compromised</strong>: malware on your machine can read files before or during sync.</p>
+        <p><strong>Denial of service</strong>: an attacker can still prevent peers from connecting.</p>
         <h2>Secure Pairing Guidelines</h2>
+        <p>Only pair with people you trust:</p>
         <ol>
-            <li>Share codes verbally or in person when possible</li>
-            <li>Verify identity through a second channel</li>
-            <li>Use unique codes for each buddy relationship</li>
-            <li>Check buddy IDs on both machines</li>
+        <li>Share codes verbally or in person when possible</li>
+        <li>Verify identity through a second channel</li>
+        <li>Use unique codes for each buddy relationship</li>
+        <li>Check buddy IDs on both machines</li>
         </ol>
-
         <h2>Security Checklist</h2>
-        <ul class="checklist">
-            <li>Pair only with trusted buddies</li>
-            <li>Verify buddy ID after pairing</li>
-            <li>Write down the 12-word recovery phrase and store it offline</li>
-            <li>Keep your system updated</li>
-            <li>Use strong local passwords</li>
-            <li>Consider full-disk encryption on your machine</li>
-            <li>Regularly check sync activity</li>
+        <ul>
+        <li>[ ] Pair only with trusted buddies</li>
+        <li>[ ] Verify buddy ID after pairing</li>
+        <li>[ ] Write down the 12-word recovery phrase and store it offline</li>
+        <li>[ ] Keep your system updated</li>
+        <li>[ ] Use strong local passwords</li>
+        <li>[ ] Consider full-disk encryption on your machine</li>
+        <li>[ ] Regularly check sync activity</li>
         </ul>
-
         <h2>Bottom Line</h2>
         <p>BuddyDrive protects direct libp2p transport with Noise, encrypts relay-backed recovery config with your master key, and encrypts folder filenames and contents with XSalsa20-Poly1305 before storing them on your buddy's machine. Your buddy sees only opaque encrypted blobs. Set <code>encrypted = false</code> only for active collaboration with buddies you trust.</p>
     </main>

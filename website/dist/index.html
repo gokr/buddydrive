@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BuddyDrive - Backup your life, with a friend</title>
-    <meta name="description" content="Peer-to-peer encrypted folder sync with relay-backed restore, a 12-word recovery phrase, and missing-file restore through normal sync.">
+    <meta name="description" content="Peer-to-peer encrypted folder backup with relay-backed restore, a 12-word recovery phrase, and missing-file recovery.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -43,13 +43,13 @@
                     <span class="badge-dot"></span>
                     Encrypted Backup &amp; Restore
                 </div>
-                <h1 class="hero-title"><span class="gradient-text">Backup your life, with a friend</span></h1>
+                <h1 class="hero-title"><span class="gradient-text">Backup your life, with a friend.</span></h1>
                 <p class="hero-subtitle">
                     Peer-to-peer encrypted folder sync with relay-backed restore. Keep your documents, photos, and other important folders encrypted on a trusted buddy machine, then rebuild a lost machine with a 12-word recovery phrase and resync missing files.
                 </p>
                 <div class="hero-cta">
                     <a href="docs.html" class="btn btn-primary">Get Started</a>
-                    <a href="features.html" class="btn btn-secondary">Learn More</a>
+                    <a href="security.html" class="btn btn-secondary">Learn More</a>
                 </div>
             </div>
             <div class="hero-image">
@@ -61,38 +61,38 @@
     <section class="features">
         <div class="container">
             <h2 class="section-title">Why BuddyDrive?</h2>
-            <p class="section-subtitle">Offsite backup with someone you trust, plus a recovery path when a machine is lost.</p>
+            <p class="section-subtitle">Offsite backup with someone you trust, plus a recovery path when a new machine has to take over.</p>
 
             <div class="feature-grid">
                 <div class="feature-card">
                     <div class="feature-icon">Offsite</div>
                     <h3>Real Offsite Protection</h3>
-                    <p>Fire, flood, theft, and dead disks are easier to survive when a buddy has the other copy.</p>
+                    <p>Fire, flood, theft, and dead disks are easier to survive when a buddy holds the other copy. Your backup lives somewhere you do not live.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">12W</div>
                     <h3>Recovery Phrase</h3>
-                    <p>Set up a 12-word recovery phrase once and restore config on a replacement machine later.</p>
+                    <p>Set up a 12-word recovery phrase once. BuddyDrive derives a master key from it and syncs an encrypted copy of your config to the relay, so a replacement machine can rebuild itself.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">Lock</div>
                     <h3>Encrypted Backup</h3>
-                    <p>Filenames and file contents are encrypted before storage. Your buddy sees only opaque blobs.</p>
+                    <p>Filenames and file contents are encrypted with XSalsa20-Poly1305 before they are stored with your buddy. Blob names are hashes of the encrypted paths, so even the directory listing says nothing.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">Owner</div>
+                    <h3>Owner Authoritative</h3>
+                    <p>Only the machine that owns a folder moves or deletes its files. A buddy stores sealed chunks it never opens, serves them back on request, and cannot push files into your folders.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">Sync</div>
                     <h3>Restore Missing Files</h3>
-                    <p>After config recovery, normal sync can recreate files that are missing locally but still exist on your buddy.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">Rule</div>
-                    <h3>Append-Only Option</h3>
-                    <p>Protect an existing local copy from remote overwrite while still allowing missing files to be recreated.</p>
+                    <p>After recover, a takeover session pulls back files your machine has no record of. Moves are detected by content hash, so a rename does not re-upload.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">OSS</div>
                     <h3>Open Source</h3>
-                    <p>No accounts, no subscription, and no black box between you and your data.</p>
+                    <p>No accounts, no subscription, no black box between you and your data. Audit the code, or change it.</p>
                 </div>
             </div>
         </div>
@@ -101,26 +101,29 @@
     <section class="content-page" style="max-width: 1000px; padding: 80px 24px;">
         <div class="container">
             <h2 class="section-title">How It Works</h2>
+            <p class="section-subtitle" style="text-align: center; margin-bottom: 48px;">
+                
+            </p>
             <div class="steps">
                 <div class="step">
                     <div class="step-number">1</div>
-                    <h3>Install</h3>
-                    <p>Install BuddyDrive on both machines.</p>
+                    <h3>Install BuddyDrive</h3>
+                    <p>on both machines</p>
                 </div>
                 <div class="step">
                     <div class="step-number">2</div>
-                    <h3>Pair</h3>
-                    <p>Generate a pairing code and share it with your buddy.</p>
+                    <h3>Pair devices</h3>
+                    <p>using a simple code</p>
                 </div>
                 <div class="step">
                     <div class="step-number">3</div>
-                    <h3>Protect</h3>
-                    <p>Select folders to sync and enable recovery if you want a rebuild path.</p>
+                    <h3>Select folders</h3>
+                    <p>to sync and optionally enable recovery</p>
                 </div>
                 <div class="step">
                     <div class="step-number">4</div>
-                    <h3>Restore</h3>
-                    <p>Recover config with 12 words, then let sync recreate what is missing.</p>
+                    <h3>Restore when needed</h3>
+                    <p>- recover config with 12 words, then let sync recreate missing files</p>
                 </div>
             </div>
         </div>
@@ -128,7 +131,7 @@
 
     <section style="background: var(--color-bg-secondary); padding: 80px 0;">
         <div class="container">
-            <h2 class="section-title">Cloud vs BuddyDrive</h2>
+            <h2 class="section-title">Cloud Backup vs BuddyDrive</h2>
             <table class="comparison-table">
                 <thead>
                     <tr>
@@ -139,23 +142,23 @@
                 <tbody>
                     <tr>
                         <td>$5-20/month forever</td>
-                        <td><strong>Free, forever</strong></td>
+                        <td>Free, forever</td>
                     </tr>
                     <tr>
-                        <td>Vendor-managed restore</td>
-                        <td><strong>Your own 12-word recovery phrase</strong></td>
-                    </tr>
-                    <tr>
-                        <td>Data on company servers</td>
-                        <td><strong>Encrypted data with your buddy</strong></td>
-                    </tr>
-                    <tr>
-                        <td>Account required</td>
-                        <td><strong>No account required</strong></td>
+                        <td>Data stored on company servers</td>
+                        <td>Data stored with your buddy</td>
                     </tr>
                     <tr>
                         <td>Trust the provider</td>
-                        <td><strong>Trust someone you know</strong></td>
+                        <td>Trust someone you know</td>
+                    </tr>
+                    <tr>
+                        <td>Account required</td>
+                        <td>No account required</td>
+                    </tr>
+                    <tr>
+                        <td>Recover through vendor</td>
+                        <td>Recover with your own 12 words</td>
                     </tr>
                 </tbody>
             </table>
@@ -165,11 +168,25 @@
     <section class="cta-section">
         <div class="container">
             <h2>Who Is This For?</h2>
-            <p>Families, friends, and small teams that want offsite sync, a practical restore path, and fewer subscriptions.</p>
+            <p>Families, friends, and small teams that want offsite encrypted backup, a practical restore path, and fewer subscriptions.</p>
+            <ul class="audience-list">
+                <li><strong>Families</strong> - offsite backup with people you already trust</li>
+                <li><strong>Friends</strong> - mutual backup without cloud costs</li>
+                <li><strong>Small teams</strong> - simple shared folder sync and restore</li>
+                <li><strong>Privacy-conscious users</strong> - local control over recovery secrets</li>
+                <li><strong>Budget-conscious users</strong> - free alternative to another subscription</li>
+            </ul>
             <div class="hero-cta">
                 <a href="docs.html" class="btn btn-primary">Get Started</a>
                 <a href="security.html" class="btn btn-secondary">Security Details</a>
             </div>
+        </div>
+    </section>
+
+    <section class="content-page" style="max-width: 1000px; padding: 60px 24px 20px;">
+        <div class="container">
+                <p>BuddyDrive builds from source on Linux and macOS. Install it on two machines, pair them with one shared code, set up recovery, and start backing up.</p>
+                <p><a href="/docs">Download Now</a> or read the <a href="/features">full feature list</a>.</p>
         </div>
     </section>
 

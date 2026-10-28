@@ -134,8 +134,9 @@ Restore is just backup in the opposite direction:
 4. The owner decrypts, writes and hash-verifies it
 
 A file the buddy has and you do not is only *deleted* when your index shows you
-held that path before; otherwise it is fetched. That is what makes restore onto
-an empty machine pull files down instead of wiping the buddy's copy.
+held that path before. A path your index has no record of is left alone; restoring
+those happens only in a takeover session, which is how `recover` rebuilds a lost
+machine — and why a buddy cannot push files into your folders.
 
 If the destination folder is append-only and already has a file with that name, the local file is kept.
 

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Features - BuddyDrive</title>
-    <meta name="description" content="Encrypted backup, recovery, restore, relay fallback, move detection, append-only folders, and the current BuddyDrive feature set.">
+    <meta name="description" content="Encrypted backup, recovery, restore, relay fallback, move detection, append-only folders, and the current limits of each.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -40,156 +40,151 @@
 
     <main class="content-page">
         <h2>Core Features</h2>
-
         <h3>Recovery And Restore</h3>
+        <p>BuddyDrive now includes a recovery path for lost or rebuilt machines:</p>
         <ul>
-            <li><strong>12-word recovery phrase</strong> &mdash; standard BIP39 with SHA-256 checksum (catches transcription errors)</li>
-            <li><strong>Master key</strong> derived via Argon2i (stronger than BIP39's PBKDF2) then BLAKE2b</li>
-            <li><strong>Encrypted config backup</strong> synced to the relay</li>
-            <li><strong>Config restore</strong> via <code>buddydrive recover</code></li>
-            <li><strong>File restore through normal sync</strong> after the recovered machine starts again</li>
+        <li><strong>12-word recovery phrase</strong> — standard BIP39 with SHA-256 checksum (catches transcription errors)</li>
+        <li><strong>Master key</strong> derived via Argon2i (stronger than BIP39's PBKDF2) then BLAKE2b</li>
+        <li><strong>Encrypted config backup</strong> synced to the relay</li>
+        <li><strong>Config restore</strong> via <code>buddydrive recover</code></li>
+        <li><strong>File restore through normal sync</strong> after the recovered machine starts again</li>
         </ul>
-
         <h3>Peer-to-Peer Architecture</h3>
-        <p>No central sync account. No vendor lock-in.</p>
-        <pre><code>Your Machine &lt;--direct or relay--&gt; Buddy's Machine</code></pre>
+        <p>No central sync account. No cloud drive. No vendor lock-in.</p>
+<pre><code class="language-text">Your Machine &lt;--direct or relay--&gt; Buddy's Machine
+        </code></pre>
+        <p>BuddyDrive uses a relay-backed API for peer discovery and libp2p for direct transport. Current connectivity options include direct public TCP connections and relay fallback. Features:</p>
         <ul>
-            <li><strong>Relay API discovery</strong> for finding buddies via pairing-code-derived keys</li>
-            <li><strong>Deterministic initiator selection</strong> &mdash; the side without a public address initiates; if both same reachability, lower buddy UUID initiates</li>
-            <li><strong>Relay fallback</strong> when both sides store the same pairing code</li>
-            <li><strong>Always accept incoming</strong> &mdash; incoming connections from known buddies are accepted regardless of sync time</li>
-            <li><strong>Yamux multiplexing</strong> for multiple streams</li>
+        <li><strong>Relay API discovery</strong> - find your buddy via pairing-code-derived keys on the relay; each side has its own record, so two buddies never overwrite each other</li>
+        <li><strong>Deterministic initiator selection</strong> - the side without a public address initiates; if both same reachability, lower buddy UUID initiates</li>
+        <li><strong>Relay fallback</strong> - available when both peers store the same pairing code for the relationship</li>
+        <li><strong>Known addresses</strong> - <code>buddy-addresses</code> is dialed first, which is enough for two buddies on one LAN with no public IP and no relay</li>
+        <li><strong>Always accept incoming</strong> - incoming connections from known buddies are accepted regardless of sync time</li>
+        <li><strong>Yamux multiplexing</strong> - multiple streams over one connection</li>
         </ul>
-
         <h3>Automatic File Sync</h3>
+        <p>Once paired and configured, BuddyDrive runs in the background:</p>
         <ul>
-            <li><strong>File change detection</strong> for new, modified, and deleted files</li>
-            <li><strong>Move detection</strong> &mdash; renamed files detected via content hash, no re-upload needed</li>
-            <li><strong>Incremental sync</strong> so only changed data is transferred</li>
-            <li><strong>Chunked transfer</strong> in 64KB blocks</li>
-            <li><strong>Symlink support</strong> &mdash; symlink targets are preserved across sync</li>
-            <li><strong>LZ4 compression</strong> when it reduces payload size</li>
+        <li><strong>File change detection</strong> - notices new, modified, and deleted files</li>
+        <li><strong>Move detection</strong> - renamed files detected via content hash, no re-upload needed</li>
+        <li><strong>Incremental sync</strong> - only transfers what changed</li>
+        <li><strong>Chunked transfer</strong> - handles large files efficiently</li>
+        <li><strong>Symlink support</strong> - symlink targets are preserved across sync</li>
+        <li><strong>Crash-safe writes</strong> - incoming files land in <code>.buddytmp</code>, are flushed, then renamed into place; leftovers are cleaned up on the next start</li>
+        <li><strong>Per-buddy storage</strong> - a buddy's folders live in a storage folder of their own, one directory per folder id, so same-named folders never collide</li>
+        <li><strong>Scheduled or on demand</strong> - each connection carries one session and is dropped after it, so the next dial picks up changes. Each buddy has its own sync window and interval, and <code>POST /sync</code> asks the daemon to sync now</li>
         </ul>
-
         <h3>Encrypted Backup</h3>
         <p>When folder encryption is enabled (the default), filenames and file contents are encrypted before being stored on your buddy's machine:</p>
         <ul>
-            <li><strong>Deterministic path encryption</strong> &mdash; same filename always encrypts to the same ciphertext, enabling move detection without re-uploading</li>
-            <li><strong>Random content nonces</strong> &mdash; each 64KB chunk is encrypted with a fresh random nonce, preventing nonce reuse across file versions</li>
-            <li><strong>Opaque storage</strong> &mdash; your buddy sees only encrypted blobs, not your filenames or file contents</li>
-            <li><strong>Unencrypted sharing mode</strong> &mdash; set <code>encrypted = false</code> to share files plaintext for collaboration</li>
+        <li><strong>Deterministic path encryption</strong> — same filename always encrypts to the same ciphertext, enabling move detection without re-uploading</li>
+        <li><strong>Random content nonces</strong> — each 64KB chunk is encrypted with a fresh random nonce, preventing nonce reuse across file versions</li>
+        <li><strong>Opaque storage</strong> — your buddy stores <code>.blob</code> frames it never opens, under names that are hashes of the encrypted path, so neither the directory listing nor the content reveals your filenames</li>
+        <li><strong>Owner is authoritative</strong> — only the folder's owner decides moves, deletes and restores; the storage side never deletes on its own</li>
+        <li><strong>Unencrypted sharing mode</strong> — set <code>encrypted = false</code> to share files plaintext for collaboration</li>
         </ul>
-
+        <p>Note: the <code>.meta</code> sidecar does expose size, mode, mtime, content hash and
+        symlink target to the storage side. That is metadata, not content.</p>
         <h3>Restore Missing Files</h3>
-        <p>If a file still exists on your buddy but is missing locally, BuddyDrive can recreate it during the next successful sync. Restored files are hash-verified after write.</p>
-
+        <p>The sync engine restores missing local files when they still exist on the buddy side:</p>
+        <ul>
+        <li>Lose a local copy</li>
+        <li>Reconnect to your buddy</li>
+        <li>BuddyDrive requests the missing file during the next sync</li>
+        <li>The file is recreated locally and hash-verified</li>
+        </ul>
         <h3>Move and Delete Detection</h3>
+        <p>BuddyDrive detects file renames and deletes efficiently:</p>
         <ul>
-            <li><strong>Moved files</strong> &mdash; detected via content hash matching; the buddy renames the encrypted path without re-uploading</li>
-            <li><strong>Deleted files</strong> &mdash; propagated to the buddy with a delete instruction</li>
-            <li><strong>Content-hash-based comparison</strong> &mdash; streaming blake2b hash used for change detection, not just mtime/size</li>
+        <li><strong>Moved files</strong> — detected via content hash matching; the buddy renames the encrypted path without re-uploading</li>
+        <li><strong>Deleted files</strong> — propagated to the buddy with a delete instruction</li>
+        <li><strong>Content-hash-based comparison</strong> — streaming blake2b hash used for change detection, not just mtime/size</li>
         </ul>
-
         <h3>Folder Policies</h3>
+        <p>Choose how each folder behaves:</p>
         <ul>
-            <li><strong>Append-only mode</strong> avoids remote overwrites of existing local files</li>
-            <li><strong>Missing files can still be restored</strong> even in append-only mode</li>
-            <li><strong>Buddy-specific folders</strong> restrict a folder to a chosen buddy</li>
-            <li><strong>Per-folder names</strong> keep sync targets readable in the CLI and GUI</li>
+        <li><strong>Append-only mode</strong> avoids remote overwrites of existing local files</li>
+        <li><strong>Buddy-specific folders</strong> restrict a folder to a selected buddy</li>
+        <li><strong>Per-folder names</strong> keep sync targets readable in the CLI and GUI</li>
         </ul>
-
         <h3>Real-Time Status</h3>
         <p>GTK4 desktop application shows:</p>
         <ul>
-            <li>Connection status for each buddy</li>
-            <li>Sync progress per folder</li>
-            <li>File counts and bytes transferred</li>
-            <li>Recent activity log</li>
+        <li>Connection status for each buddy</li>
+        <li>Sync progress per folder</li>
+        <li>File counts and bytes transferred</li>
+        <li>Recent activity log</li>
         </ul>
         <p>The CLI provides the same core configuration and recovery flow for headless systems.</p>
-
         <h2>Security Features</h2>
-
         <h3>Pairing Code</h3>
+        <p>Pairing uses a short code that you share with your buddy out-of-band:</p>
         <ol>
-            <li>Generate a pairing code for your buddy; it is saved with them in your config</li>
-            <li>Share it with your buddy</li>
-            <li>They store the same code when adding you</li>
-            <li>That one shared code keys discovery and relay fallback for the two of you</li>
+        <li>Generate a pairing code for your buddy; it is saved with them in your config</li>
+        <li>Share it with your buddy</li>
+        <li>They store the same code when adding you</li>
+        <li>That one shared code keys discovery and relay fallback for the two of you</li>
         </ol>
-
         <h3>Direct Transport Encryption</h3>
         <p>Direct libp2p peer connections use Noise transport encryption. Recovery config blobs synced to the relay are encrypted with the recovery master key before upload. Folder contents are encrypted with XSalsa20-Poly1305 before being stored on the buddy's machine. Relay API mutations are authenticated with Ed25519 signatures derived from the master key.</p>
-
         <h3>Recovery Metadata</h3>
+        <p>Recovery stores:</p>
         <ul>
-            <li>A <code>public_key</code> lookup value in <code>[recovery]</code></li>
-            <li>A locally stored <code>master_key</code></li>
-            <li>An encrypted config blob in the relay API</li>
+        <li>A <code>public_key</code> lookup value in <code>[recovery]</code></li>
+        <li>A locally stored <code>master_key</code></li>
+        <li>An encrypted config blob in the relay API</li>
         </ul>
-
         <h2>Sync Features</h2>
-
         <h3>Conflict Handling</h3>
+        <p>When both you and your buddy edit the same file:</p>
         <ul>
-            <li><strong>Owner-authoritative by default</strong> &mdash; the file owner's current version always replaces the storage copy</li>
-            <li><strong>Append-only mode</strong> avoids remote overwrites of existing local files</li>
-            <li><strong>Missing files can still be restored</strong> even in append-only mode</li>
-            <li><strong>Move detection</strong> avoids full re-upload when a file is renamed</li>
-            <li><strong>No built-in version history yet</strong></li>
+        <li><strong>Owner-authoritative by default</strong> — the file owner's current version always replaces the storage copy</li>
+        <li><strong>Append-only mode</strong> avoids remote overwrites of existing local files</li>
+        <li><strong>Missing files can still be restored</strong> even in append-only mode</li>
+        <li><strong>Move detection</strong> avoids full re-upload when a file is renamed</li>
+        <li><strong>No built-in version history yet</strong></li>
         </ul>
-
         <h3>Large File Support</h3>
         <ul>
-            <li>Files split into 64KB chunks</li>
-            <li>LZ4 compression when it reduces payload size</li>
-            <li>Optional bandwidth limit through config</li>
+        <li>Files split into 64KB chunks</li>
+        <li>LZ4 compression when it reduces payload size</li>
+        <li>Optional bandwidth limit through config</li>
         </ul>
-
         <h2>Platform Support</h2>
-
         <h3>Linux</h3>
-        <p>Build from source today. GTK4 GUI with desktop integration on Linux.</p>
-
+        <p>Build from source. GTK4 GUI with desktop integration on Linux.</p>
         <h3>macOS</h3>
-        <p>Build from source.</p>
-
-        <h3>Windows</h3>
-        <p>Build from source.</p>
-
+        <p>Build from source. <code>config.nims</code> links libsodium from both Homebrew prefixes (Intel and Apple Silicon).</p>
         <h3>Headless</h3>
-        <p>Run on servers, NAS boxes, or Raspberry Pi with the CLI only.</p>
-
+        <p>Run on servers, NAS boxes, or Raspberry Pi with the CLI only — the web GUI is served from the daemon, so no desktop is needed.</p>
+        <h3>Windows</h3>
+        <p>Not a supported build target: <code>crypto.nim</code> loads <code>libsodium.so.23</code> by name, which is Linux-specific. Running under WSL works as a Linux build.</p>
         <h2>Technical Details</h2>
-
         <h3>Built With</h3>
         <ul>
-            <li><strong>Nim</strong> - systems programming language</li>
-            <li><strong>libp2p</strong> - peer-to-peer networking</li>
-            <li><strong>libsodium</strong> - encryption (XSalsa20-Poly1305) and key derivation</li>
-            <li><strong>GTK4</strong> - desktop GUI</li>
-            <li><strong>SQLite</strong> - runtime status and file tracking</li>
+        <li><strong>Nim</strong> - systems programming language</li>
+        <li><strong>libp2p</strong> - peer-to-peer networking (Noise security, Yamux muxing)</li>
+        <li><strong>libsodium</strong> - folder, path and chunk encryption, key derivation</li>
+        <li><strong>GTK4</strong> - desktop GUI (Linux)</li>
+        <li><strong>SQLite</strong> - runtime status and file tracking</li>
         </ul>
-
         <h3>Network Requirements</h3>
         <ul>
-            <li>Outbound internet access</li>
-            <li>Direct mode needs a reachable public TCP address</li>
-            <li>Relay mode needs a configured relay service and matching pairing code on both sides</li>
-            <li>IPv4 and IPv6 supported</li>
+        <li>Outbound internet access</li>
+        <li>Direct mode needs a reachable public TCP address</li>
+        <li>Relay mode needs a configured relay service and matching pairing code on both sides</li>
+        <li>IPv4 and IPv6 supported</li>
         </ul>
-
         <h2>Limitations</h2>
         <ul>
-            <li>Background sync depends on peers connecting successfully</li>
-            <li><code>recover</code> restores config from the relay path today; buddy-backed config fetch is not implemented yet</li>
-            <li><code>export-recovery</code> shows stored recovery metadata, not the original phrase</li>
-            <li><code>init --with-recovery</code> is shown in help but returns an error if used; use <code>init</code> then <code>setup-recovery</code></li>
-            <li>No mobile apps yet</li>
-            <li>No file versioning yet</li>
+        <li>Background sync depends on peers connecting successfully</li>
+        <li><code>recover</code> restores config from the relay path today; buddy-backed config fetch is not implemented yet</li>
+        <li><code>export-recovery</code> shows stored recovery metadata, not the original phrase</li>
+        <li><code>init --with-recovery</code> is shown in help but returns an error if used; use <code>init</code> then <code>setup-recovery</code></li>
+        <li>No mobile apps yet</li>
+        <li>No file versioning yet</li>
         </ul>
-
-        <p>See <a href="how-it-works.html">How It Works</a> for architecture details.</p>
+        <p>See <a href="/how-it-works">How It Works</a> for architecture details.</p>
     </main>
 
     <footer class="footer">
