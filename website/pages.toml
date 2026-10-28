@@ -1,0 +1,44 @@
+# Metadata for the generated website (website/dist/).
+#
+# scripts/build-website.py turns website/content/*.md into static HTML. Only what
+# the markdown cannot express lives here: <title>, the meta description, the
+# page-header blurb and the landing page's subtitle.
+#
+# The landing page's cards, steps and comparison table are parsed from
+# index.md, so there is exactly one place to edit them. A card's icon comes from
+# attr_list on its heading:  ### Real Offsite Protection {icon=Offsite}
+#
+# After editing either this file or a content .md, run:
+#   scripts/build-website.py
+# and commit website/dist/. CI checks they match (--check).
+
+[index]
+title = "BuddyDrive - Backup your life, with a friend"
+description = "Peer-to-peer encrypted folder backup with relay-backed restore, a 12-word recovery phrase, and missing-file recovery."
+badge = "Encrypted Backup & Restore"
+why_subtitle = "Offsite backup with someone you trust, plus a recovery path when a new machine has to take over."
+who_blurb = "Families, friends, and small teams that want offsite encrypted backup, a practical restore path, and fewer subscriptions."
+cta_primary = "Get Started"
+cta_primary_href = "docs.html"
+cta_secondary = "Security Details"
+cta_secondary_href = "security.html"
+
+[features]
+title = "Features - BuddyDrive"
+description = "Encrypted backup, recovery, restore, relay fallback, move detection, append-only folders, and the current limits of each."
+blurb = "Encrypted backup, recovery, restore, and practical peer-to-peer sync."
+
+[security]
+title = "Security - BuddyDrive"
+description = "What BuddyDrive protects today: encrypted backup, transport encryption, recovery security, and the current threat model."
+blurb = "What is protected today, and what still depends on trusting your buddy."
+
+[how-it-works]
+title = "How It Works - BuddyDrive"
+description = "Technical architecture of BuddyDrive: peer-to-peer networking, encrypted backup, relay-backed recovery, and the sync session."
+blurb = "Encrypted backup, peer discovery, relay fallback, and relay-backed recovery."
+
+[docs]
+title = "Documentation - BuddyDrive"
+description = "Get started with BuddyDrive, set up recovery, configure encrypted backup, and restore config on a new machine."
+blurb = "Install, pair, enable recovery, and restore when needed."

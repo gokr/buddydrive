@@ -243,8 +243,9 @@ When a machine replaces another one, it takes over: `buddydrive recover` does th
 The side that owns a folder is the only authority on it. The storage side keeps
 what it is told to keep and never deletes on its own; restores are requests it
 serves back. That asymmetry is what makes a restore onto an empty machine safe:
-a file the buddy has and you do not is *fetched*, and is only *deleted* on the
-buddy when your own index shows you held that path before.
+a file the buddy has and you do not is only *deleted* on the buddy when your own
+index shows you held that path before. If your index has no record of it at all,
+it is left alone; restoring those is what a takeover does — see [One Machine Per Identity](#one-machine-per-identity).
 
 ### Where a Buddy's Files Are Kept
 
@@ -303,8 +304,8 @@ over that one connection, in two rounds (an *owner round* and a *storage round*)
 3. Exchanges owner folder lists with the buddy, then handles the folders of the buddy with the **lower UUID** first. The conversation is strictly alternating, which an unbuffered transport needs
 4. Computes deltas: missing files, modified files, moves, and deletes. A file the
    buddy has and you do not is only deleted when your index shows you held that
-   path before; otherwise it is fetched. That is what makes restore onto an empty
-   machine pull files down instead of wiping the buddy's copy
+   path before. A path your index has no record of is left alone, and only
+   restored during a takeover, so a buddy cannot push files into your folders
 5. Transfers chunks (64KB, LZ4 compressed when beneficial, encrypted with random nonces). Encrypted folders send the sealed frames, which the storage side keeps as `.blob` without ever opening them
 6. Both sides update SQLite index
 7. Restored files are hash-verified after write

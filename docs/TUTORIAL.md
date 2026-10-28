@@ -282,8 +282,9 @@ sync:
 3. The next successful sync recreates it, verified by content hash
 
 A file the buddy has and you do not is only *deleted* when your index shows you
-held that path before; otherwise it is fetched. That is what makes restore onto
-an empty machine pull files down instead of wiping the buddy's copy.
+held that path before. A path your index has no record of is left alone: restoring
+those is what `buddydrive recover` does on a new machine, by marking the session
+as a takeover.
 
 Append-only only protects existing local files from being overwritten. It does
 not block creating a file that is missing locally.

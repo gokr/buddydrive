@@ -1,10 +1,18 @@
-.PHONY: build build-gui clean install test package deb
+.PHONY: build build-gui clean install test package deb website website-check
 
 build:
 	nimble build -d:release
 
 build-gui:
 	nimble gui_release
+
+# Regenerate the static site in website/dist/ from website/content/.
+website:
+	scripts/build-website.py
+
+# Fail if website/dist/ is not what website/content/ generates (CI runs this).
+website-check:
+	scripts/build-website.py --check
 
 clean:
 	rm -rf bin/*
