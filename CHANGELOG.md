@@ -137,12 +137,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path so Homebrew-installed libraries are found.
 - Sync no longer deletes files that exist on only one side. A remote path is
   deleted only when the index shows the local side previously held it;
-  anything never seen locally is pulled instead. Index rows for files that
-  disappeared from disk are retained, and pruning moved to
-  `pruneIndexOfMissingFiles` after deletions have propagated, so the worst case
-  for a failed session is a deleted file reappearing rather than a live file
-  being lost. `deleteLocalFile` now also refuses on append-only folders, which
-  previously blocked only overwrites.
+  anything never seen locally is left in place, and restored only during a
+  takeover. Index rows for files that disappeared from disk are retained, and
+  pruning moved to `pruneIndexOfMissingFiles` after deletions have propagated,
+  so the worst case for a failed session is a deleted file reappearing rather
+  than a live file being lost. `deleteLocalFile` now also refuses on
+  append-only folders, which previously blocked only overwrites.
+- A normal sync no longer takes back stored files that the owner has neither
+  on disk nor in its index. Such files are restored only in a takeover session
+  (after `recover` or `buddydrive takeover`), which is how a lost or new
+  machine gets its files back. Previously a buddy could place files into the
+  owner's folders this way, including in unencrypted ones.
 - Sync sessions end with an explicit `msgSessionEnd` exchange in a fixed order,
   so a relay cannot tear down the connection while a peer still has data in
   flight and truncate the final stream, which used to report a failed sync for
