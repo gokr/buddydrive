@@ -119,6 +119,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script. `docs/architecture.md` was added, and the website
   content was brought up to date with pairing, `stop` and `takeover`.
+- README, the manual, the tutorial, `docs/architecture.md`, the man page and
+  the website were rewritten for the backup model and checked against the
+  code. The tutorial is now a working two-instance walkthrough, pairing is
+  documented as generate-on-one-side and enter-on-the-other, and the control
+  API documents `GET /sessions`, `GET /storage`, `GET /logs`, `POST /sync`,
+  `POST /buddies/update`, `POST /folders/update` and `POST /daemon/stop`.
+  The docs no longer claim Windows support or a resume feature and now state
+  wire protocol 7.
 
 ### Fixed
 
@@ -189,3 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disconnected, and timestamps no longer drift by the timezone offset.
 - `start --port N` works, and a folder whose id another folder already uses is
   skipped rather than colliding with it.
+- Debian metadata and the man page described pre-backup-model behavior. They
+  now say relay-API discovery instead of DHT and XSalsa20-Poly1305, list the
+  build dependencies (`clang`, `libclang-dev`, `liblz4-dev`, Nim 2.2.8), the
+  systemd `Documentation` URL points at `gokr/buddydrive`, and the man page was
+  regenerated to include `takeover`.
