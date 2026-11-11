@@ -198,7 +198,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `start --port N` works, and a folder whose id another folder already uses is
   skipped rather than colliding with it.
 - Debian metadata and the man page described pre-backup-model behavior. They
-  now say relay-API discovery instead of DHT and XSalsa20-Poly1305, list the
-  build dependencies (`clang`, `libclang-dev`, `liblz4-dev`, Nim 2.2.8), the
-  systemd `Documentation` URL points at `gokr/buddydrive`, and the man page was
-  regenerated to include `takeover`.
+  now say relay-API discovery instead of DHT and name XSalsa20-Poly1305 instead
+  of XChaCha20-Poly1305, list the build dependencies (`clang`, `libclang-dev`,
+  `liblz4-dev`, Nim 2.2.8), the systemd `Documentation` URL points at
+  `gokr/buddydrive`, and the man page was regenerated to include `takeover`.
