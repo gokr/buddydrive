@@ -93,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real sync request that the daemon picks up within two seconds, ignoring sync
   time and which side normally dials. The obsolete global "Sync Window"
   settings are gone.
-- **Breaking:** wire protocol version 6 and a new discovery key format, so both
+- **Breaking:** wire protocol version 7 and a new discovery key format, so both
   buddies must run this build; older peers are rejected at the handshake.
   Stored recovery `public_key` values in the old short format must be
   regenerated with `setup-recovery` (no migration, as there are no users yet).
