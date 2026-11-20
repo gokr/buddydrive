@@ -92,9 +92,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows per-buddy storage and sync times, and its Sync button now queues a
   real sync request that the daemon picks up within two seconds, ignoring sync
   time and which side normally dials. The obsolete global "Sync Window"
-  settings are gone.
-- **Breaking:** wire protocol version 6 and a new discovery key format, so both
-  buddies must run this build; older peers are rejected at the handshake.
+  settings are gone. Dates, sizes and counts are formatted with a chosen
+  BCP 47 locale (`[gui] locale` in `config.toml`, empty for the browser's
+  language), the header shows the daemon's build (version, commit and wire
+  protocol), and each buddy shows its effective interval and next planned
+  sync. The build is also printed at daemon start and returned by
+  `GET /status`.
+- Encrypted folders now send a content hash keyed with the folder key, so a
+  storage buddy cannot match it against files it already knows. Existing
+  backups are rehashed in place with `msgRehash`, and restores accept either
+  form. The buddy still sees each file's size, modification time and
+  permission bits.
+- **Breaking:** wire protocol version 7, a new discovery key format and keyed
+  content hashes, so both buddies must run this build; older peers are
+  rejected at the handshake.
   Stored recovery `public_key` values in the old short format must be
   regenerated with `setup-recovery` (no migration, as there are no users yet).
 - `buddydrive stop` now actually stops the daemon, and Ctrl+C and SIGTERM shut
@@ -119,6 +130,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GitHub Pages, and Debian packaging gained man pages, tmpfiles configuration,
   and a postinst script. `docs/architecture.md` was added, and the website
   content was brought up to date with pairing, `stop` and `takeover`.
+- README, the manual, the tutorial, `docs/architecture.md`, the man page and
+  the website were rewritten for the backup model and checked against the
+  code. The tutorial is now a working two-instance walkthrough, pairing is
+  documented as generate-on-one-side and enter-on-the-other, and the control
+  API documents `GET /sessions`, `GET /storage`, `GET /logs`, `POST /sync`,
+  `POST /buddies/update`, `POST /folders/update` and `POST /daemon/stop`.
+  The docs no longer claim Windows support or a resume feature and now state
+  wire protocol 7.
 
 ### Fixed
 
@@ -189,3 +208,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disconnected, and timestamps no longer drift by the timezone offset.
 - `start --port N` works, and a folder whose id another folder already uses is
   skipped rather than colliding with it.
+- Debian metadata and the man page described pre-backup-model behavior. They
+  now say relay-API discovery instead of DHT and name XSalsa20-Poly1305 instead
+  of XChaCha20-Poly1305, list the build dependencies (`clang`, `libclang-dev`,
+  `liblz4-dev`, Nim 2.2.8), the systemd `Documentation` URL points at
+  `gokr/buddydrive`, and the man page was regenerated to include `takeover`.
